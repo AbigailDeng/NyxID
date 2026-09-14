@@ -4945,8 +4945,7 @@ mod tests {
 
         assert!(
             auth_url.authorization_url.contains("platform-client-id"),
-            "managed pin must use the platform client, got: {}",
-            auth_url.authorization_url
+            "managed pin must use the platform client"
         );
         assert!(
             !auth_url.authorization_url.contains("legacy-byo-client-id"),
@@ -5038,8 +5037,7 @@ mod tests {
 
         assert!(
             auth_url.authorization_url.contains("my-own-client-id"),
-            "BYO reconnect must keep the user's own client, got: {}",
-            auth_url.authorization_url
+            "BYO reconnect must keep the user's own client"
         );
         assert!(
             !auth_url.authorization_url.contains("platform-client-id"),

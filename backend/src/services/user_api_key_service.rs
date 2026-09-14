@@ -3816,10 +3816,10 @@ mod tests {
         )
         .await;
 
-        match result {
-            Err(crate::errors::AppError::NotFound(_)) => {}
-            other => panic!("expected NotFound, got {other:?}"),
-        }
+        assert!(
+            matches!(result, Err(crate::errors::AppError::NotFound(_))),
+            "expected NotFound"
+        );
     }
 
     #[tokio::test]
@@ -3880,10 +3880,10 @@ mod tests {
         .await;
 
         // The terminal-status filter means no row matches → NotFound.
-        match result {
-            Err(crate::errors::AppError::NotFound(_)) => {}
-            other => panic!("expected NotFound for revoked key, got {other:?}"),
-        }
+        assert!(
+            matches!(result, Err(crate::errors::AppError::NotFound(_))),
+            "expected NotFound for revoked key"
+        );
 
         // The revoked key is untouched — not resurrected to `active`.
         let after = get_key(&db, &key_id).await;

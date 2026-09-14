@@ -13,13 +13,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use aes_gcm::aead::{Aead, Payload};
-use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+use aes_gcm::aead::{Aead, AeadCore, Payload};
+use aes_gcm::{Aes256Gcm, KeyInit};
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use comfy_table::{Table, presets::UTF8_FULL_CONDENSED};
 use hkdf::Hkdf;
-use rand::RngCore;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
@@ -1848,14 +1847,12 @@ fn encrypt_login_snapshot(plaintext: &[u8], worker_token: &[u8]) -> Result<Vec<u
     if plaintext.is_empty() || plaintext.len() > 350 * 1024 {
         bail!("Captured login state must be 1-358400 bytes")
     }
-    let mut salt = [0_u8; 32];
-    let mut nonce_bytes = [0_u8; 12];
-    rand::rngs::OsRng.fill_bytes(&mut salt);
-    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    let salt: [u8; 32] = rand::Rng::r#gen(&mut rand::rngs::OsRng);
+    let nonce = Aes256Gcm::generate_nonce(&mut rand::rngs::OsRng);
     let cipher = snapshot_cipher(&salt, worker_token)?;
     let ciphertext = cipher
         .encrypt(
-            Nonce::from_slice(&nonce_bytes),
+            &nonce,
             Payload {
                 msg: plaintext,
                 aad: SESSION_INFO,
@@ -1865,7 +1862,7 @@ fn encrypt_login_snapshot(plaintext: &[u8], worker_token: &[u8]) -> Result<Vec<u
     let envelope = serde_json::json!({
         "version": SESSION_FORMAT_VERSION,
         "salt_base64": base64::engine::general_purpose::STANDARD.encode(salt),
-        "nonce_base64": base64::engine::general_purpose::STANDARD.encode(nonce_bytes),
+        "nonce_base64": base64::engine::general_purpose::STANDARD.encode(nonce),
         "ciphertext_base64": base64::engine::general_purpose::STANDARD.encode(ciphertext),
     });
     let encoded = serde_json::to_vec(&envelope)?;
@@ -2457,6 +2454,8 @@ mod tests {
     use super::*;
     use crate::cli::OutputFormat;
     use crate::test_support::mock_auth_with_output;
+    use aes_gcm::Nonce;
+    use rand::RngCore;
     use wiremock::matchers::{body_json, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -2651,6 +2650,12 @@ mod tests {
         let plaintext = br#"{"version":1,"cookies":[],"origins":[]}"#;
         let encoded = encrypt_login_snapshot(plaintext, token).expect("encrypt");
         let envelope: Value = serde_json::from_slice(&encoded).expect("envelope");
+        let second: Value = serde_json::from_slice(
+            &encrypt_login_snapshot(plaintext, token).expect("encrypt again"),
+        )
+        .expect("second envelope");
+        assert_ne!(envelope["salt_base64"], second["salt_base64"]);
+        assert_ne!(envelope["nonce_base64"], second["nonce_base64"]);
         let salt = base64::engine::general_purpose::STANDARD
             .decode(envelope["salt_base64"].as_str().unwrap())
             .unwrap();
