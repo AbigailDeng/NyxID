@@ -317,6 +317,15 @@ describe("KeyDetailPage — core rendering", () => {
     );
   });
 
+  it.each([true, false])("gates permission editing on supports_oauth_scopes=%s", (supported) => {
+    hooks.key.data = makeKey({ status: "active", credential_type: "oauth2" });
+    hooks.catalogEntry = { slug: "api-notion", provider_type: "oauth2", supports_oauth_scopes: supported };
+    render(<KeyDetailPage />);
+    const manage = screen.queryByRole("button", { name: /Manage permissions/i });
+    if (supported) expect(manage).toBeInTheDocument();
+    else expect(manage).not.toBeInTheDocument();
+  });
+
   it("uses continue authentication copy for pending OAuth-backed services", async () => {
     const user = userEvent.setup();
     hooks.key.data = makeKey({
@@ -394,7 +403,9 @@ describe("KeyDetailPage — edit flows", () => {
       label: "Renamed Key",
     });
     // Drive the success path.
-    hooks.updateKey.mock.calls[0]![1].onSuccess();
+    act(() => {
+      hooks.updateKey.mock.calls[0]![1].onSuccess();
+    });
     expect(mockToastSuccess).toHaveBeenCalledWith("Label updated");
     expect(editButtons.length).toBeGreaterThan(0);
   });
@@ -421,7 +432,9 @@ describe("KeyDetailPage — edit flows", () => {
       endpointId: "ep-1",
       url: "https://proxy.example.com/v1",
     });
-    hooks.updateEndpoint.mock.calls[0]![1].onSuccess();
+    act(() => {
+      hooks.updateEndpoint.mock.calls[0]![1].onSuccess();
+    });
     expect(mockToastSuccess).toHaveBeenCalledWith("Endpoint updated");
   });
 
@@ -452,7 +465,9 @@ describe("KeyDetailPage — edit flows", () => {
       endpointId: "ep-1",
       openapi_spec_url: "https://api.openai.com/openapi.json",
     });
-    hooks.updateEndpoint.mock.calls[0]![1].onSuccess();
+    act(() => {
+      hooks.updateEndpoint.mock.calls[0]![1].onSuccess();
+    });
     expect(mockToastSuccess).toHaveBeenCalledWith("OpenAPI spec URL saved");
   });
 
@@ -472,7 +487,9 @@ describe("KeyDetailPage — edit flows", () => {
       keyId: "ak-1",
       credential: "sk-new-secret",
     });
-    hooks.updateExternalApiKey.mock.calls[0]![1].onSuccess();
+    act(() => {
+      hooks.updateExternalApiKey.mock.calls[0]![1].onSuccess();
+    });
     expect(mockToastSuccess).toHaveBeenCalledWith("Credential rotated");
   });
 
@@ -552,7 +569,9 @@ describe("KeyDetailPage — edit flows", () => {
       serviceId: "key-1",
       custom_user_agent: "MyAgent/1.0",
     });
-    hooks.updateUserService.mock.calls[0]![1].onSuccess();
+    act(() => {
+      hooks.updateUserService.mock.calls[0]![1].onSuccess();
+    });
     expect(mockToastSuccess).toHaveBeenCalledWith("Custom User-Agent saved");
   });
 

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -62,7 +62,9 @@ describe("useKeyAuthorizationWatch", () => {
     await waitFor(() => expect(result.current.status).toBe("pending_auth"));
     expect(result.current.authorized).toBe(false);
 
-    await vi.advanceTimersByTimeAsync(2_100);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_100);
+    });
     await waitFor(() => expect(result.current.authorized).toBe(true));
   });
 
@@ -93,7 +95,9 @@ describe("useKeyAuthorizationWatch", () => {
     await waitFor(() => expect(result.current.status).toBe("active"));
     expect(result.current.authorized).toBe(false);
 
-    await vi.advanceTimersByTimeAsync(2_100);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_100);
+    });
     await waitFor(() => expect(result.current.authorized).toBe(true));
   });
 });

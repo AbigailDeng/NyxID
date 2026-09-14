@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api-client";
 import {
   isTerminalAuthFailureStatus,
@@ -46,6 +46,15 @@ vi.mock("@/pages/cli-pair/reserve-action", () => ({
   reservePairingAction: mockReservePairingAction,
   rewindPairingAction: mockRewindPairingAction,
 }));
+
+beforeEach(() => {
+  // happy-dom opens and fetches real pages unless the browser boundary is stubbed.
+  vi.spyOn(window, "open").mockReturnValue(null);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function resetFlowMocks() {
   mockDelete.mockReset();
@@ -495,12 +504,16 @@ describe("OAuthFlow polling integration", () => {
         throw new Error(`unexpected GET ${path}`);
       });
 
-      // Note: no need to stub `window.open` — issue #653 Option A
-      // removed the auto-window.open from the wizard's effect. The
-      // OAuth URL is rendered as the prominent "Open {provider} sign-
-      // in" button instead, and polling fires regardless of whether
-      // that button has been clicked.
+      // A blocked popup still leaves the provider link available and polling active.
       renderOAuthFlow();
+
+      await waitFor(() => {
+        expect(window.open).toHaveBeenCalledWith(
+          "https://example.com/oauth",
+          "_blank",
+          "noopener,noreferrer",
+        );
+      });
 
       // Wait for the polling loop to fire its first GET. Default
       // polling interval is 2s; allow generous slack for CI.
