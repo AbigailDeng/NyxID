@@ -1,7 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { CreditGrant } from "@/schemas/billing-credits";
-import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { GrantRevokeDescription } from "./grant-revoke-description";
 
 const grant = {
@@ -30,6 +35,7 @@ describe("GrantRevokeDescription", () => {
       <Dialog open>
         <DialogContent>
           <DialogHeader>
+            <DialogTitle>Revoke credit grant</DialogTitle>
             <GrantRevokeDescription grant={grant} />
           </DialogHeader>
         </DialogContent>

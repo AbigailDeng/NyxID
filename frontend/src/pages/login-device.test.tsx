@@ -2,7 +2,10 @@ import { act, fireEvent, render as testingRender, screen } from "@testing-librar
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PreviewAuthDeviceResponse } from "@/schemas/auth-device";
+import type {
+  ApproveAuthDeviceResponse,
+  PreviewAuthDeviceResponse,
+} from "@/schemas/auth-device";
 import { LoginDevicePage } from "./login-device";
 import { PreviewPanel, ApprovalCaution } from "@/components/auth/login-request-preview";
 
@@ -14,8 +17,8 @@ const {
   previewReset,
   previewState,
 } = vi.hoisted(() => ({
-  approveMutate: vi.fn(),
-  denyMutate: vi.fn(),
+  approveMutate: vi.fn<(code: string) => Promise<ApproveAuthDeviceResponse>>(),
+  denyMutate: vi.fn<(code: string) => Promise<ApproveAuthDeviceResponse>>(),
   navigate: vi.fn(),
   previewMutate: vi.fn(),
   previewReset: vi.fn(),
@@ -117,6 +120,8 @@ function makePreview(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  approveMutate.mockResolvedValue({ ok: true });
+  denyMutate.mockResolvedValue({ ok: true });
   previewState.data = undefined;
   previewState.search = {};
   previewMutate.mockImplementation(async () => ({requested_profile: null, interval: 5, ...(previewState.data ?? makePreview())}));
@@ -167,6 +172,12 @@ describe("LoginDevicePage", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(750); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Approve full account session" })); });
     expect(approveMutate).toHaveBeenCalledExactlyOnceWith("2ABCDEFGH");
+    expect(
+      screen.getByText("Approved - return to the requesting device"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Approve full account session" }),
+    ).not.toBeInTheDocument();
   });
 
   it.each(["2-ABCD-EFGH!", "2-ABCD-EFGHX", "2-ABCD"])("rejects malformed device link %s before formatting", (user_code) => {

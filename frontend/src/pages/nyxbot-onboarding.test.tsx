@@ -318,9 +318,11 @@ describe("Nyxbot onboarding", () => {
     );
     await waitFor(() => expect(redirect).toHaveBeenCalledTimes(1));
     expect(router.state.location.search.step).toBe("source");
-    await router.navigate({
-      to: "/nyxbot/onboarding",
-      search: { step: "channel", channel: "telegram" },
+    await act(async () => {
+      await router.navigate({
+        to: "/nyxbot/onboarding",
+        search: { step: "channel", channel: "telegram" },
+      });
     });
     await toChannel();
     expect(router.state.location.search).toEqual({
@@ -423,9 +425,11 @@ describe("Nyxbot onboarding", () => {
     await userEvent.click(screen.getByRole("button", { name: /^Continue$/ }));
     await waitFor(() => expect(redirect).toHaveBeenCalledTimes(1));
     expect(router.state.location.search.step).toBe("source");
-    await router.navigate({
-      to: "/nyxbot/onboarding",
-      search: { step: "channel", channel: "telegram" },
+    await act(async () => {
+      await router.navigate({
+        to: "/nyxbot/onboarding",
+        search: { step: "channel", channel: "telegram" },
+      });
     });
     await toChannel();
     get.mockClear();
@@ -701,9 +705,11 @@ describe("Nyxbot onboarding", () => {
     );
     await waitFor(() => expect(redirect).toHaveBeenCalledTimes(1));
     expect(router.state.location.search.step).toBe("source");
-    await router.navigate({
-      to: "/nyxbot/onboarding",
-      search: { step: "channel", channel: "telegram" },
+    await act(async () => {
+      await router.navigate({
+        to: "/nyxbot/onboarding",
+        search: { step: "channel", channel: "telegram" },
+      });
     });
     await toChannel();
     await userEvent.click(screen.getByRole("button", { name: "Back" }));
@@ -1202,9 +1208,11 @@ describe("Nyxbot onboarding", () => {
     );
     await waitFor(() => expect(redirect).toHaveBeenCalledTimes(1));
     expect(router.state.location.search.step).toBe("source");
-    await router.navigate({
-      to: "/nyxbot/onboarding",
-      search: { step: "channel", channel: "telegram" },
+    await act(async () => {
+      await router.navigate({
+        to: "/nyxbot/onboarding",
+        search: { step: "channel", channel: "telegram" },
+      });
     });
     await toChannel();
     expect(screen.getByRole("radio", { name: /Telegram/ })).not.toBeChecked();

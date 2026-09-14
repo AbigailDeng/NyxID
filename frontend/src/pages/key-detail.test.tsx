@@ -403,7 +403,9 @@ describe("KeyDetailPage — edit flows", () => {
       label: "Renamed Key",
     });
     // Drive the success path.
-    hooks.updateKey.mock.calls[0]![1].onSuccess();
+    act(() => {
+      hooks.updateKey.mock.calls[0]![1].onSuccess();
+    });
     expect(mockToastSuccess).toHaveBeenCalledWith("Label updated");
     expect(editButtons.length).toBeGreaterThan(0);
   });
@@ -430,7 +432,9 @@ describe("KeyDetailPage — edit flows", () => {
       endpointId: "ep-1",
       url: "https://proxy.example.com/v1",
     });
-    hooks.updateEndpoint.mock.calls[0]![1].onSuccess();
+    act(() => {
+      hooks.updateEndpoint.mock.calls[0]![1].onSuccess();
+    });
     expect(mockToastSuccess).toHaveBeenCalledWith("Endpoint updated");
   });
 
@@ -461,7 +465,9 @@ describe("KeyDetailPage — edit flows", () => {
       endpointId: "ep-1",
       openapi_spec_url: "https://api.openai.com/openapi.json",
     });
-    hooks.updateEndpoint.mock.calls[0]![1].onSuccess();
+    act(() => {
+      hooks.updateEndpoint.mock.calls[0]![1].onSuccess();
+    });
     expect(mockToastSuccess).toHaveBeenCalledWith("OpenAPI spec URL saved");
   });
 
@@ -481,7 +487,9 @@ describe("KeyDetailPage — edit flows", () => {
       keyId: "ak-1",
       credential: "sk-new-secret",
     });
-    hooks.updateExternalApiKey.mock.calls[0]![1].onSuccess();
+    act(() => {
+      hooks.updateExternalApiKey.mock.calls[0]![1].onSuccess();
+    });
     expect(mockToastSuccess).toHaveBeenCalledWith("Credential rotated");
   });
 
@@ -561,7 +569,9 @@ describe("KeyDetailPage — edit flows", () => {
       serviceId: "key-1",
       custom_user_agent: "MyAgent/1.0",
     });
-    hooks.updateUserService.mock.calls[0]![1].onSuccess();
+    act(() => {
+      hooks.updateUserService.mock.calls[0]![1].onSuccess();
+    });
     expect(mockToastSuccess).toHaveBeenCalledWith("Custom User-Agent saved");
   });
 

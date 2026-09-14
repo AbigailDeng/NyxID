@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api-client";
 import {
   AssistantKeyCreateDialog,
@@ -83,6 +83,10 @@ beforeEach(() => {
   mockPost.mockReset();
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("AssistantKeyCreateDialog", () => {
   it("fences double submission and reports only after exact read-back and secret acknowledgement", async () => {
     installSuccessfulReads();
@@ -131,6 +135,7 @@ describe("AssistantKeyCreateDialog", () => {
   });
 
   it("rejects empty and duplicate service sets before any provider read", async () => {
+    const consoleError = vi.spyOn(console, "error");
     for (const allowedServiceIds of [[], ["service-alpha", "service-alpha"]]) {
       const { unmount } = renderDialog({ ...PARAMS, allowedServiceIds });
       await userEvent.click(screen.getByRole("button", { name: "Create key" }));
@@ -141,6 +146,7 @@ describe("AssistantKeyCreateDialog", () => {
       mockGet.mockClear();
       mockPost.mockClear();
     }
+    expect(consoleError).not.toHaveBeenCalled();
   });
 
   it("rejects unknown and cross-owner service reads before mutation", async () => {

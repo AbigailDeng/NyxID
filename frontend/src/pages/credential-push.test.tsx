@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DownstreamService } from "@/types/api";
 import type { NodeInfo } from "@/types/nodes";
 import { NodeDetailPage } from "./node-detail";
@@ -10,6 +10,7 @@ import { ServiceDetailPage } from "./service-detail";
 const {
   hooks,
   mockNavigate,
+  mockBuildAcceptUrl,
   mockPushCredential,
   mockToastError,
   mockToastSuccess,
@@ -36,6 +37,7 @@ const {
   return {
     hooks,
     mockNavigate: vi.fn(),
+    mockBuildAcceptUrl: vi.fn(),
     mockPushCredential: vi.fn(),
     mockToastError: vi.fn(),
     mockToastSuccess: vi.fn(),
@@ -60,6 +62,10 @@ vi.mock("@tanstack/react-router", () => ({
   ),
   useNavigate: () => mockNavigate,
   useParams: () => routerState.params,
+}));
+
+vi.mock("@/lib/credential-accept-url", () => ({
+  buildStandaloneCredentialAcceptUrl: mockBuildAcceptUrl,
 }));
 
 vi.mock("@/hooks/use-nodes", () => ({
@@ -222,6 +228,10 @@ function expectMetadataOnlyPushBody(body: Record<string, unknown>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockBuildAcceptUrl.mockResolvedValue(
+    "https://api.example.com/nodes/node-1/credentials/pending/pending-1/accept",
+  );
+  vi.spyOn(window.location, "assign").mockImplementation(() => undefined);
   hooks.node = {
     data: makeNode(),
     isLoading: false,
@@ -238,6 +248,10 @@ beforeEach(() => {
     refetch: vi.fn(),
   };
   mockPushCredential.mockResolvedValue({ id: "pending-1" });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("credential push forms", () => {
@@ -268,6 +282,17 @@ describe("credential push forms", () => {
       remote_crypto: true,
     });
     expectMetadataOnlyPushBody(body);
+    expect(mockBuildAcceptUrl).toHaveBeenCalledExactlyOnceWith(
+      "node-1",
+      "pending-1",
+      "/nodes/node-1",
+    );
+    await waitFor(() => {
+      expect(window.location.assign).toHaveBeenCalledExactlyOnceWith(
+        "https://api.example.com/nodes/node-1/credentials/pending/pending-1/accept",
+      );
+    });
+    expect(mockToastError).not.toHaveBeenCalled();
   });
 
   it("service-detail single binding with node_id posts metadata only", async () => {
@@ -293,6 +318,17 @@ describe("credential push forms", () => {
       remote_crypto: true,
     });
     expectMetadataOnlyPushBody(body);
+    expect(mockBuildAcceptUrl).toHaveBeenCalledExactlyOnceWith(
+      "node-1",
+      "pending-1",
+      "/services/svc-1",
+    );
+    await waitFor(() => {
+      expect(window.location.assign).toHaveBeenCalledExactlyOnceWith(
+        "https://api.example.com/nodes/node-1/credentials/pending/pending-1/accept",
+      );
+    });
+    expect(mockToastError).not.toHaveBeenCalled();
   });
 
   it("service-detail with zero bindings keeps the bind CTA and hides push", () => {

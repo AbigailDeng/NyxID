@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OAUTH_LAUNCH_CONTEXT_KEY } from "@/lib/oauth-popup";
 import { OAuthCompletePage } from "./oauth-complete";
@@ -95,7 +95,9 @@ describe("OAuth completion page", () => {
     expect(
       screen.getByRole("button", { name: /try again/i }),
     ).toBeInTheDocument();
-    vi.advanceTimersByTime(30_000);
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
     expect(window.close).not.toHaveBeenCalled();
   });
 
@@ -127,7 +129,9 @@ describe("OAuth completion page", () => {
     );
     render(<OAuthCompletePage />);
     fireEvent.keyDown(window, { key: "Tab" });
-    vi.advanceTimersByTime(3_500);
+    act(() => {
+      vi.advanceTimersByTime(3_500);
+    });
     expect(window.close).not.toHaveBeenCalled();
   });
 
@@ -140,7 +144,9 @@ describe("OAuth completion page", () => {
     );
     render(<OAuthCompletePage />);
     fireEvent.focus(window);
-    vi.advanceTimersByTime(3_500);
+    act(() => {
+      vi.advanceTimersByTime(3_500);
+    });
     expect(window.close).toHaveBeenCalledTimes(1);
   });
 

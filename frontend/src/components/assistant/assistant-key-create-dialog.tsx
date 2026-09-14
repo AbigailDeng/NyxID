@@ -381,9 +381,9 @@ export function AssistantKeyCreateDialog({
             <div className="space-y-2">
               <span className="text-muted-foreground">Allowed services</span>
               <div className="flex flex-wrap gap-1.5">
-                {params.allowedServiceIds.map((serviceId) => (
+                {params.allowedServiceIds.map((serviceId, index) => (
                   <Badge
-                    key={serviceId}
+                    key={`${index}:${serviceId}`}
                     variant="secondary"
                     className="max-w-full truncate font-mono"
                   >
