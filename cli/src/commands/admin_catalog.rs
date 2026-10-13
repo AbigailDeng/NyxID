@@ -112,6 +112,9 @@ pub async fn run_provider(command: AdminProviderCommands) -> Result<()> {
         AdminProviderCommands::Update {
             provider,
             file,
+            with_client,
+            client_id_env,
+            client_secret_env,
             auth,
         } => {
             let mut api = ApiClient::from_auth_checked(&auth).await?;
@@ -134,6 +137,18 @@ pub async fn run_provider(command: AdminProviderCommands) -> Result<()> {
                 }
             };
             reject_fields(&body, PROVIDER_SECRET_FIELDS, "provider file")?;
+            let mut body = body;
+            if with_client {
+                let (client_id, client_secret) = read_client_values(
+                    current["provider_type"] != "device_code",
+                    client_id_env.as_deref(),
+                    client_secret_env.as_deref(),
+                )?;
+                body["client_id"] = client_id.into();
+                if let Some(secret) = client_secret {
+                    body["client_secret"] = secret.into();
+                }
+            }
             let updated: Value = if body.as_object().is_some_and(Map::is_empty) {
                 eprintln!("No changes.");
                 current
@@ -142,7 +157,7 @@ pub async fn run_provider(command: AdminProviderCommands) -> Result<()> {
                     .await?
             };
             print_provider(&updated, &auth)?;
-            if file.is_none() {
+            if file.is_none() && !with_client {
                 offer_client(&mut api, &updated, &auth).await?;
             }
             Ok(())
@@ -1246,6 +1261,14 @@ fn read_client(
     client_secret_env: Option<&str>,
 ) -> Result<(String, Option<String>)> {
     eprintln!("{slug}: register this redirect URI in the vendor's OAuth app: {redirect}");
+    read_client_values(needs_secret, client_id_env, client_secret_env)
+}
+
+fn read_client_values(
+    needs_secret: bool,
+    client_id_env: Option<&str>,
+    client_secret_env: Option<&str>,
+) -> Result<(String, Option<String>)> {
     let client_id = match client_id_env {
         Some(name) => env_secret(name)?,
         None => ask_required("Client ID", None)?,
@@ -1785,6 +1808,49 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn provider_update_with_client_sends_the_client_with_the_change() {
+        let server = MockServer::start().await;
+        listing(&server, json!([provider_row(true)]), json!([])).await;
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(
+            file.path(),
+            "token_url: https://accounts.zoho.eu/oauth/v2/token\n",
+        )
+        .unwrap();
+        Mock::given(method("PUT"))
+            .and(path(
+                "/api/v1/providers/11111111-1111-4111-8111-111111111111",
+            ))
+            .and(body_json(json!({
+                "token_url": "https://accounts.zoho.eu/oauth/v2/token",
+                "client_id": "current-id",
+                "client_secret": "current-secret",
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(provider_row(true)))
+            .expect(1)
+            .mount(&server)
+            .await;
+        unsafe {
+            std::env::set_var("NYXID_TEST_WITH_CLIENT_ID", "current-id");
+            std::env::set_var("NYXID_TEST_WITH_CLIENT_SECRET", " current-secret ");
+        }
+        let result = run_provider(AdminProviderCommands::Update {
+            provider: "zoho-mail".into(),
+            file: Some(file.path().into()),
+            with_client: true,
+            client_id_env: Some("NYXID_TEST_WITH_CLIENT_ID".into()),
+            client_secret_env: Some("NYXID_TEST_WITH_CLIENT_SECRET".into()),
+            auth: mock_auth(server.uri()),
+        })
+        .await;
+        unsafe {
+            std::env::remove_var("NYXID_TEST_WITH_CLIENT_ID");
+            std::env::remove_var("NYXID_TEST_WITH_CLIENT_SECRET");
+        }
+        result.unwrap();
     }
 
     #[tokio::test]
