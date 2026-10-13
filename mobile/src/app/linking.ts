@@ -284,6 +284,10 @@ export const appLinking: LinkingOptions<RootStackParamList> = {
   config: {
     screens: {
       Auth: "auth",
+      Assistant: { path: "chat/:conversationId?", parse: { conversationId: String } },
+      Services: "services",
+      Agents: { path: "agents/:agentId?", parse: { agentId: String } },
+      AccountSecurity: "account/security",
       Activity: {
         path: "activity",
         parse: { challengeId: String },

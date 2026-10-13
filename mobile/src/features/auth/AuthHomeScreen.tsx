@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import * as WebBrowser from "expo-web-browser";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, AppState, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import Svg, { Path, Defs, LinearGradient, Stop } from "react-native-svg";
 import { LinearGradient as ExpoLinearGradient } from "expo-linear-gradient";
 import type { RootStackParamList } from "../../app/AppNavigator";
@@ -12,6 +12,7 @@ import { ToastKind, ToastOverlay, ToastState } from "../../components/ToastOverl
 import { mobileApi } from "../../lib/api/mobileApi";
 import { resolveErrorMessage } from "../../lib/api/errorMessages";
 import { useAuthSession } from "./AuthSessionContext";
+import { passwordLoginInput, requiresTotp } from "./emailLogin";
 import { capture } from "../../lib/telemetry";
 import { useTheme } from "../../theme/ThemeContext";
 import type { ThemeColors } from "../../theme/mobileTheme";
@@ -188,10 +189,13 @@ export function AuthHomeScreen({ navigation }: Props) {
   const [toast, setToast] = useState<ToastState | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [mfaCode, setMfaCode] = useState("");
   const [isEmailAuthPending, setIsEmailAuthPending] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const { signInWithSession } = useAuthSession();
   const isMountedRef = useRef(true);
+  const emailLoginLock = useRef(false);
   const lastHandledSocialUrlRef = useRef<string | null>(null);
 
   const showToast = (message: string, kind: ToastKind) => {
@@ -199,6 +203,7 @@ export function AuthHomeScreen({ navigation }: Props) {
   };
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
     };
@@ -209,6 +214,13 @@ export function AuthHomeScreen({ navigation }: Props) {
     const timer = setTimeout(() => setToast(null), 2200);
     return () => clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "background") { setPassword(""); setMfaCode(""); }
+    });
+    return () => subscription.remove();
+  }, []);
 
   const resetSocialState = useCallback(() => {
     if (isMountedRef.current) {
@@ -225,7 +237,6 @@ export function AuthHomeScreen({ navigation }: Props) {
       lastHandledSocialUrlRef.current = url;
 
       const callback = parseSocialCallback(url);
-      if (__DEV__) console.log(`[auth] Parsed callback:`, JSON.stringify(callback));
 
       if (!callback) {
         setLoginError("Unable to complete social sign-in.");
@@ -234,7 +245,6 @@ export function AuthHomeScreen({ navigation }: Props) {
       }
 
       if (callback.status === "error") {
-        if (__DEV__) console.log(`[auth] Social auth error:`, callback.error);
         setLoginError(resolveSocialAuthError(callback.error));
         resetSocialState();
         return;
@@ -307,17 +317,14 @@ export function AuthHomeScreen({ navigation }: Props) {
 
     try {
       const authorizeUrl = mobileApi.getSocialAuthorizeUrl(provider, SOCIAL_CALLBACK_URL);
-      if (__DEV__) console.log(`[auth] Opening ${provider} auth: ${authorizeUrl}`);
 
       const result = await WebBrowser.openAuthSessionAsync(
         authorizeUrl,
         SOCIAL_CALLBACK_URL
       );
 
-      if (__DEV__) console.log(`[auth] Browser result:`, JSON.stringify(result));
 
       if (result.type === "success") {
-        if (__DEV__) console.log(`[auth] Callback URL: ${result.url}`);
         await handleSocialCallback(result.url);
         return;
       }
@@ -329,7 +336,6 @@ export function AuthHomeScreen({ navigation }: Props) {
 
       setLoginError(`Social sign-in failed: ${result.type}`);
     } catch (error) {
-      if (__DEV__) console.log(`[auth] startSocialLogin error:`, error);
       setLoginError(resolveErrorMessage(error));
     } finally {
       if (isMountedRef.current) {
@@ -340,19 +346,27 @@ export function AuthHomeScreen({ navigation }: Props) {
   };
 
   const handleEmailLogin = async () => {
-    if (isEmailAuthPending || !email.trim() || !password) return;
+    if (emailLoginLock.current || isSocialAuthPending || !email.trim() || !password) return;
+    emailLoginLock.current = true;
     setIsEmailAuthPending(true);
     setLoginError(null);
     try {
-      const result = await mobileApi.loginWithPassword({ email: email.trim(), password });
+      const result = await mobileApi.loginWithPassword(passwordLoginInput(email, password, mfaRequired, mfaCode));
       await signInWithSession({
         accessToken: result.accessToken,
         refreshToken: result.refreshToken,
         accessTokenExpiresAt: Date.now() + Math.floor(result.expiresIn * 1000),
       });
     } catch (error) {
-      setLoginError(resolveErrorMessage(error));
+      if (requiresTotp(error)) {
+        setMfaRequired(true);
+        setLoginError(null);
+      } else {
+        setLoginError(resolveErrorMessage(error));
+      }
+      setMfaCode("");
     } finally {
+      emailLoginLock.current = false;
       if (isMountedRef.current) {
         setIsEmailAuthPending(false);
       }
@@ -372,23 +386,27 @@ export function AuthHomeScreen({ navigation }: Props) {
         <View style={styles.heroWrap}>
           <PortalMarkLogo />
           <Text style={styles.heroTitle}>NyxID</Text>
-          <Text style={styles.heroTagline}>Your companion for approvals and notifications</Text>
+          <Text style={styles.heroTagline}>Your conversations, connections and approvals</Text>
         </View>
 
         {/* Email login */}
         <View style={flowStyles.card}>
           <TextInput
             style={styles.input}
+            accessibilityLabel="Email"
+            editable={!isAnyPending}
             placeholder="Email"
             placeholderTextColor={colors.textMuted}
             value={email}
-            onChangeText={(v) => { setEmail(v); setLoginError(null); }}
+            onChangeText={(v) => { setEmail(v); setMfaRequired(false); setMfaCode(""); setLoginError(null); }}
             keyboardType="email-address"
             autoCapitalize="none"
             autoComplete="email"
           />
           <TextInput
             style={styles.input}
+            accessibilityLabel="Password"
+            editable={!isAnyPending}
             placeholder="Password"
             placeholderTextColor={colors.textMuted}
             value={password}
@@ -396,10 +414,15 @@ export function AuthHomeScreen({ navigation }: Props) {
             secureTextEntry
             autoComplete="current-password"
           />
+          {mfaRequired ? <>
+            <Text style={{ ...typeScale.caption, color: colors.textSecondary }}>Enter the six-digit code from your authenticator.</Text>
+            <TextInput style={styles.input} accessibilityLabel="Authenticator code" placeholder="000000" placeholderTextColor={colors.textMuted} value={mfaCode} onChangeText={(value) => setMfaCode(value.replace(/\D/g, "").slice(0, 6))} keyboardType="number-pad" autoComplete="one-time-code" maxLength={6} editable={!isAnyPending} autoFocus />
+          </> : null}
           {/* DESIGN.md §Buttons: primary CTA uses `nyx-gradient-vivid`. */}
           <Pressable
             onPress={() => void handleEmailLogin()}
-            disabled={isEmailAuthPending || !email.trim() || !password}
+            accessibilityRole="button"
+            disabled={isAnyPending || !email.trim() || !password || (mfaRequired && !/^\d{6}$/.test(mfaCode))}
             style={[styles.signInButtonWrap, (isEmailAuthPending || !email.trim() || !password) && styles.buttonDisabled]}
           >
             <ExpoLinearGradient
@@ -412,7 +435,7 @@ export function AuthHomeScreen({ navigation }: Props) {
                 {isEmailAuthPending ? (
                   <ActivityIndicator size="small" color={colors.onPrimary} />
                 ) : null}
-                <Text style={styles.signInButtonText}>{isEmailAuthPending ? "Signing in..." : "Sign In"}</Text>
+                <Text style={styles.signInButtonText}>{isEmailAuthPending ? "Signing in..." : mfaRequired ? "Verify & sign in" : "Sign In"}</Text>
               </View>
             </ExpoLinearGradient>
           </Pressable>

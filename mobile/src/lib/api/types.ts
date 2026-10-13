@@ -7,7 +7,7 @@ export type ChallengeItem = {
   action: string;
   resource: string;
   approval_mode: ApprovalMode;
-  risk_level: "low" | "medium" | "high";
+  risk_level: "low" | "medium" | "high" | "unknown";
   status: ChallengeStatus;
   created_at: string;
   expires_at: string;
@@ -24,7 +24,7 @@ export type ChallengeDetail = ChallengeItem & {
   summary: string;
   request_context: {
     client: string;
-    location: string;
+    requester: string;
   };
   /**
    * Stable service identifier (e.g. catalog slug or `UserService.slug`).
@@ -33,6 +33,11 @@ export type ChallengeDetail = ChallengeItem & {
    * underlying service rather than the user-editable display title.
    */
   service_slug: string;
+  tool_name?: string | null;
+  tool_call_id?: string | null;
+  tool_arguments?: string | null;
+  is_destructive?: boolean | null;
+  verb?: string | null;
 };
 
 export type ApprovalItem = {

@@ -19,7 +19,7 @@ import { activatePushAfterLogin } from "../../lib/notifications/pushNotification
 import { useTheme } from "../../theme/ThemeContext";
 import type { ThemeColors } from "../../theme/mobileTheme";
 import { createFlowStyles } from "../../theme/flowStyles";
-import { BOTTOM_NAV_CLEARANCE, radius, spacing, typeScale } from "../../theme/designTokens";
+import { radius, spacing, typeScale } from "../../theme/designTokens";
 import { useEffect, useMemo, useState } from "react";
 
 type Props = NativeStackScreenProps<RootStackParamList, "AccountSettings">;
@@ -457,7 +457,7 @@ export function AccountSettingsScreen({ navigation }: Props) {
     <ScreenContainer>
       <ScrollView
         style={flowStyles.content}
-        contentContainerStyle={[flowStyles.scrollContent, { paddingHorizontal: spacing.xxl, paddingBottom: BOTTOM_NAV_CLEARANCE }]}
+        contentContainerStyle={[flowStyles.scrollContent, { paddingHorizontal: spacing.xxl, paddingBottom: spacing.huge }]}
         showsVerticalScrollIndicator={false}
       >
         {isOffline && <OfflineBanner subtitle="Some features unavailable" onRetry={async () => {
@@ -657,6 +657,8 @@ export function AccountSettingsScreen({ navigation }: Props) {
 
         {/* Actions */}
         <View style={styles.actionsWrap}>
+          <PrimaryButton label="Profile & account security" kind="ghost"
+            onPress={() => navigation.navigate("AccountSecurity")} />
           <PrimaryButton label="Generate terminal login code" kind="ghost" disabled={isOffline}
             onPress={() => navigation.navigate("AgentKeyLogin", { mint: true })} />
           <PrimaryButton

@@ -49,6 +49,7 @@ import { createIdempotencyKey } from "../../lib/api/idempotency";
 import { getDecisionErrorMessage, formatGrantDuration, getChallengeActionState } from "./challengeUiState";
 import { StatusBadge } from "../../components/StatusBadge";
 import { PrimaryButton } from "../../components/PrimaryButton";
+import { ApprovalEvidence } from "./ApprovalEvidence";
 import { useTheme } from "../../theme/ThemeContext";
 import type { ThemeColors } from "../../theme/mobileTheme";
 import { createFlowStyles } from "../../theme/flowStyles";
@@ -207,7 +208,7 @@ function ChallengeDetailSheet({
   if (!shown) return null;
 
   const actionState = getChallengeActionState(shown);
-  const riskColorMap = { high: colors.riskHigh.text, medium: colors.riskMedium.text, low: colors.riskLow.text };
+  const riskColorMap = { high: colors.riskHigh.text, medium: colors.riskMedium.text, low: colors.riskLow.text, unknown: colors.textSecondary };
   const riskColor = riskColorMap[shown.risk_level];
   const isGrantMode = shown.approval_mode === "grant";
 
@@ -260,7 +261,8 @@ function ChallengeDetailSheet({
                   flowStyles={flowStyles}
                 />
               ) : null}
-              <DetailRow label="Location" value={shown.request_context.location} isLast flowStyles={flowStyles} />
+              <DetailRow label="Requester" value={shown.request_context.requester} isLast flowStyles={flowStyles} />
+              <ApprovalEvidence challenge={shown} />
             </View>
 
             {actionState.reason ? (

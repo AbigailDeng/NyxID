@@ -37,12 +37,14 @@ export function ChallengeCard({
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
-  const riskVariant = challenge.risk_level === "high" ? "riskHigh" : challenge.risk_level === "medium" ? "riskMedium" : "riskLow";
+  const riskVariant = challenge.risk_level === "high" ? "riskHigh" : challenge.risk_level === "medium" ? "riskMedium" : challenge.risk_level === "low" ? "riskLow" : "orgChip";
   // DESIGN.md §Interaction Rules: status badges always Title Case.
   const riskLabel = challenge.risk_level.charAt(0).toUpperCase() + challenge.risk_level.slice(1);
   const modeLabel = challenge.approval_mode === "grant" ? "Grant mode" : "Per-request";
   const durationLabel = challenge.approval_mode === "grant" ? ` · ${grantDurationLabel}` : "";
   const timeAgo = formatTimeAgo(challenge.created_at);
+  const expired = !Number.isFinite(Date.parse(challenge.expires_at)) || Date.parse(challenge.expires_at) <= Date.now();
+  const blocked = isMutating || expired || challenge.status !== "PENDING";
   // Render an org chip when the backend marks the request as
   // created under an org approval policy. The label falls back to
   // a generic "Org" when the server omitted the name, so old
@@ -72,16 +74,18 @@ export function ChallengeCard({
       </Text>
       <View style={styles.actions}>
         <Pressable
-          style={[styles.approveBtn, isMutating && styles.btnDisabled]}
+          style={[styles.approveBtn, blocked && styles.btnDisabled]}
           onPress={onApprove}
-          disabled={isMutating}
+          disabled={blocked}
+          accessibilityRole="button"
         >
           <Text style={styles.approveBtnText}>Approve</Text>
         </Pressable>
         <Pressable
-          style={[styles.denyBtn, isMutating && styles.btnDisabled]}
+          style={[styles.denyBtn, blocked && styles.btnDisabled]}
           onPress={onDeny}
-          disabled={isMutating}
+          disabled={blocked}
+          accessibilityRole="button"
         >
           <Text style={styles.denyBtnText}>Deny</Text>
         </Pressable>

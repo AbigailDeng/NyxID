@@ -42,7 +42,7 @@ export function HistoryCard({ item, onPress }: HistoryCardProps) {
 
   const modeLabel = item.approval_mode === "grant" ? "Grant" : "Per-request";
 
-  const riskVariant = item.risk_level === "high" ? "riskHigh" : item.risk_level === "medium" ? "riskMedium" : "riskLow";
+  const riskVariant = item.risk_level === "high" ? "riskHigh" : item.risk_level === "medium" ? "riskMedium" : item.risk_level === "low" ? "riskLow" : "orgChip";
   const riskLabel = item.risk_level.charAt(0).toUpperCase() + item.risk_level.slice(1);
 
   return (

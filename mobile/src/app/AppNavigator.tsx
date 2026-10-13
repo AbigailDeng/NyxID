@@ -1,175 +1,165 @@
-import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { StyleSheet, View } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
+import {
+  createNativeStackNavigator,
+  type NativeStackScreenProps,
+} from "@react-navigation/native-stack";
+import { Pressable, StyleSheet } from "react-native";
+import { Menu } from "lucide-react-native";
 import { AuthHomeScreen } from "../features/auth/AuthHomeScreen";
 import { DeviceLoginScreen } from "../features/auth/DeviceLoginScreen";
 import { AgentKeyLoginScreen } from "../features/auth/AgentKeyLoginScreen";
 import { useAuthSession } from "../features/auth/AuthSessionContext";
 import { AccountSettingsScreen } from "../features/account/AccountSettingsScreen";
+import { AccountSecurityScreen } from "../features/account/AccountSecurityScreen";
 import { ActivityScreen } from "../features/activity/ActivityScreen";
 import { ActivityDetailScreen } from "../features/activity/ActivityDetailScreen";
+import { AssistantScreen } from "../features/assistant/AssistantScreen";
+import { ServicesScreen } from "../features/services/ServicesScreen";
+import { AgentsScreen } from "../features/agents/AgentsScreen";
 import { TermsOfServiceScreen } from "../features/legal/TermsOfServiceScreen";
 import { PrivacyPolicyScreen } from "../features/legal/PrivacyPolicyScreen";
 import { FullScreenLoading } from "../components/FullScreenLoading";
-import { BottomNavV2, type BottomNavV2Tab } from "../components/BottomNavV2";
-// import { NyxFAB } from "../components/NyxFAB"; // TODO: re-enable when chat is ready
 import { useTheme } from "../theme/ThemeContext";
-import { spacing } from "../theme/designTokens";
+import { fonts } from "../theme/designTokens";
 
 export type RootStackParamList = {
   Auth: undefined;
+  Assistant: { conversationId?: string; agentId?: string } | undefined;
+  Services: undefined;
+  Agents: { agentId?: string } | undefined;
   Activity: { challengeId?: string } | undefined;
   ActivityDetail: { challengeId: string };
   AccountSettings: undefined;
+  AccountSecurity: undefined;
   TermsOfService: undefined;
   PrivacyPolicy: undefined;
   DeviceLogin: { user_code?: string; start_scanner?: boolean } | undefined;
-  AgentKeyLogin: { user_code?: string; flow?: "agent-key" | "device"; mint?: boolean } | undefined;
+  AgentKeyLogin:
+    | { user_code?: string; flow?: "agent-key" | "device"; mint?: boolean }
+    | undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-type AppNavigatorProps = {
-  currentRouteName?: string;
-  onMainTabPress?: (tab: BottomNavV2Tab) => void;
-  onNyxPress?: () => void;
-};
-
-function resolveActiveMainTab(routeName?: string): BottomNavV2Tab {
-  if (!routeName) return "activity";
-  if (routeName === "Activity") return "activity";
-  if (routeName === "ActivityDetail") return "activity";
-  if (routeName === "AccountSettings") return "account";
-  if (routeName === "TermsOfService") return "account";
-  if (routeName === "PrivacyPolicy") return "account";
-  return "activity";
+function AgentsRoute({
+  navigation,
+  route,
+}: NativeStackScreenProps<RootStackParamList, "Agents">) {
+  return (
+    <AgentsScreen
+      agentId={route.params?.agentId}
+      onOpenChat={(params) => navigation.navigate("Assistant", params)}
+    />
+  );
 }
 
-export function AppNavigator({ currentRouteName, onMainTabPress, onNyxPress }: AppNavigatorProps) {
+export function AppNavigator({ onOpenMenu }: { onOpenMenu: () => void }) {
   const { isAuthenticated, isRestoring } = useAuthSession();
   const { colors } = useTheme();
-  const activeMainTab = resolveActiveMainTab(currentRouteName);
-  const isLegalRoute = currentRouteName === "TermsOfService" || currentRouteName === "PrivacyPolicy";
-  const isDetailRoute = currentRouteName === "ActivityDetail";
-  const isDeviceLoginRoute = currentRouteName === "DeviceLogin" || currentRouteName === "AgentKeyLogin";
-  const showGlobalBottomNav =
-    isAuthenticated &&
-    Boolean(onMainTabPress) &&
-    !isLegalRoute &&
-    !isDetailRoute &&
-    !isDeviceLoginRoute;
-
-  if (isRestoring) {
-    return <FullScreenLoading title="Restoring session..." subtitle="Validating local secure session" />;
-  }
-
+  const drawerHeader = {
+    headerShown: true,
+    headerLeft: () => (
+      <Pressable
+        onPress={onOpenMenu}
+        accessibilityRole="button"
+        accessibilityLabel="Open navigation"
+        style={styles.menu}
+      >
+        <Menu color={colors.textPrimary} size={22} />
+      </Pressable>
+    ),
+  };
+  if (isRestoring)
+    return (
+      <FullScreenLoading
+        title="Restoring session..."
+        subtitle="Validating local secure session"
+      />
+    );
   return (
-    <View style={[styles.container, { backgroundColor: colors.bg }]}>
-      <View style={styles.stackWrap}>
-        <Stack.Navigator
-          initialRouteName={isAuthenticated ? "Activity" : "Auth"}
-          screenOptions={{
-            headerShown: false,
-            headerStyle: { backgroundColor: colors.bg },
-            headerTintColor: colors.textPrimary,
-            contentStyle: { backgroundColor: colors.bg },
-          }}
-        >
-          {isAuthenticated ? (
-            <>
-              <Stack.Screen
-                name="Activity"
-                component={ActivityScreen}
-                options={{ title: "Activity", animation: "slide_from_left" }}
-              />
-              <Stack.Screen
-                name="ActivityDetail"
-                component={ActivityDetailScreen}
-                options={{ title: "Approval Detail", animation: "none" }}
-              />
-              <Stack.Screen
-                name="AccountSettings"
-                component={AccountSettingsScreen}
-                options={{ title: "Account Settings", animation: "slide_from_right" }}
-              />
-            </>
-          ) : (
-            <>
-              <Stack.Screen name="Auth" component={AuthHomeScreen} options={{ title: "NyxID Sign In" }} />
-            </>
-          )}
+    <Stack.Navigator
+      initialRouteName={isAuthenticated ? "Assistant" : "Auth"}
+      screenOptions={{
+        headerShown: false,
+        headerStyle: { backgroundColor: colors.bg },
+        headerTintColor: colors.textPrimary,
+        headerTitleStyle: { fontFamily: fonts.displaySemi, fontSize: 18 },
+        headerShadowVisible: false,
+        contentStyle: { backgroundColor: colors.bg },
+        headerBackButtonDisplayMode: "minimal",
+      }}
+    >
+      {isAuthenticated ? (
+        <Stack.Group navigationKey="workspace">
           <Stack.Screen
-            name="TermsOfService"
-            component={TermsOfServiceScreen}
-            options={{ title: "Terms of Service", animation: "slide_from_left" }}
+            name="Assistant"
+            component={AssistantScreen}
+            options={{ ...drawerHeader, title: "NyxID" }}
           />
           <Stack.Screen
-            name="PrivacyPolicy"
-            component={PrivacyPolicyScreen}
-            options={{ title: "Privacy Policy", animation: "slide_from_left" }}
+            name="Services"
+            component={ServicesScreen}
+            options={{ ...drawerHeader, title: "Services" }}
           />
           <Stack.Screen
-            name="DeviceLogin"
-            component={DeviceLoginScreen}
-            options={{ title: "Approve Device Login", animation: "slide_from_right" }}
+            name="Agents"
+            component={AgentsRoute}
+            options={{ ...drawerHeader, title: "Agents" }}
           />
-          <Stack.Screen name="AgentKeyLogin" component={AgentKeyLoginScreen} options={{ title: "Agent Key Login", animation: "slide_from_right" }} />
-        </Stack.Navigator>
-      </View>
-      {showGlobalBottomNav ? (
-        <View style={styles.bottomOverlay} pointerEvents="box-none">
-          <LinearGradient
-            colors={[colors.bg + "00", colors.bg]}
-            locations={[0, 1]}
-            style={styles.fadeGradient}
-            pointerEvents="none"
+          <Stack.Screen
+            name="Activity"
+            component={ActivityScreen}
+            options={{ ...drawerHeader, title: "Approvals" }}
           />
-          <View style={[styles.bottomWrap, { backgroundColor: colors.bg }]}>
-            <View style={styles.navContainer}>
-              <BottomNavV2 active={activeMainTab} onTabPress={(tab) => onMainTabPress?.(tab)} />
-              {/* TODO: re-enable when chat is ready
-              <View style={styles.fabPosition}>
-                <NyxFAB onPress={onNyxPress} />
-              </View>
-              */}
-            </View>
-          </View>
-        </View>
-      ) : null}
-    </View>
+          <Stack.Screen
+            name="ActivityDetail"
+            component={ActivityDetailScreen}
+            options={{ title: "Approval detail", animation: "none" }}
+          />
+          <Stack.Screen
+            name="AccountSettings"
+            component={AccountSettingsScreen}
+            options={{ ...drawerHeader, title: "Settings" }}
+          />
+          <Stack.Screen
+            name="AccountSecurity"
+            component={AccountSecurityScreen}
+            options={{ headerShown: true, title: "Account & security" }}
+          />
+        </Stack.Group>
+      ) : (
+        <Stack.Screen
+          name="Auth"
+          navigationKey="auth"
+          component={AuthHomeScreen}
+          options={{ title: "NyxID Sign In" }}
+        />
+      )}
+      <Stack.Group navigationKey={isAuthenticated ? "signed-in" : "signed-out"}>
+        <Stack.Screen
+          name="TermsOfService"
+          component={TermsOfServiceScreen}
+          options={{ title: "Terms of Service" }}
+        />
+        <Stack.Screen
+          name="PrivacyPolicy"
+          component={PrivacyPolicyScreen}
+          options={{ title: "Privacy Policy" }}
+        />
+        <Stack.Screen
+          name="DeviceLogin"
+          component={DeviceLoginScreen}
+          options={{ title: "Approve Device Login" }}
+        />
+        <Stack.Screen
+          name="AgentKeyLogin"
+          component={AgentKeyLoginScreen}
+          options={{ title: "Agent Key Login" }}
+        />
+      </Stack.Group>
+    </Stack.Navigator>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  stackWrap: {
-    flex: 1,
-  },
-  bottomOverlay: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  fadeGradient: {
-    height: 40,
-  },
-  bottomWrap: {
-    paddingHorizontal: spacing.xxl,
-    paddingBottom: spacing.xxxl,
-  },
-  navContainer: {
-    position: "relative",
-  },
-  fabPosition: {
-    position: "absolute",
-    top: -41.5,
-    left: "50%",
-    marginLeft: -28.5,
-    overflow: "visible",
-    height: 77,
-    justifyContent: "flex-end",
-  } as const,
+  menu: { minWidth: 44, height: 44, marginLeft: -8, justifyContent: "center" },
 });

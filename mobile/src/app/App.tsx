@@ -46,13 +46,12 @@ import {
 } from "../lib/notifications/pushNotifications";
 import { ToastOverlay, type ToastState } from "../components/ToastOverlay";
 import { signalApprovalStateMayHaveChanged } from "../lib/notifications/approvalRefreshSignal";
-import { AuthSessionProvider } from "../features/auth/AuthSessionContext";
+import { AuthSessionProvider, useAuthSession } from "../features/auth/AuthSessionContext";
 import { MobileConsentProvider } from "../lib/consent";
 import { capture } from "../lib/telemetry";
 import type { PushType } from "../lib/telemetry-schema";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import type { BottomNavV2Tab } from "../components/BottomNavV2";
-// import { NyxSheet } from "../features/nyx/NyxSheet"; // TODO: re-enable when chat is ready
+import { WorkspaceDrawer, type WorkspaceRoute } from "../components/workspace/WorkspaceDrawer";
 import { ThemeProvider, useTheme } from "../theme/ThemeContext";
 
 // Wire TanStack Query's online state to NetInfo so queries pause when offline
@@ -111,7 +110,6 @@ function getActiveRouteName(
 export default function App() {
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
   const [currentRouteName, setCurrentRouteName] = useState<string | undefined>(undefined);
-  const [isNyxOpen, setIsNyxOpen] = useState(false);
   const pendingChallengeFromTapRef = useRef<string | null>(null);
   const lastAppStateRef = useRef(AppState.currentState);
   const [pushToast, setPushToast] = useState<ToastState | null>(null);
@@ -365,8 +363,6 @@ export default function App() {
                     currentRouteName={currentRouteName}
                     setCurrentRouteName={setCurrentRouteName}
                     flushPendingChallengeTapNavigation={flushPendingChallengeTapNavigation}
-                    isNyxOpen={isNyxOpen}
-                    setIsNyxOpen={setIsNyxOpen}
                     pushToast={pushToast}
                   />
                 </AuthSessionProvider>
@@ -384,20 +380,30 @@ function ThemedAppShell({
   currentRouteName,
   setCurrentRouteName,
   flushPendingChallengeTapNavigation,
-  isNyxOpen,
-  setIsNyxOpen,
   pushToast,
 }: {
   navigationRef: ReturnType<typeof useNavigationContainerRef<RootStackParamList>>;
   currentRouteName: string | undefined;
   setCurrentRouteName: (name: string | undefined) => void;
   flushPendingChallengeTapNavigation: () => void;
-  isNyxOpen: boolean;
-  setIsNyxOpen: (open: boolean) => void;
   pushToast: ToastState | null;
 }) {
   const { mode } = useTheme();
   const insets = useSafeAreaInsets();
+  const { isAuthenticated } = useAuthSession();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  useEffect(() => { if (!isAuthenticated) setDrawerOpen(false); }, [isAuthenticated]);
+  const navigateFromDrawer = (route: WorkspaceRoute) => {
+    setDrawerOpen(false);
+    if (!navigationRef.isReady()) return;
+    switch (route) {
+      case "Assistant": navigationRef.navigate("Assistant"); break;
+      case "Activity": navigationRef.navigate("Activity"); break;
+      case "Services": navigationRef.navigate("Services"); break;
+      case "Agents": navigationRef.navigate("Agents"); break;
+      case "AccountSettings": navigationRef.navigate("AccountSettings"); break;
+    }
+  };
 
   return (
     <>
@@ -416,19 +422,7 @@ function ThemedAppShell({
         }}
       >
         <StatusBar style={mode === "dark" ? "light" : "dark"} />
-        <AppNavigator
-          currentRouteName={currentRouteName}
-          onMainTabPress={(tab: BottomNavV2Tab) => {
-            if (!navigationRef.isReady()) return;
-            capture({
-              name: "ui.mobile_nav_target_opened",
-              props: { target: tab, source: "tab" },
-            });
-            if (tab === "activity") navigationRef.navigate("Activity");
-            if (tab === "account") navigationRef.navigate("AccountSettings");
-          }}
-          // onNyxPress={() => setIsNyxOpen(true)} // TODO: re-enable when chat is ready
-        />
+        <AppNavigator onOpenMenu={() => setDrawerOpen(true)} />
       </NavigationContainer>
       {/* ToastOverlay anchors to `top: 0` of its parent and relies on the
           screen's SafeAreaView for inset. Mounted globally it has no such
@@ -439,7 +433,14 @@ function ThemedAppShell({
       >
         <ToastOverlay toast={pushToast} duration={6000} />
       </View>
-      {/* <NyxSheet isOpen={isNyxOpen} onClose={() => setIsNyxOpen(false)} /> */}{/* TODO: re-enable when chat is ready */}
+      {isAuthenticated ? <WorkspaceDrawer
+        visible={drawerOpen}
+        currentRoute={currentRouteName}
+        onClose={() => setDrawerOpen(false)}
+        onNavigate={navigateFromDrawer}
+        onScan={() => { setDrawerOpen(false); navigationRef.navigate("DeviceLogin", { start_scanner: true }); }}
+        onLoginCode={() => { setDrawerOpen(false); navigationRef.navigate("AgentKeyLogin", { mint: true }); }}
+      /> : null}
     </>
   );
 }
