@@ -13,24 +13,18 @@ import { mobileApi } from "../../lib/api/mobileApi";
 import { resolveErrorMessage } from "../../lib/api/errorMessages";
 import { useAuthSession } from "./AuthSessionContext";
 import { passwordLoginInput, requiresTotp } from "./emailLogin";
+import {
+  parseSocialCallback,
+  SOCIAL_CALLBACK_URL,
+  type SocialProvider,
+} from "./socialCallback";
 import { capture } from "../../lib/telemetry";
 import { useTheme } from "../../theme/ThemeContext";
 import type { ThemeColors } from "../../theme/mobileTheme";
 import { createFlowStyles } from "../../theme/flowStyles";
 import { radius, spacing, typeScale } from "../../theme/designTokens";
 
-type SocialProvider = "google" | "github" | "apple";
 type Props = NativeStackScreenProps<RootStackParamList, "Auth">;
-const SOCIAL_CALLBACK_URL = "nyxid://auth/social/callback";
-
-type SocialCallback = {
-  status: "success" | "error";
-  accessToken?: string;
-  refreshToken?: string;
-  expiresIn?: number;
-  error?: string;
-  provider?: SocialProvider;
-};
 
 function resolveAuthError(error: unknown): string {
   if (!(error instanceof Error)) return "Sign-in failed. Please try again.";
@@ -56,54 +50,6 @@ function resolveSocialAuthError(error: string | undefined): string {
       return "WAITLIST";
     default:
       return error || "Social sign-in failed. Please try again.";
-  }
-}
-
-function parseSocialCallback(url: string): SocialCallback | null {
-  if (!url.startsWith(SOCIAL_CALLBACK_URL)) {
-    return null;
-  }
-
-  try {
-    const parsed = new URL(url);
-    const statusRaw = parsed.searchParams.get("status");
-    const providerRaw = parsed.searchParams.get("provider");
-    const provider: SocialProvider | undefined =
-      providerRaw === "google" || providerRaw === "github" || providerRaw === "apple"
-        ? providerRaw
-        : undefined;
-    if (statusRaw !== "success" && statusRaw !== "error") {
-      return {
-        status: "error",
-        error: "social_auth_unknown",
-        provider,
-      };
-    }
-
-    if (statusRaw === "error") {
-      return {
-        status: "error",
-        error: parsed.searchParams.get("error") ?? parsed.searchParams.get("message") ?? undefined,
-        provider,
-      };
-    }
-
-    const expiresInRaw = parsed.searchParams.get("expires_in");
-    const expiresInParsed = expiresInRaw ? Number(expiresInRaw) : NaN;
-
-    return {
-      status: "success",
-      accessToken: parsed.searchParams.get("access_token") ?? undefined,
-      refreshToken: parsed.searchParams.get("refresh_token") ?? undefined,
-      expiresIn:
-        Number.isFinite(expiresInParsed) && expiresInParsed > 0 ? expiresInParsed : undefined,
-      provider,
-    };
-  } catch (e) {
-    return {
-      status: "error",
-      error: e instanceof Error ? e.message : "social_auth_unknown",
-    };
   }
 }
 
@@ -231,18 +177,12 @@ export function AuthHomeScreen({ navigation }: Props) {
 
   const handleSocialCallback = useCallback(
     async (url: string) => {
+      const callback = parseSocialCallback(url);
+      if (!callback) return;
       if (lastHandledSocialUrlRef.current === url) {
         return;
       }
       lastHandledSocialUrlRef.current = url;
-
-      const callback = parseSocialCallback(url);
-
-      if (!callback) {
-        setLoginError("Unable to complete social sign-in.");
-        resetSocialState();
-        return;
-      }
 
       if (callback.status === "error") {
         setLoginError(resolveSocialAuthError(callback.error));

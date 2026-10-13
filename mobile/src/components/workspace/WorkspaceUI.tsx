@@ -24,11 +24,13 @@ import { fonts, radius, TOUCH_TARGET } from "../../theme/designTokens";
 
 export function WorkspacePage({
   title,
+  titleNumberOfLines,
   subtitle,
   children,
   scroll = true,
 }: PropsWithChildren<{
   title: string;
+  titleNumberOfLines?: number;
   subtitle?: string;
   scroll?: boolean;
 }>) {
@@ -39,6 +41,9 @@ export function WorkspacePage({
       <View style={styles.heading}>
         <Text
           accessibilityRole="header"
+          accessibilityLabel={title}
+          numberOfLines={titleNumberOfLines}
+          ellipsizeMode="tail"
           style={[styles.title, { color: colors.textPrimary }]}
         >
           {title}

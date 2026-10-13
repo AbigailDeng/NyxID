@@ -8,7 +8,7 @@ import {
   modelListSchema,
   type AssistantTurnEvent,
 } from "../../features/assistant/assistantTypes";
-import { AssistantSseDecoder } from "../../features/assistant/assistantStream";
+import { readAssistantResponse } from "../../features/assistant/assistantStreamReader";
 
 const ROOT = "/assistant/nyxagent";
 const path = (id: string) =>
@@ -111,37 +111,7 @@ export async function streamAssistantTurn(
       "The connection was interrupted. Refresh history before sending again.",
     );
   }
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder("utf-8", { fatal: true });
-  const frames = new AssistantSseDecoder();
-  let terminal = false;
-  let total = 0;
-  try {
-    while (!terminal) {
-      const { done, value } = await withDeadline(
-        reader.read(),
-        135000,
-        controller,
-      );
-      if (done) break;
-      total += value.byteLength;
-      if (total > 12 * 1024 * 1024)
-        throw new Error("Assistant response exceeded its limit.");
-      for (const event of frames.push(
-        decoder.decode(value, { stream: true }),
-      )) {
-        onEvent(event);
-        if (event.event === "turn.completed") terminal = true;
-      }
-    }
-    if (!terminal)
-      throw new Error(
-        "The connection was interrupted. The assistant may still be working.",
-      );
-  } finally {
-    await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
-  }
+  await readAssistantResponse(response.body, onEvent, controller);
 }
 
 async function withDeadline<T>(

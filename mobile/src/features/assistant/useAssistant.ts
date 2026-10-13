@@ -50,6 +50,8 @@ export function useAssistant(initialId?: string, agentId?: string) {
   const mounted = useRef(true);
   const epoch = useRef(0);
   const historySequence = useRef(0);
+  const reopenSequence = useRef(0);
+  const recoverSequence = useRef(0);
   const indexSequence = useRef(0);
   const streamController = useRef<AbortController | undefined>(undefined);
   const sendLock = useRef(false);
@@ -115,6 +117,34 @@ export function useAssistant(initialId?: string, agentId?: string) {
 
   const openConversation = useCallback(
     (id?: string) => {
+      const operation = ++reopenSequence.current;
+      if (id && id === selected.current) {
+        // React does not rerun the selected-id effect for the same saved chat.
+        // Keep its rows and live subscription while explicitly refreshing it.
+        const localEpoch = epoch.current;
+        setError(undefined);
+        setLoading(true);
+        void refreshHistory(id)
+          .catch((cause) => {
+            if (
+              mounted.current &&
+              selected.current === id &&
+              epoch.current === localEpoch &&
+              reopenSequence.current === operation
+            )
+              setError(errorMessage(cause));
+          })
+          .finally(() => {
+            if (
+              mounted.current &&
+              selected.current === id &&
+              epoch.current === localEpoch &&
+              reopenSequence.current === operation
+            )
+              setLoading(false);
+          });
+        return;
+      }
       epoch.current += 1;
       historySequence.current += 1;
       streamController.current?.abort();
@@ -126,8 +156,9 @@ export function useAssistant(initialId?: string, agentId?: string) {
       setError(undefined);
       setRecoveryRequired(false);
       setLoading(!!id);
+      setLoadingOlder(false);
     },
-    [updateHistory],
+    [refreshHistory, updateHistory],
   );
 
   useEffect(() => {
@@ -138,13 +169,23 @@ export function useAssistant(initialId?: string, agentId?: string) {
   }, [initialId, agentId, openConversation]);
 
   const recover = useCallback(async () => {
+    const recovery = ++recoverSequence.current;
     setError(undefined);
     const id = selected.current;
+    const localEpoch = epoch.current;
+    const operation = reopenSequence.current;
     try {
       if (id) await refreshHistory(id);
       await refreshIndex();
     } catch (cause) {
-      if (mounted.current) setError(errorMessage(cause));
+      if (
+        mounted.current &&
+        selected.current === id &&
+        epoch.current === localEpoch &&
+        reopenSequence.current === operation &&
+        recoverSequence.current === recovery
+      )
+        setError(errorMessage(cause));
     }
   }, [refreshHistory, refreshIndex]);
 
@@ -188,13 +229,29 @@ export function useAssistant(initialId?: string, agentId?: string) {
   useEffect(() => {
     if (!conversationId || !active) return;
     let current = true;
+    const operation = ++reopenSequence.current;
+    const localEpoch = epoch.current;
     setLoading(true);
     void refreshHistory(conversationId)
       .catch((cause) => {
-        if (current && mounted.current) setError(errorMessage(cause));
+        if (
+          current &&
+          mounted.current &&
+          selected.current === conversationId &&
+          epoch.current === localEpoch &&
+          reopenSequence.current === operation
+        )
+          setError(errorMessage(cause));
       })
       .finally(() => {
-        if (current && mounted.current) setLoading(false);
+        if (
+          current &&
+          mounted.current &&
+          selected.current === conversationId &&
+          epoch.current === localEpoch &&
+          reopenSequence.current === operation
+        )
+          setLoading(false);
       });
     return () => {
       current = false;
@@ -309,6 +366,7 @@ export function useAssistant(initialId?: string, agentId?: string) {
       !active ||
       !id ||
       sending ||
+      loadingOlder ||
       history?.conversation.active_turn ||
       !history
     )
@@ -320,7 +378,7 @@ export function useAssistant(initialId?: string, agentId?: string) {
     void send(queued.map(continuationText).join("\n")).catch((cause) =>
       setError(errorMessage(cause)),
     );
-  }, [active, conversationId, history, sending, send]);
+  }, [active, conversationId, history, sending, loadingOlder, send]);
 
   async function decide(acknowledgementId: string, choice: "allow" | "deny") {
     const id = selected.current;
@@ -416,13 +474,26 @@ export function useAssistant(initialId?: string, agentId?: string) {
     const id = selected.current;
     const before = latestHistory.current?.before_seq;
     if (!id || !before || loadingOlder) return;
+    const localEpoch = epoch.current;
+    const operation = reopenSequence.current;
     setLoadingOlder(true);
     try {
       await refreshHistory(id, before);
     } catch (cause) {
-      if (mounted.current) setError(errorMessage(cause));
+      if (
+        mounted.current &&
+        selected.current === id &&
+        epoch.current === localEpoch &&
+        reopenSequence.current === operation
+      )
+        setError(errorMessage(cause));
     } finally {
-      if (mounted.current) setLoadingOlder(false);
+      if (
+        mounted.current &&
+        selected.current === id &&
+        epoch.current === localEpoch
+      )
+        setLoadingOlder(false);
     }
   }
 

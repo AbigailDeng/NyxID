@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -37,6 +37,11 @@ import { fonts, radius } from "../../theme/designTokens";
 import { useAssistant } from "./useAssistant";
 import { liveReplyText } from "./assistantStream";
 import {
+  ASSISTANT_SEND_PRESS_GRACE_MS,
+  createAssistantComposerPressGuard,
+} from "./assistantComposerPress";
+import { transcriptEndOffset } from "./assistantTranscriptScroll";
+import {
   acknowledgementTitle,
   retryInput,
   storedAssistantError,
@@ -68,8 +73,11 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [localError, setLocalError] = useState<string>();
+  const composerPress = useRef(createAssistantComposerPressGuard());
+  const [stopProtected, setStopProtected] = useState(false);
   const transcript = useRef<FlatList<AssistantMessage>>(null);
   const following = useRef(true);
+  const transcriptMetrics = useRef({ height: 0, viewportHeight: 0 });
   const conversation = assistant.history?.conversation;
   const running = assistant.sending || !!conversation?.active_turn;
   const destroyed = conversation?.agent?.destroyed;
@@ -87,6 +95,8 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
         message.turn_id === assistant.live?.turnId && message.role === "user",
     );
   const messages = assistant.history?.messages ?? [];
+  const stableTranscript =
+    messages.length > 0 && !running && !assistant.inputText;
   const hasHistoryGap = messages.some(
     (item, index) =>
       index > 0 && item.seq > (messages[index - 1]?.seq ?? item.seq) + 1,
@@ -98,16 +108,26 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
     !destroyed &&
     assistant.online &&
     !assistant.loading &&
+    !assistant.loadingOlder &&
     !assistant.recoveryRequired;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     following.current = true;
+    transcriptMetrics.current = { height: 0, viewportHeight: 0 };
     setLocalError(undefined);
   }, [assistant.conversationId]);
   useEffect(() => {
     draftRevision.current += 1;
     setDraft("");
   }, [route?.params?.agentId, route?.params?.conversationId]);
+  useEffect(() => {
+    if (!stopProtected) return;
+    const timeout = setTimeout(
+      () => setStopProtected(false),
+      ASSISTANT_SEND_PRESS_GRACE_MS,
+    );
+    return () => clearTimeout(timeout);
+  }, [stopProtected]);
 
   async function perform(operation: () => Promise<unknown>) {
     setLocalError(undefined);
@@ -130,6 +150,8 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
   }
 
   async function sendDraft() {
+    if (!canSend || !composerPress.current("send")) return;
+    setStopProtected(true);
     const text = draft.trim();
     const revision = draftRevision.current;
     following.current = true;
@@ -281,7 +303,10 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
             label="Retry unfinished work"
             variant="secondary"
             disabled={
-              running || !assistant.online || assistant.recoveryRequired
+              running ||
+              !assistant.online ||
+              assistant.recoveryRequired ||
+              assistant.loadingOlder
             }
             onPress={() =>
               void perform(() => assistant.send(input, item.turn_id))
@@ -358,7 +383,10 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
                   label="Deny"
                   variant="secondary"
                   disabled={
-                    !!assistant.deciding || expired || !assistant.online
+                    !!assistant.deciding ||
+                    expired ||
+                    !assistant.online ||
+                    assistant.loadingOlder
                   }
                   onPress={() =>
                     void perform(() => assistant.decide(row.id, "deny"))
@@ -370,7 +398,10 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
                   label="Allow"
                   loading={assistant.deciding === row.id}
                   disabled={
-                    !!assistant.deciding || expired || !assistant.online
+                    !!assistant.deciding ||
+                    expired ||
+                    !assistant.online ||
+                    assistant.loadingOlder
                   }
                   onPress={() =>
                     void perform(() => assistant.decide(row.id, "allow"))
@@ -385,7 +416,11 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
   }
 
   return (
-    <WorkspacePage title={conversation?.title ?? "Assistant"} scroll={false}>
+    <WorkspacePage
+      title={conversation?.title ?? "Assistant"}
+      titleNumberOfLines={1}
+      scroll={false}
+    >
       <View style={styles.toolbar}>
         <View style={styles.row}>
           <IconButton label="Chat history" onPress={() => setHistoryOpen(true)}>
@@ -446,15 +481,33 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
         <Notice message="This agent was destroyed. This chat is read-only." />
       ) : null}
       <FlatList
+        key={assistant.conversationId ?? "new-chat"}
         ref={transcript}
         style={styles.fill}
         data={messages}
         keyExtractor={(item) => item.id}
         renderItem={renderMessage}
+        ItemSeparatorComponent={TranscriptSeparator}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         contentContainerStyle={styles.transcript}
-        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+        // Anchor persisted rows when paging history. A live reply footer
+        // disappears into saved rows, so disable anchoring while it changes.
+        maintainVisibleContentPosition={
+          stableTranscript ? { minIndexForVisible: 0 } : undefined
+        }
+        onLayout={(event) => {
+          const metrics = transcriptMetrics.current;
+          metrics.viewportHeight = event.nativeEvent.layout.height;
+          if (following.current)
+            transcript.current?.scrollToOffset({
+              offset: transcriptEndOffset(
+                metrics.height,
+                metrics.viewportHeight,
+              ),
+              animated: false,
+            });
+        }}
         onScroll={(event) => {
           const { contentOffset, contentSize, layoutMeasurement } =
             event.nativeEvent;
@@ -462,10 +515,19 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
             contentSize.height - layoutMeasurement.height - contentOffset.y <
             100;
         }}
+        onScrollBeginDrag={() => {
+          following.current = false;
+        }}
         scrollEventThrottle={100}
-        onContentSizeChange={() => {
-          if (following.current)
-            transcript.current?.scrollToEnd({ animated: false });
+        onContentSizeChange={(_width, height) => {
+          const metrics = transcriptMetrics.current;
+          metrics.height = height;
+          if (following.current) {
+            transcript.current?.scrollToOffset({
+              offset: transcriptEndOffset(height, metrics.viewportHeight),
+              animated: false,
+            });
+          }
         }}
         ListHeaderComponent={
           assistant.history?.before_seq ? (
@@ -477,6 +539,15 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
               }
               variant="secondary"
               loading={assistant.loadingOlder}
+              // Page a stable transcript so dynamic footer changes cannot
+              // interfere with the native reading anchor.
+              disabled={
+                running ||
+                assistant.loading ||
+                !assistant.online ||
+                !!assistant.deciding ||
+                assistant.mutating
+              }
               onPress={() => {
                 following.current = false;
                 void assistant.loadOlder();
@@ -484,6 +555,7 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
             />
           ) : null
         }
+        ListHeaderComponentStyle={styles.transcriptHeader}
         ListEmptyComponent={
           assistant.loading ? (
             <ActivityIndicator color={colors.primary} />
@@ -647,9 +719,13 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
             <IconButton
               label="Stop assistant"
               disabled={
-                assistant.mutating || conversation?.active_turn?.stop_requested
+                stopProtected ||
+                assistant.mutating ||
+                conversation?.active_turn?.stop_requested
               }
-              onPress={() => void assistant.stop()}
+              onPress={() => {
+                if (composerPress.current("stop")) void assistant.stop();
+              }}
             >
               <Square size={18} color={colors.danger} />
             </IconButton>
@@ -812,6 +888,10 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
   );
 }
 
+function TranscriptSeparator() {
+  return <View style={styles.transcriptSeparator} />;
+}
+
 function IconButton({
   children,
   label,
@@ -928,7 +1008,9 @@ const styles = StyleSheet.create({
   },
   modelPill: { flexShrink: 1, paddingVertical: 10, paddingHorizontal: 8 },
   modelLabel: { fontSize: 11 },
-  transcript: { paddingVertical: 8, gap: 20, flexGrow: 1 },
+  transcript: { paddingVertical: 8, flexGrow: 1 },
+  transcriptHeader: { marginBottom: 20 },
+  transcriptSeparator: { height: 20 },
   message: { gap: 8, paddingVertical: 10 },
   userMessage: {
     padding: 14,
@@ -940,7 +1022,7 @@ const styles = StyleSheet.create({
   messageText: { fontFamily: fonts.bodyRegular, fontSize: 14, lineHeight: 23 },
   metadata: { fontSize: 11 },
   timestamp: { fontSize: 10 },
-  footer: { gap: 16 },
+  footer: { gap: 16, paddingTop: 20 },
   welcome: { alignItems: "center", gap: 16, paddingVertical: 36 },
   welcomeIcon: {
     width: 64,

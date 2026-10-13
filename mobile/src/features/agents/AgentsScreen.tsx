@@ -66,6 +66,8 @@ export function AgentsScreen({
   const [notice, setNotice] = useState<string>();
   const [confirmation, setConfirmation] = useState<"destroy" | "delete">();
   const [editorVersion, setEditorVersion] = useState(0);
+  const [profileVersion, setProfileVersion] = useState(0);
+  const [grantsVersion, setGrantsVersion] = useState(0);
   const lock = useRef(false);
   const list = useQuery({
     queryKey: [...ROOT, "list"],
@@ -84,6 +86,10 @@ export function AgentsScreen({
     queryFn: ({ signal }) => agentsApi.detail(selectedId!, signal),
     retry: false,
     enabled: focused && foreground && Boolean(selectedId),
+    refetchInterval: (query) =>
+      focused && foreground && query.state.data?.agent.status === "running"
+        ? 5000
+        : false,
   });
   const connections = useQuery({
     queryKey: ["workspace", "services", "connections"],
@@ -134,7 +140,7 @@ export function AgentsScreen({
   async function run(
     action: () => Promise<void>,
     success?: string,
-    refreshForms = false,
+    refreshForm?: "profile" | "grants",
   ): Promise<boolean> {
     if (lock.current) return false;
     lock.current = true;
@@ -144,7 +150,8 @@ export function AgentsScreen({
     try {
       await action();
       await reload();
-      if (refreshForms) setEditorVersion((value) => value + 1);
+      if (refreshForm === "profile") setProfileVersion((value) => value + 1);
+      if (refreshForm === "grants") setGrantsVersion((value) => value + 1);
       if (success) setNotice(success);
       return true;
     } catch (cause) {
@@ -280,7 +287,7 @@ export function AgentsScreen({
               <Notice message="This agent is destroyed. Its threads are read only until you delete it permanently." />
             )}
             <AgentProfileForm
-              key={`profile:${agent.id}:${editorVersion}`}
+              key={`profile:${agent.id}:${editorVersion}:${profileVersion}`}
               agent={agent}
               models={models.data ?? []}
               modelsError={models.isError}
@@ -305,13 +312,13 @@ export function AgentsScreen({
                     await agentsApi.update(agent.id, patch);
                   },
                   "Profile saved.",
-                  true,
+                  "profile",
                 )
               }
             />
             {agent.kind === "specialist" && (
               <AgentGrantsForm
-                key={`grants:${agent.id}:${editorVersion}`}
+                key={`grants:${agent.id}:${editorVersion}:${grantsVersion}`}
                 agent={agent}
                 connections={connections.data ?? []}
                 connectionsError={connections.isError}
@@ -337,7 +344,7 @@ export function AgentsScreen({
                       );
                     },
                     "Permissions saved.",
-                    true,
+                    "grants",
                   )
                 }
               />
