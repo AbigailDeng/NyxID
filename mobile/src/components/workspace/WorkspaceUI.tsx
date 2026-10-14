@@ -28,32 +28,36 @@ export function WorkspacePage({
   subtitle,
   children,
   scroll = true,
+  showHeading = true,
 }: PropsWithChildren<{
   title: string;
   titleNumberOfLines?: number;
   subtitle?: string;
   scroll?: boolean;
+  showHeading?: boolean;
 }>) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const content = (
     <>
-      <View style={styles.heading}>
-        <Text
-          accessibilityRole="header"
-          accessibilityLabel={title}
-          numberOfLines={titleNumberOfLines}
-          ellipsizeMode="tail"
-          style={[styles.title, { color: colors.textPrimary }]}
-        >
-          {title}
-        </Text>
-        {subtitle ? (
-          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-            {subtitle}
+      {showHeading && (
+        <View style={styles.heading}>
+          <Text
+            accessibilityRole="header"
+            accessibilityLabel={title}
+            numberOfLines={titleNumberOfLines}
+            ellipsizeMode="tail"
+            style={[styles.title, { color: colors.textPrimary }]}
+          >
+            {title}
           </Text>
-        ) : null}
-      </View>
+          {subtitle ? (
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
+      )}
       {children}
     </>
   );

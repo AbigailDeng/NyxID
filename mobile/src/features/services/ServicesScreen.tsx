@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
+  Keyboard,
   Linking,
   Pressable,
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
@@ -16,7 +18,6 @@ import {
   ChevronRight,
   KeyRound,
   PlugZap,
-  Search,
   ShieldCheck,
 } from "lucide-react-native";
 import {
@@ -469,13 +470,41 @@ export function ServicesScreen() {
   );
   const current = tab === "connected" ? connections : catalog;
   return (
-    <WorkspacePage
-      title="Services"
-      subtitle="Connect the services your agents can use"
-    >
+    <WorkspacePage title="Services" showHeading={false}>
       {notice && <Notice message={notice} tone="success" />}
       {error && <Notice message={error} tone="error" />}
-      <View style={styles.tabs}>
+      <View style={styles.search}>
+        <Text style={[styles.searchLabel, { color: colors.textSecondary }]}>
+          Search services
+        </Text>
+        <TextInput
+          accessibilityLabel="Search services"
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Search by name or service"
+          placeholderTextColor={colors.textMuted}
+          selectionColor={colors.primary}
+          autoCapitalize="none"
+          autoCorrect={false}
+          clearButtonMode="while-editing"
+          returnKeyType="search"
+          onSubmitEditing={Keyboard.dismiss}
+          style={[
+            styles.searchInput,
+            {
+              color: colors.textPrimary,
+              borderColor: colors.border,
+              backgroundColor: colors.cardSoft,
+            },
+          ]}
+        />
+      </View>
+      <View
+        style={[
+          styles.tabs,
+          { backgroundColor: colors.cardSoft, borderColor: colors.border },
+        ]}
+      >
         {(["connected", "catalog"] as const).map((value) => (
           <Pressable
             key={value}
@@ -484,13 +513,13 @@ export function ServicesScreen() {
               setError(undefined);
             }}
             accessibilityRole="tab"
+            hitSlop={{ top: 2, bottom: 2 }}
             accessibilityState={{ selected: tab === value }}
             style={[
               styles.tab,
               {
                 backgroundColor:
                   tab === value ? colors.navActive : "transparent",
-                borderColor: colors.border,
               },
             ]}
           >
@@ -507,18 +536,6 @@ export function ServicesScreen() {
           </Pressable>
         ))}
       </View>
-      <View style={styles.search}>
-        <Search color={colors.textMuted} size={18} />
-        <View style={styles.flex}>
-          <Field
-            label="Search services"
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search by name or service"
-            autoCapitalize="none"
-          />
-        </View>
-      </View>
       {current.isPending && (
         <ActivityIndicator
           accessibilityLabel="Loading services"
@@ -534,84 +551,109 @@ export function ServicesScreen() {
           />
         </>
       )}
-      {tab === "connected" &&
-        filteredConnections.map((connection) => (
-          <Pressable
-            key={connection.id}
-            accessibilityRole="button"
-            accessibilityLabel={`Manage ${connection.label}`}
-            onPress={() => {
-              setSelectedId(connection.id);
-              setError(undefined);
-              setNotice(undefined);
-            }}
-          >
-            <Card>
-              <View style={styles.row}>
-                <View
+      <View style={styles.serviceList}>
+        <Text
+          accessibilityRole="header"
+          style={[styles.sectionTitle, { color: colors.textPrimary }]}
+        >
+          {tab === "connected" ? "Connected services" : "Available to add"}
+        </Text>
+        {tab === "connected" &&
+          filteredConnections.map((connection) => (
+            <Pressable
+              key={connection.id}
+              accessibilityRole="button"
+              accessibilityLabel={`Manage ${connection.label}`}
+              onPress={() => {
+                setSelectedId(connection.id);
+                setError(undefined);
+                setNotice(undefined);
+              }}
+            >
+              <Card style={styles.serviceCard}>
+                <Text
                   style={[
-                    styles.icon,
-                    { backgroundColor: colors.primaryTone.bg },
+                    styles.connectionStatus,
+                    {
+                      color:
+                        connection.is_active && connection.status === "active"
+                          ? colors.success
+                          : colors.textSecondary,
+                    },
                   ]}
                 >
-                  <PlugZap size={22} color={colors.primaryOnTint} />
+                  ●{" "}
+                  {connection.is_active
+                    ? connection.status.replaceAll("_", " ")
+                    : "Disabled"}
+                </Text>
+                <View style={styles.row}>
+                  <View
+                    style={[styles.icon, { backgroundColor: colors.ghostBg }]}
+                  >
+                    <PlugZap size={18} color={colors.primary} />
+                  </View>
+                  <View style={styles.flex}>
+                    <Text style={[styles.title, { color: colors.textPrimary }]}>
+                      {connection.label}
+                    </Text>
+                    <Label muted style={styles.cardDescription}>
+                      {connectionOwner(connection)}
+                    </Label>
+                    <Label mono muted style={styles.cardMetadata}>
+                      {connection.slug}
+                    </Label>
+                  </View>
+                  <ChevronRight color={colors.textMuted} size={18} />
                 </View>
-                <View style={styles.flex}>
-                  <Text style={[styles.title, { color: colors.textPrimary }]}>
-                    {connection.label}
-                  </Text>
-                  <Label muted>
-                    {connectionOwner(connection)} ·{" "}
-                    {connection.is_active
-                      ? connection.status.replaceAll("_", " ")
-                      : "Disabled"}
-                  </Label>
-                  <Label mono muted>
-                    {connection.slug}
-                  </Label>
-                </View>
-                <ChevronRight color={colors.textMuted} size={18} />
-              </View>
-            </Card>
-          </Pressable>
-        ))}
-      {tab === "catalog" &&
-        filteredCatalog.map((entry) => (
-          <Pressable
-            key={entry.slug}
-            accessibilityRole="button"
-            accessibilityLabel={`Connect ${entry.name}`}
-            onPress={() => {
-              setAdding(entry);
-              setError(undefined);
-              setNotice(undefined);
-            }}
-          >
-            <Card>
-              <View style={styles.row}>
-                <View
-                  style={[
-                    styles.icon,
-                    { backgroundColor: colors.primaryTone.bg },
-                  ]}
+              </Card>
+            </Pressable>
+          ))}
+        {tab === "catalog" &&
+          filteredCatalog.map((entry) => (
+            <Pressable
+              key={entry.slug}
+              accessibilityRole="button"
+              accessibilityLabel={`Connect ${entry.name}`}
+              onPress={() => {
+                setAdding(entry);
+                setError(undefined);
+                setNotice(undefined);
+              }}
+            >
+              <Card style={styles.serviceCard}>
+                <Text
+                  style={[styles.connectionStatus, { color: colors.primary }]}
                 >
-                  {entry.platform_key?.available ? (
-                    <ShieldCheck size={22} color={colors.primaryOnTint} />
-                  ) : (
-                    <KeyRound size={22} color={colors.primaryOnTint} />
-                  )}
+                  ●{" "}
+                  {entry.platform_key?.available
+                    ? "Platform key available"
+                    : "Connect"}
+                </Text>
+                <View style={styles.row}>
+                  <View
+                    style={[styles.icon, { backgroundColor: colors.ghostBg }]}
+                  >
+                    {entry.platform_key?.available ? (
+                      <ShieldCheck size={18} color={colors.primary} />
+                    ) : (
+                      <KeyRound size={18} color={colors.primary} />
+                    )}
+                  </View>
+                  <View style={styles.flex}>
+                    <Text style={[styles.title, { color: colors.textPrimary }]}>
+                      {entry.name}
+                    </Text>
+                    <Label muted style={styles.cardDescription}>
+                      {entry.description ?? entry.slug}
+                    </Label>
+                  </View>
+                  <ChevronRight color={colors.textMuted} size={18} />
                 </View>
-                <View style={styles.flex}>
-                  <Text style={[styles.title, { color: colors.textPrimary }]}>
-                    {entry.name}
-                  </Text>
-                  <Label muted>{entry.description ?? entry.slug}</Label>
-                </View>
-                <ChevronRight color={colors.textMuted} size={18} />
-              </View>
-            </Card>
-          </Pressable>
-        ))}
+              </Card>
+            </Pressable>
+          ))}
+      </View>
       {!current.isPending &&
         !current.isError &&
         !(tab === "connected"
@@ -828,15 +870,35 @@ function ConnectForm({
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  row: { flexDirection: "row", alignItems: "center", gap: 12 },
+  row: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
   icon: {
-    width: 44,
-    height: 44,
+    width: 34,
+    height: 34,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 12,
+    borderRadius: 10,
   },
-  title: { fontFamily: fonts.displaySemi, fontSize: 17 },
+  title: { fontFamily: fonts.bodySemi, fontSize: 14, lineHeight: 20 },
+  serviceList: { gap: 12 },
+  sectionTitle: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 4,
+  },
+  serviceCard: { minHeight: 114, borderRadius: 13, gap: 8 },
+  connectionStatus: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 10,
+    lineHeight: 14,
+    textTransform: "capitalize",
+  },
+  cardDescription: {
+    fontFamily: fonts.bodyRegular,
+    fontSize: 12,
+    lineHeight: 19,
+  },
+  cardMetadata: { fontSize: 11, lineHeight: 16 },
   status: { fontFamily: fonts.mono, fontSize: 12, textTransform: "capitalize" },
   statusRow: {
     flexDirection: "row",
@@ -844,15 +906,30 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 14,
   },
-  tabs: { flexDirection: "row", gap: 8 },
-  tab: {
-    flex: 1,
-    minHeight: 44,
-    alignItems: "center",
-    justifyContent: "center",
+  tabs: {
+    flexDirection: "row",
+    padding: 3,
+    minHeight: 48,
     borderRadius: 10,
     borderWidth: 1,
   },
-  tabLabel: { fontFamily: fonts.bodySemi, fontSize: 13 },
-  search: { flexDirection: "row", alignItems: "center", gap: 10 },
+  tab: {
+    flex: 1,
+    minHeight: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 7,
+  },
+  tabLabel: { fontFamily: fonts.bodySemi, fontSize: 12, lineHeight: 18 },
+  search: { gap: 8 },
+  searchLabel: { fontFamily: fonts.bodySemi, fontSize: 12, lineHeight: 16 },
+  searchInput: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontFamily: fonts.bodyRegular,
+    fontSize: 13,
+  },
 });
