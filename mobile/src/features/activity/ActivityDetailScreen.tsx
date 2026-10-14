@@ -249,7 +249,11 @@ export function ActivityDetailScreen({ navigation, route }: Props) {
       void queryClient.invalidateQueries({ queryKey: ["challenge", challengeId] });
       setToast({ message: decision === "APPROVE" ? "Approved" : "Denied", kind: "success" });
       setTimeout(() => {
-        navigation.replace("Activity");
+        if (navigation.canGoBack()) {
+          navigation.goBack();
+        } else {
+          navigation.replace("Workspace", { screen: "Activity" });
+        }
       }, 600);
     },
     onError: (err) => {

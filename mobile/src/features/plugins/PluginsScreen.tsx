@@ -19,7 +19,10 @@ import {
   RefreshCw,
 } from "lucide-react-native";
 import * as WebBrowser from "expo-web-browser";
-import type { RootStackParamList } from "../../app/AppNavigator";
+import type {
+  RootStackParamList,
+  WorkspaceNavigationProp,
+} from "../../app/navigationTypes";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import {
   ActionButton,
@@ -53,8 +56,7 @@ export function PluginsScreen({
   initialTab = "connectors",
 }: { agentId?: string; initialTab?: Tab } = {}) {
   const { colors } = useTheme();
-  const navigation =
-    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const navigation = useNavigation<WorkspaceNavigationProp>();
   const focused = useIsFocused();
   const [foreground, setForeground] = useState(
     AppState.currentState === "active",
@@ -227,7 +229,7 @@ export function PluginsScreen({
         <PluginSkills
           query={query}
           agentId={agentId}
-          onOpenChat={(params) => navigation.navigate("Assistant", params)}
+          onOpenChat={(params) => navigation.push("AssistantContext", params)}
         />
       ) : (
         <>
@@ -352,7 +354,7 @@ export function AgentSkillsScreen({ agentId }: { agentId: string }) {
       <PluginSkills
         query={query}
         agentId={agentId}
-        onOpenChat={(params) => navigation.navigate("Assistant", params)}
+        onOpenChat={(params) => navigation.push("AssistantContext", params)}
       />
     </WorkspacePage>
   );

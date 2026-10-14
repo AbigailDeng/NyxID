@@ -55,10 +55,12 @@ export function AgentsScreen({
   agentId,
   onOpenChat,
   onOpenSkills,
+  onClose,
 }: {
   agentId?: string;
   onOpenChat?: OpenChat;
   onOpenSkills?: (agentId: string) => void;
+  onClose?: () => void;
 } = {}) {
   const { colors } = useTheme();
   const queryClient = useQueryClient();
@@ -71,6 +73,7 @@ export function AgentsScreen({
   const [search, setSearch] = useState("");
   const [includeDestroyed, setIncludeDestroyed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [closeRequested, setCloseRequested] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [confirmation, setConfirmation] = useState<"destroy" | "delete">();
@@ -129,19 +132,29 @@ export function AgentsScreen({
     return () => subscription.remove();
   }, [focused, reload]);
   function back() {
+    if (onClose) {
+      setCloseRequested(true);
+      return;
+    }
     setSelectedId(undefined);
     setCreating(false);
     setError(undefined);
     setConfirmation(undefined);
   }
   useWorkspaceBack({
-    active: Boolean(selectedId) || creating,
+    active: onClose ? busy : Boolean(selectedId) || creating,
+    defaultRole: onClose ? "back" : "menu",
     disabled: busy,
-    label: "Back to agents",
+    label: onClose ? "Back" : "Back to agents",
     onBack: () => {
       if (!lock.current) back();
     },
   });
+  useEffect(() => {
+    if (busy || !closeRequested) return;
+    setCloseRequested(false);
+    onClose?.();
+  }, [busy, closeRequested, onClose]);
 
   async function run(
     action: () => Promise<void>,
@@ -179,7 +192,7 @@ export function AgentsScreen({
     return (
       <WorkspacePage title="New agent" subtitle="Create a personal specialist">
         <ActionButton
-          label="Back to agents"
+          label={onClose ? "Back" : "Back to agents"}
           variant="secondary"
           disabled={busy}
           onPress={back}
@@ -220,7 +233,7 @@ export function AgentsScreen({
         }
       >
         <ActionButton
-          label="Back to agents"
+          label={onClose ? "Back" : "Back to agents"}
           variant="secondary"
           disabled={busy}
           onPress={back}

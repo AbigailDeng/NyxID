@@ -15,12 +15,20 @@ import type {
   NativeStackNavigationOptions,
   NativeStackNavigationProp,
 } from "@react-navigation/native-stack";
-import { BackHandler, Pressable, StyleSheet, View } from "react-native";
+import { BackHandler, Pressable, StyleSheet } from "react-native";
 import { ChevronLeft, Menu } from "lucide-react-native";
 import { useTheme } from "../theme/ThemeContext";
 import type { RootStackParamList } from "./AppNavigator";
 
 export const WorkspaceMenuContext = createContext(() => {});
+export type WorkspaceNavigationGuardChange = (
+  id: symbol,
+  blocked: boolean,
+) => void;
+export const WorkspaceNavigationGuardContext =
+  createContext<WorkspaceNavigationGuardChange>(() => {});
+
+export type WorkspaceHeaderRole = "menu" | "back";
 
 function WorkspaceHeaderButton({
   back = false,
@@ -53,49 +61,38 @@ function WorkspaceHeaderButton({
 }
 
 export function workspaceHeaderOptions({
+  role,
   onBack,
   onOpenMenu,
-  localBack = false,
   disabled = false,
   label = "Back",
 }: {
-  onBack: () => void;
   onOpenMenu: () => void;
-  localBack?: boolean;
   disabled?: boolean;
   label?: string;
-}): NativeStackNavigationOptions {
-  const leftButtons = (canGoBack?: boolean) => {
-    const hasBack = localBack || canGoBack === true;
-    return (
-      <View style={styles.navigation}>
-        {hasBack ? (
-          <WorkspaceHeaderButton
-            back
-            onPress={onBack}
-            disabled={disabled}
-            label={label}
-          />
-        ) : null}
-        <WorkspaceHeaderButton
-          onPress={onOpenMenu}
-          disabled={hasBack && disabled}
-          label="Open navigation"
-        />
-      </View>
-    );
-  };
+} & (
+  | { role: "menu"; onBack?: () => void }
+  | { role: "back"; onBack: () => void }
+)): NativeStackNavigationOptions {
+  const leftButton = () => (
+    <WorkspaceHeaderButton
+      back={role === "back"}
+      onPress={role === "back" ? onBack : onOpenMenu}
+      disabled={disabled}
+      label={role === "back" ? label : "Open navigation"}
+    />
+  );
   return {
     headerShown: true,
     headerBackVisible: false,
     headerBackButtonMenuEnabled: false,
-    headerLeft: ({ canGoBack }) => leftButtons(canGoBack),
+    headerLeft: leftButton,
     // Clear both right-side options when setOptions merges a previous header.
     headerRight: () => null,
-    unstable_headerLeftItems: ({ canGoBack }) => [
+    unstable_headerLeftItems: () => [
       {
         type: "custom",
-        element: leftButtons(canGoBack),
+        element: leftButton(),
         hidesSharedBackground: true,
       },
     ],
@@ -107,11 +104,13 @@ export function workspaceHeaderOptions({
 export function useWorkspaceBack({
   active,
   onBack,
+  defaultRole = "menu",
   disabled = false,
   label = "Back",
 }: {
   active: boolean;
   onBack: () => void;
+  defaultRole?: WorkspaceHeaderRole;
   disabled?: boolean;
   label?: string;
 }) {
@@ -119,6 +118,8 @@ export function useWorkspaceBack({
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const focused = useIsFocused();
   const onOpenMenu = useContext(WorkspaceMenuContext);
+  const onNavigationGuardChange = useContext(WorkspaceNavigationGuardContext);
+  const guardId = useRef(Symbol("workspace-navigation-guard"));
   const current = useRef({ onBack, disabled });
   current.current = { onBack, disabled };
   const localBack = useCallback(() => {
@@ -129,20 +130,38 @@ export function useWorkspaceBack({
     if (!focused) return;
     navigation.setOptions({
       ...workspaceHeaderOptions({
+        role: active ? "back" : defaultRole,
         onOpenMenu,
         onBack: active ? localBack : navigation.goBack,
-        localBack: active,
-        disabled: active && disabled,
+        disabled,
         label: active ? label : "Back",
       }),
-      gestureEnabled: !active,
+      gestureEnabled: !active && !disabled,
     });
-  }, [active, disabled, focused, label, localBack, navigation, onOpenMenu]);
+  }, [
+    active,
+    defaultRole,
+    disabled,
+    focused,
+    label,
+    localBack,
+    navigation,
+    onOpenMenu,
+  ]);
 
-  usePreventRemove(focused && active, localBack);
+  usePreventRemove(focused && (active || disabled), localBack);
+
+  // Defer external approval navigation while a critical write forbids leaving.
+  // Local detail Back handling remains independent from notification delivery.
+  useLayoutEffect(() => {
+    if (!focused || !disabled) return;
+    const id = guardId.current;
+    onNavigationGuardChange(id, true);
+    return () => onNavigationGuardChange(id, false);
+  }, [disabled, focused, onNavigationGuardChange]);
 
   useEffect(() => {
-    if (!focused || !active) return;
+    if (!focused || (!active && !disabled)) return;
     const subscription = BackHandler.addEventListener(
       "hardwareBackPress",
       () => {
@@ -151,11 +170,10 @@ export function useWorkspaceBack({
       },
     );
     return () => subscription.remove();
-  }, [active, focused, localBack]);
+  }, [active, disabled, focused, localBack]);
 }
 
 const styles = StyleSheet.create({
-  navigation: { flexDirection: "row", alignItems: "center" },
   button: {
     minWidth: 44,
     height: 44,

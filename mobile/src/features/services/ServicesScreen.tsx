@@ -173,6 +173,7 @@ export function ServicesScreen({
     // A dedicated setup route already has native history. Guard it only while
     // writing; a local detail screen must instead consume its own Back action.
     active: onClose ? busy : Boolean(selectedId) || Boolean(adding),
+    defaultRole: onClose ? "back" : "menu",
     disabled: busy,
     label: onClose ? "Back to plugins" : "Back to services",
     onBack: () => {

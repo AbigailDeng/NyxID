@@ -30,7 +30,6 @@ import {
   GestureDetector,
 } from "react-native-gesture-handler";
 import { useFocusEffect, useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
-import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { onlineManager, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ScreenContainer } from "../../components/ScreenContainer";
 
@@ -54,7 +53,7 @@ import { useTheme } from "../../theme/ThemeContext";
 import type { ThemeColors } from "../../theme/mobileTheme";
 import { createFlowStyles } from "../../theme/flowStyles";
 import { radius, spacing, typeScale } from "../../theme/designTokens";
-import type { RootStackParamList } from "../../app/AppNavigator";
+import type { WorkspaceNavigationProp, WorkspaceParamList } from "../../app/navigationTypes";
 import type { ActivitySegment } from "./activityTypes";
 import type { ApprovalMode, ChallengeDetail, ApprovalItem } from "../../lib/api/types";
 import {
@@ -64,7 +63,7 @@ import {
 } from "../../lib/notifications/approvalRefreshSignal";
 import { RefreshCw, ScanQrCode } from "lucide-react-native";
 
-type Nav = NativeStackNavigationProp<RootStackParamList>;
+type Nav = WorkspaceNavigationProp;
 
 function groupHistoryByDate(items: ChallengeDetail[]) {
   const today = new Date();
@@ -297,7 +296,7 @@ export function ActivityScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const navigation = useNavigation<Nav>();
-  const route = useRoute<RouteProp<RootStackParamList, "Activity">>();
+  const route = useRoute<RouteProp<WorkspaceParamList, "Activity">>();
   const queryClient = useQueryClient();
   const { isConnected, recheckConnection } = useNetworkStatus();
   const [isLiveRefreshEnabled, setIsLiveRefreshEnabled] = useState(false);
@@ -914,7 +913,7 @@ export function ActivityScreen() {
             accessibilityRole="button"
             accessibilityLabel="Scan login QR code"
             hitSlop={8}
-            onPress={() => navigation.navigate("DeviceLogin", { start_scanner: true })}
+            onPress={() => navigation.push("DeviceLogin", { start_scanner: true })}
             style={({ pressed }) => [
               styles.scanLoginButton,
               pressed && styles.scanLoginButtonPressed,

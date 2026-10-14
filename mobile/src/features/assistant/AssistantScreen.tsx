@@ -11,7 +11,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useNavigation, type NavigationProp } from "@react-navigation/native";
+import { useNavigation } from "@react-navigation/native";
 import * as WebBrowser from "expo-web-browser";
 import Markdown, {
   MarkdownIt,
@@ -30,7 +30,10 @@ import {
   Square,
   X,
 } from "lucide-react-native";
-import type { RootStackParamList } from "../../app/AppNavigator";
+import type {
+  AssistantParams,
+  WorkspaceNavigationProp,
+} from "../../app/navigationTypes";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import {
   WorkspacePage,
@@ -72,14 +75,9 @@ import type {
 } from "./assistantTypes";
 
 type AssistantScreenProps = {
+  contextual?: boolean;
   route?: {
-    params?: {
-      conversationId?: string;
-      acknowledgementId?: string;
-      agentId?: string;
-      draft?: boolean;
-      openLatest?: boolean;
-    };
+    params?: AssistantParams;
   };
 };
 
@@ -87,8 +85,11 @@ type AssistantScreenProps = {
 const assistantMarkdown = MarkdownIt(assistantMarkdownOptions);
 assistantMarkdown.validateLink = (url) => safeAssistantLinkUrl(url) !== null;
 
-export function AssistantScreen({ route }: AssistantScreenProps) {
-  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+export function AssistantScreen({
+  route,
+  contextual = false,
+}: AssistantScreenProps) {
+  const navigation = useNavigation<WorkspaceNavigationProp>();
   const { colors } = useTheme();
   const adoptedId = useRef<string | undefined>(undefined);
   const assistant = useAssistant(
@@ -285,12 +286,23 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
 
   useWorkspaceBack({
     active:
-      !navigation.canGoBack() &&
+      !contextual &&
       Boolean(assistant.conversationId || currentAgent?.kind === "specialist"),
+    defaultRole: contextual ? "back" : "menu",
     disabled:
-      assistant.loading || (assistant.sending && !assistant.conversationId),
-    label: assistant.conversationId ? `Back to ${agentName}` : "Back to NyxBot",
+      assistant.loading ||
+      ((assistant.sending || uploads.session.sending) &&
+        !assistant.conversationId),
+    label: contextual
+      ? "Back"
+      : assistant.conversationId
+        ? `Back to ${agentName}`
+        : "Back to NyxBot",
     onBack: () => {
+      if (contextual) {
+        navigation.goBack();
+        return;
+      }
       if (assistant.conversationId) newChat();
       else {
         setComposerGeneration((value) => value + 1);
@@ -958,7 +970,7 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
                   label="Review request"
                   variant="secondary"
                   onPress={() =>
-                    navigation.navigate("ActivityDetail", {
+                    navigation.push("ActivityDetail", {
                       challengeId: approval.id,
                     })
                   }
@@ -1117,7 +1129,8 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
           variant="secondary"
           onPress={() => {
             setAgentsOpen(false);
-            navigation.navigate("Agents");
+            if (contextual) navigation.popTo("Workspace", { screen: "Agents" });
+            else navigation.navigate("Agents");
           }}
         />
       </Sheet>
@@ -1293,7 +1306,7 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
             variant="secondary"
             onPress={() => {
               setDetailsOpen(false);
-              navigation.navigate("Agents", { agentId: currentAgent.id });
+              navigation.push("AgentDetail", { agentId: currentAgent.id });
             }}
           />
         ) : null}

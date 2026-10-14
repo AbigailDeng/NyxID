@@ -17,6 +17,7 @@ import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react
 import NetInfo from "@react-native-community/netinfo";
 import {
   NavigationContainer,
+  StackActions,
   NavigationState,
   PartialState,
   useNavigationContainerRef,
@@ -37,6 +38,8 @@ import { JetBrainsMono_400Regular } from "@expo-google-fonts/jetbrains-mono";
 import { AppErrorBoundary } from "./AppErrorBoundary";
 import { AppNavigator, RootStackParamList } from "./AppNavigator";
 import { appLinking, extractChallengeIdFromNotificationResponse } from "./linking";
+import { challengeNavigationAction, workspaceNavigateAction } from "./navigationHierarchy";
+import type { WorkspaceNavigationGuardChange } from "./WorkspaceHeader";
 import {
   consumePendingPushSyncSignal,
   initializeNotificationRuntime,
@@ -111,6 +114,8 @@ export default function App() {
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
   const [currentRouteName, setCurrentRouteName] = useState<string | undefined>(undefined);
   const pendingChallengeFromTapRef = useRef<string | null>(null);
+  const navigationGuardsRef = useRef(new Set<symbol>());
+  const [navigationGuardRevision, setNavigationGuardRevision] = useState(0);
   const lastAppStateRef = useRef(AppState.currentState);
   const [pushToast, setPushToast] = useState<ToastState | null>(null);
 
@@ -120,14 +125,36 @@ export default function App() {
     const pendingChallengeId = pendingChallengeFromTapRef.current;
     if (!pendingChallengeId) return;
 
-    const rootState = navigationRef.getRootState();
-    if (!rootState?.routeNames?.includes("Activity")) {
-      return;
-    }
+    const action = challengeNavigationAction(
+      navigationRef.getRootState(),
+      pendingChallengeId,
+      navigationGuardsRef.current.size > 0,
+    );
+    if (!action) return;
 
     pendingChallengeFromTapRef.current = null;
-    navigationRef.navigate("Activity", { challengeId: pendingChallengeId });
+    navigationRef.dispatch(action);
   }, [navigationRef]);
+
+  const onNavigationGuardChange = useCallback<WorkspaceNavigationGuardChange>(
+    (id, blocked) => {
+      const guards = navigationGuardsRef.current;
+      if (blocked) {
+        if (guards.has(id)) return;
+        guards.add(id);
+      } else if (!guards.delete(id)) {
+        return;
+      }
+      setNavigationGuardRevision((value) => value + 1);
+    },
+    [],
+  );
+
+  // Guard cleanup schedules a normal effect; it never dispatches during the
+  // header's layout effect or re-enters an in-progress navigation transition.
+  useEffect(() => {
+    flushPendingChallengeTapNavigation();
+  }, [navigationGuardRevision, flushPendingChallengeTapNavigation]);
 
   // Tapping the in-app toast resolves to exactly the same navigation as
   // tapping an OS notification, including the "Activity route not mounted
@@ -363,6 +390,7 @@ export default function App() {
                     currentRouteName={currentRouteName}
                     setCurrentRouteName={setCurrentRouteName}
                     flushPendingChallengeTapNavigation={flushPendingChallengeTapNavigation}
+                    onNavigationGuardChange={onNavigationGuardChange}
                     pushToast={pushToast}
                   />
                 </AuthSessionProvider>
@@ -380,12 +408,14 @@ function ThemedAppShell({
   currentRouteName,
   setCurrentRouteName,
   flushPendingChallengeTapNavigation,
+  onNavigationGuardChange,
   pushToast,
 }: {
   navigationRef: ReturnType<typeof useNavigationContainerRef<RootStackParamList>>;
   currentRouteName: string | undefined;
   setCurrentRouteName: (name: string | undefined) => void;
   flushPendingChallengeTapNavigation: () => void;
+  onNavigationGuardChange: WorkspaceNavigationGuardChange;
   pushToast: ToastState | null;
 }) {
   const { mode } = useTheme();
@@ -396,21 +426,14 @@ function ThemedAppShell({
   const navigateFromDrawer = (route: WorkspaceRoute) => {
     setDrawerOpen(false);
     if (!navigationRef.isReady()) return;
-    switch (route) {
-      case "Assistant":
-        navigationRef.navigate("Assistant", {
-          conversationId: undefined,
-          agentId: undefined,
-          draft: false,
-          openLatest: false,
-        });
-        break;
-      case "Activity": navigationRef.navigate("Activity"); break;
-      case "Services": navigationRef.navigate("Services"); break;
-      case "Plugins": navigationRef.navigate("Plugins"); break;
-      case "Agents": navigationRef.navigate("Agents"); break;
-      case "AccountSettings": navigationRef.navigate("AccountSettings"); break;
-    }
+    const workspace = navigationRef.getRootState().routes.find(
+      (item) => item.name === "Workspace",
+    );
+    if (!workspace?.state?.key) return;
+    navigationRef.dispatch({
+      ...workspaceNavigateAction(route),
+      target: workspace.state.key,
+    });
   };
 
   return (
@@ -430,7 +453,10 @@ function ThemedAppShell({
         }}
       >
         <StatusBar style={mode === "dark" ? "light" : "dark"} />
-        <AppNavigator onOpenMenu={() => setDrawerOpen(true)} />
+        <AppNavigator
+          onOpenMenu={() => setDrawerOpen(true)}
+          onNavigationGuardChange={onNavigationGuardChange}
+        />
       </NavigationContainer>
       {/* ToastOverlay anchors to `top: 0` of its parent and relies on the
           screen's SafeAreaView for inset. Mounted globally it has no such
@@ -446,8 +472,8 @@ function ThemedAppShell({
         currentRoute={currentRouteName}
         onClose={() => setDrawerOpen(false)}
         onNavigate={navigateFromDrawer}
-        onScan={() => { setDrawerOpen(false); navigationRef.navigate("DeviceLogin", { start_scanner: true }); }}
-        onLoginCode={() => { setDrawerOpen(false); navigationRef.navigate("AgentKeyLogin", { mint: true }); }}
+        onScan={() => { setDrawerOpen(false); navigationRef.dispatch(StackActions.push("DeviceLogin", { start_scanner: true })); }}
+        onLoginCode={() => { setDrawerOpen(false); navigationRef.dispatch(StackActions.push("AgentKeyLogin", { mint: true })); }}
       /> : null}
     </>
   );

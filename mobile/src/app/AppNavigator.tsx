@@ -1,3 +1,5 @@
+import { useContext } from "react";
+import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import {
   createNativeStackNavigator,
   type NativeStackScreenProps,
@@ -24,55 +26,58 @@ import { useTheme } from "../theme/ThemeContext";
 import { fonts } from "../theme/designTokens";
 import {
   WorkspaceMenuContext,
+  WorkspaceNavigationGuardContext,
+  type WorkspaceNavigationGuardChange,
   workspaceHeaderOptions,
 } from "./WorkspaceHeader";
+import { workspaceRouterOptions } from "./navigationHierarchy";
+import type {
+  RootStackParamList,
+  WorkspaceParamList,
+  WorkspaceScreenProps,
+} from "./navigationTypes";
 
-export type RootStackParamList = {
-  Auth: undefined;
-  Assistant:
-    | {
-        conversationId?: string;
-        acknowledgementId?: string;
-        agentId?: string;
-        draft?: boolean;
-        openLatest?: boolean;
-      }
-    | undefined;
-  Services: undefined;
-  Plugins: { tab?: "connectors" | "skills"; agentId?: string } | undefined;
-  ServiceSetup: { connectionId?: string; catalogSlug?: string };
-  AgentSkills: { agentId: string };
-  Agents: { agentId?: string } | undefined;
-  Activity: { challengeId?: string } | undefined;
-  ActivityDetail: { challengeId: string };
-  AccountSettings: undefined;
-  AccountSecurity: undefined;
-  TermsOfService: undefined;
-  PrivacyPolicy: undefined;
-  DeviceLogin: { user_code?: string; start_scanner?: boolean } | undefined;
-  AgentKeyLogin:
-    | { user_code?: string; flow?: "agent-key" | "device"; mint?: boolean }
-    | undefined;
-};
+export type {
+  RootStackParamList,
+  WorkspaceParamList,
+  WorkspaceScreenProps,
+  WorkspaceNavigationProp,
+} from "./navigationTypes";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+const Tabs = createBottomTabNavigator<WorkspaceParamList>();
+const hideTabBar = () => null;
 
-function AgentsRoute({
-  navigation,
-  route,
-}: NativeStackScreenProps<RootStackParamList, "Agents">) {
+function AgentsRoute({ navigation }: WorkspaceScreenProps<"Agents">) {
   return (
     <AgentsScreen
-      agentId={route.params?.agentId}
-      onOpenChat={(params) => navigation.navigate("Assistant", params)}
+      onOpenChat={(params) => navigation.push("AssistantContext", params)}
       onOpenSkills={(agentId) => navigation.push("AgentSkills", { agentId })}
     />
   );
 }
 
-function PluginsRoute({
+function AgentDetailRoute({
+  navigation,
   route,
-}: NativeStackScreenProps<RootStackParamList, "Plugins">) {
+}: NativeStackScreenProps<RootStackParamList, "AgentDetail">) {
+  return (
+    <AgentsScreen
+      agentId={route.params.agentId}
+      onClose={() => navigation.goBack()}
+      onOpenChat={(params) => navigation.push("AssistantContext", params)}
+      onOpenSkills={(agentId) => navigation.push("AgentSkills", { agentId })}
+    />
+  );
+}
+
+function AssistantContextRoute({
+  route,
+}: NativeStackScreenProps<RootStackParamList, "AssistantContext">) {
+  return <AssistantScreen contextual route={route} />;
+}
+
+function PluginsRoute({ route }: WorkspaceScreenProps<"Plugins">) {
   return (
     <PluginsScreen
       initialTab={route.params?.tab}
@@ -106,7 +111,74 @@ function AgentSkillsRoute({
   );
 }
 
-export function AppNavigator({ onOpenMenu }: { onOpenMenu: () => void }) {
+/** The drawer selects siblings; the outer native stack owns detail history. */
+function WorkspaceNavigator() {
+  const onOpenMenu = useContext(WorkspaceMenuContext);
+  const { colors } = useTheme();
+  const header = workspaceHeaderOptions({ role: "menu", onOpenMenu });
+  return (
+    <Tabs.Navigator
+      {...workspaceRouterOptions}
+      tabBar={hideTabBar}
+      screenOptions={{
+        headerShown: true,
+        headerLeft: () => header.headerLeft?.({ canGoBack: false }),
+        headerLeftContainerStyle: { paddingLeft: 16 },
+        headerRight: () => null,
+        headerStyle: { backgroundColor: colors.bg },
+        headerTintColor: colors.textPrimary,
+        headerTitleStyle: { fontFamily: fonts.displaySemi, fontSize: 18 },
+        headerTitleAlign: "center",
+        headerShadowVisible: false,
+        sceneStyle: { backgroundColor: colors.bg },
+        // Mounted screens retain drafts, filters and scroll position on selection.
+        lazy: true,
+      }}
+    >
+      <Tabs.Screen
+        name="Assistant"
+        component={AssistantScreen}
+        options={{ title: "NyxID" }}
+      />
+      <Tabs.Screen
+        name="Agents"
+        component={AgentsRoute}
+        options={{ title: "Agents" }}
+      />
+      <Tabs.Screen
+        name="Plugins"
+        component={PluginsRoute}
+        options={{
+          title: "Plugins",
+          headerTitleStyle: { fontFamily: fonts.bodySemi, fontSize: 19 },
+        }}
+      />
+      <Tabs.Screen
+        name="Services"
+        component={ServicesScreen}
+        options={{ title: "Services" }}
+      />
+      <Tabs.Screen
+        name="Activity"
+        component={ActivityScreen}
+        options={{ title: "Approvals" }}
+      />
+      <Tabs.Screen
+        name="AccountSettings"
+        component={AccountSettingsScreen}
+        options={{ title: "Settings" }}
+      />
+    </Tabs.Navigator>
+  );
+}
+
+export function AppNavigator({
+  onOpenMenu,
+  onNavigationGuardChange,
+}: {
+  onOpenMenu: () => void;
+  onNavigationGuardChange: WorkspaceNavigationGuardChange;
+}) {
   const { isAuthenticated, isRestoring } = useAuthSession();
   const { colors } = useTheme();
   if (isRestoring)
@@ -118,155 +190,117 @@ export function AppNavigator({ onOpenMenu }: { onOpenMenu: () => void }) {
     );
   return (
     <WorkspaceMenuContext.Provider value={onOpenMenu}>
-      <Stack.Navigator
-        initialRouteName={isAuthenticated ? "Assistant" : "Auth"}
-        screenOptions={{
-          headerShown: false,
-          headerStyle: { backgroundColor: colors.bg },
-          headerTintColor: colors.textPrimary,
-          headerTitleStyle: { fontFamily: fonts.displaySemi, fontSize: 18 },
-          headerShadowVisible: false,
-          contentStyle: { backgroundColor: colors.bg },
-          headerBackButtonDisplayMode: "minimal",
-        }}
-      >
-        {isAuthenticated ? (
-          <Stack.Group navigationKey="workspace">
+      <WorkspaceNavigationGuardContext.Provider value={onNavigationGuardChange}>
+        <Stack.Navigator
+          initialRouteName={isAuthenticated ? "Workspace" : "Auth"}
+          screenOptions={{
+            headerShown: false,
+            headerStyle: { backgroundColor: colors.bg },
+            headerTintColor: colors.textPrimary,
+            headerTitleStyle: { fontFamily: fonts.displaySemi, fontSize: 18 },
+            headerShadowVisible: false,
+            contentStyle: { backgroundColor: colors.bg },
+            headerBackButtonDisplayMode: "minimal",
+          }}
+        >
+          {isAuthenticated ? (
+            <Stack.Group navigationKey="workspace">
+              <Stack.Screen name="Workspace" component={WorkspaceNavigator} />
+              <Stack.Screen
+                name="AssistantContext"
+                component={AssistantContextRoute}
+                options={({ navigation }) => ({
+                  ...workspaceHeaderOptions({
+                    role: "back",
+                    onOpenMenu,
+                    onBack: navigation.goBack,
+                  }),
+                  title: "NyxID",
+                })}
+              />
+              <Stack.Screen
+                name="AgentDetail"
+                component={AgentDetailRoute}
+                options={({ navigation }) => ({
+                  ...workspaceHeaderOptions({
+                    role: "back",
+                    onOpenMenu,
+                    onBack: navigation.goBack,
+                  }),
+                  title: "Agent",
+                })}
+              />
+              <Stack.Screen
+                name="ServiceSetup"
+                component={ServiceSetupRoute}
+                options={({ navigation, route }) => ({
+                  ...workspaceHeaderOptions({
+                    role: "back",
+                    onOpenMenu,
+                    onBack: navigation.goBack,
+                  }),
+                  title: route.params.catalogSlug
+                    ? "Connect service"
+                    : "Manage connection",
+                })}
+              />
+              <Stack.Screen
+                name="AgentSkills"
+                component={AgentSkillsRoute}
+                options={({ navigation }) => ({
+                  ...workspaceHeaderOptions({
+                    role: "back",
+                    onOpenMenu,
+                    onBack: navigation.goBack,
+                  }),
+                  title: "Agent skills",
+                })}
+              />
+              <Stack.Screen
+                name="ActivityDetail"
+                component={ActivityDetailScreen}
+                options={{ title: "Approval detail", animation: "none" }}
+              />
+              <Stack.Screen
+                name="AccountSecurity"
+                component={AccountSecurityScreen}
+                options={{ headerShown: true, title: "Account & security" }}
+              />
+            </Stack.Group>
+          ) : (
             <Stack.Screen
-              name="Assistant"
-              component={AssistantScreen}
-              options={({ navigation }) => ({
-                ...workspaceHeaderOptions({
-                  onOpenMenu,
-                  onBack: navigation.goBack,
-                }),
-                title: "NyxID",
-              })}
+              name="Auth"
+              navigationKey="auth"
+              component={AuthHomeScreen}
+              options={{ title: "NyxID Sign In" }}
+            />
+          )}
+          <Stack.Group
+            navigationKey={isAuthenticated ? "signed-in" : "signed-out"}
+          >
+            <Stack.Screen
+              name="TermsOfService"
+              component={TermsOfServiceScreen}
+              options={{ title: "Terms of Service" }}
             />
             <Stack.Screen
-              name="Plugins"
-              component={PluginsRoute}
-              options={({ navigation }) => ({
-                ...workspaceHeaderOptions({
-                  onOpenMenu,
-                  onBack: navigation.goBack,
-                }),
-                title: "Plugins",
-                headerTitleStyle: { fontFamily: fonts.bodySemi, fontSize: 19 },
-              })}
+              name="PrivacyPolicy"
+              component={PrivacyPolicyScreen}
+              options={{ title: "Privacy Policy" }}
             />
             <Stack.Screen
-              name="ServiceSetup"
-              component={ServiceSetupRoute}
-              options={({ navigation, route }) => ({
-                ...workspaceHeaderOptions({
-                  onOpenMenu,
-                  onBack: navigation.goBack,
-                }),
-                title: route.params.catalogSlug
-                  ? "Connect service"
-                  : "Manage connection",
-              })}
+              name="DeviceLogin"
+              component={DeviceLoginScreen}
+              options={{ title: "Approve Device Login" }}
             />
             <Stack.Screen
-              name="AgentSkills"
-              component={AgentSkillsRoute}
-              options={({ navigation }) => ({
-                ...workspaceHeaderOptions({
-                  onOpenMenu,
-                  onBack: navigation.goBack,
-                }),
-                title: "Agent skills",
-              })}
-            />
-            <Stack.Screen
-              name="Services"
-              component={ServicesScreen}
-              options={({ navigation }) => ({
-                ...workspaceHeaderOptions({
-                  onOpenMenu,
-                  onBack: navigation.goBack,
-                }),
-                title: "Services",
-              })}
-            />
-            <Stack.Screen
-              name="Agents"
-              component={AgentsRoute}
-              options={({ navigation }) => ({
-                ...workspaceHeaderOptions({
-                  onOpenMenu,
-                  onBack: navigation.goBack,
-                }),
-                title: "Agents",
-              })}
-            />
-            <Stack.Screen
-              name="Activity"
-              component={ActivityScreen}
-              options={({ navigation }) => ({
-                ...workspaceHeaderOptions({
-                  onOpenMenu,
-                  onBack: navigation.goBack,
-                }),
-                title: "Approvals",
-              })}
-            />
-            <Stack.Screen
-              name="ActivityDetail"
-              component={ActivityDetailScreen}
-              options={{ title: "Approval detail", animation: "none" }}
-            />
-            <Stack.Screen
-              name="AccountSettings"
-              component={AccountSettingsScreen}
-              options={({ navigation }) => ({
-                ...workspaceHeaderOptions({
-                  onOpenMenu,
-                  onBack: navigation.goBack,
-                }),
-                title: "Settings",
-              })}
-            />
-            <Stack.Screen
-              name="AccountSecurity"
-              component={AccountSecurityScreen}
-              options={{ headerShown: true, title: "Account & security" }}
+              name="AgentKeyLogin"
+              component={AgentKeyLoginScreen}
+              options={{ title: "Agent Key Login" }}
             />
           </Stack.Group>
-        ) : (
-          <Stack.Screen
-            name="Auth"
-            navigationKey="auth"
-            component={AuthHomeScreen}
-            options={{ title: "NyxID Sign In" }}
-          />
-        )}
-        <Stack.Group
-          navigationKey={isAuthenticated ? "signed-in" : "signed-out"}
-        >
-          <Stack.Screen
-            name="TermsOfService"
-            component={TermsOfServiceScreen}
-            options={{ title: "Terms of Service" }}
-          />
-          <Stack.Screen
-            name="PrivacyPolicy"
-            component={PrivacyPolicyScreen}
-            options={{ title: "Privacy Policy" }}
-          />
-          <Stack.Screen
-            name="DeviceLogin"
-            component={DeviceLoginScreen}
-            options={{ title: "Approve Device Login" }}
-          />
-          <Stack.Screen
-            name="AgentKeyLogin"
-            component={AgentKeyLoginScreen}
-            options={{ title: "Agent Key Login" }}
-          />
-        </Stack.Group>
-      </Stack.Navigator>
+        </Stack.Navigator>
+      </WorkspaceNavigationGuardContext.Provider>
     </WorkspaceMenuContext.Provider>
   );
 }

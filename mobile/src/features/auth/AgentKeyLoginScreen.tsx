@@ -212,10 +212,15 @@ export function AgentKeyLoginScreen({ navigation, route }: Props) {
     const result = await loginCodeApi.mint(grant);
     if (current === generation.current) setIssued(result);
   }
-  const back = () =>
-    navigation.canGoBack()
-      ? navigation.goBack()
-      : navigation.navigate(isAuthenticated ? "Activity" : "Auth");
+  const back = () => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else if (isAuthenticated) {
+      navigation.navigate("Workspace", { screen: "Activity" });
+    } else {
+      navigation.navigate("Auth");
+    }
+  };
   if (scanning)
     return (
       <DeviceCodeScanner
