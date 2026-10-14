@@ -20,6 +20,7 @@ import {
   ChevronDown,
   MessageSquare,
   MoreHorizontal,
+  Paperclip,
   Plus,
   Send,
   Square,
@@ -46,6 +47,9 @@ import {
 } from "./assistantComposerPress";
 import { submitAssistantDraft } from "./assistantComposerDraft";
 import { AssistantActivityDisclosure } from "./AssistantActivityDisclosure";
+import { AssistantAttachmentView } from "./AssistantAttachmentView";
+import { AssistantPendingUploads } from "./AssistantPendingUploads";
+import { useAssistantUploads } from "./useAssistantUploads";
 import { describeToolActivity } from "./assistantActivityText";
 import { NativeAuthoredSkillReview } from "../plugins/NativeAuthoredSkillReview";
 import { transcriptEndOffset } from "./assistantTranscriptScroll";
@@ -90,6 +94,7 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
     route?.params?.acknowledgementId,
   );
   const [draft, setDraft] = useState("");
+  const [composerGeneration, setComposerGeneration] = useState(0);
   const draftRevision = useRef(0);
   function updateDraft(value: string) {
     draftRevision.current += 1;
@@ -136,14 +141,15 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
     );
   const messages = assistant.history?.messages ?? [];
   const stableTranscript =
-    messages.length > 0 && !running && !assistant.inputText;
+    messages.length > 0 &&
+    !running &&
+    !assistant.inputText &&
+    !assistant.inputAttachments.length;
   const hasHistoryGap = messages.some(
     (item, index) =>
       index > 0 && item.seq > (messages[index - 1]?.seq ?? item.seq) + 1,
   );
-  const canSend =
-    !!draft.trim() &&
-    [...draft].length <= 32768 &&
+  const canCompose =
     !running &&
     !destroyed &&
     assistant.online &&
@@ -155,6 +161,21 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
     (!!assistant.conversationId ||
       (assistant.agent?.can_use === true &&
         assistant.agent.status !== "destroyed"));
+  const uploads = useAssistantUploads({
+    conversationId: assistant.conversationId,
+    agentId: assistant.agentId,
+    model: assistant.model,
+    generation: composerGeneration,
+    enabled: canCompose,
+    online: assistant.online,
+  });
+  const canSend =
+    canCompose &&
+    !uploads.session.sending &&
+    !uploads.blocked &&
+    !uploads.picking &&
+    (!!draft.trim() || uploads.files.length > 0) &&
+    [...draft].length <= 32768;
 
   useEffect(() => {
     if (
@@ -221,6 +242,7 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
   }
 
   function newChat() {
+    setComposerGeneration((value) => value + 1);
     const agentId = assistant.agentId;
     assistant.openConversation();
     assistant.setModel(assistant.agent?.model ?? "nyxagent/chat");
@@ -245,6 +267,7 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
     onBack: () => {
       if (assistant.conversationId) newChat();
       else {
+        setComposerGeneration((value) => value + 1);
         assistant.openConversation();
         navigation.setParams({
           conversationId: undefined,
@@ -267,7 +290,10 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
         draft,
         updateDraft,
         getRevision: () => draftRevision.current,
-        send: assistant.send,
+        send: (text) =>
+          uploads.session.submit((payload) =>
+            assistant.send(text, undefined, payload),
+          ),
       }),
     );
   }
@@ -378,12 +404,14 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
           }}
         />
         {isUser ? (
-          <Text
-            selectable
-            style={[styles.messageText, { color: colors.textPrimary }]}
-          >
-            {item.text}
-          </Text>
+          item.text ? (
+            <Text
+              selectable
+              style={[styles.messageText, { color: colors.textPrimary }]}
+            >
+              {item.text}
+            </Text>
+          ) : null
         ) : (
           <Markdown
             style={markdownStyle}
@@ -394,13 +422,11 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
           </Markdown>
         )}
         {item.attachments.map((attachment) => (
-          <Label muted key={attachment.id} style={styles.metadata}>
-            {attachment.label} ·{" "}
-            {attachment.expired ? "Expired" : formatSize(attachment.size)}
-            {attachment.image_input === "unavailable"
-              ? " · Image input unavailable"
-              : ""}
-          </Label>
+          <AssistantAttachmentView
+            key={attachment.id}
+            attachment={attachment}
+            conversationId={assistant.conversationId}
+          />
         ))}
         {item.status === "failed" ? (
           <Notice
@@ -605,7 +631,11 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
               ? "Current assistant model"
               : "Choose assistant model"
           }
-          disabled={!!assistant.conversationId || assistant.sending}
+          disabled={
+            !!assistant.conversationId ||
+            assistant.sending ||
+            uploads.session.sending
+          }
           onPress={() => setModelOpen(true)}
           style={styles.modelPill}
         >
@@ -768,7 +798,8 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
         }
         ListFooterComponent={
           <View style={styles.footer}>
-            {assistant.inputText && !optimisticUserPersisted ? (
+            {(assistant.inputText || assistant.inputAttachments.length > 0) &&
+            !optimisticUserPersisted ? (
               <View
                 style={[
                   styles.message,
@@ -779,12 +810,23 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
                 <Label muted style={styles.messageLabel}>
                   You · sending
                 </Label>
-                <Text
-                  selectable
-                  style={[styles.messageText, { color: colors.textPrimary }]}
-                >
-                  {assistant.inputText}
-                </Text>
+                {assistant.inputText ? (
+                  <Text
+                    selectable
+                    style={[styles.messageText, { color: colors.textPrimary }]}
+                  >
+                    {assistant.inputText}
+                  </Text>
+                ) : null}
+                {assistant.inputAttachments.map((attachment) => (
+                  <AssistantAttachmentView
+                    key={attachment.id}
+                    attachment={attachment}
+                    conversationId={
+                      assistant.conversationId ?? assistant.live?.conversationId
+                    }
+                  />
+                ))}
               </View>
             ) : null}
             {running && !streamPersisted ? (
@@ -878,6 +920,20 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
           { backgroundColor: colors.card, borderColor: colors.border },
         ]}
       >
+        <AssistantPendingUploads
+          files={uploads.files}
+          remove={uploads.remove}
+          disabled={running || uploads.session.sending}
+        />
+        {uploads.error || uploads.notice ? (
+          <Label
+            style={{
+              color: uploads.error ? colors.danger : colors.textSecondary,
+            }}
+          >
+            {uploads.error ?? uploads.notice}
+          </Label>
+        ) : null}
         <TextInput
           accessibilityLabel="Message to assistant"
           value={draft}
@@ -894,12 +950,30 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
           style={[styles.composerInput, { color: colors.textPrimary }]}
         />
         <View style={styles.composerActions}>
+          <IconButton
+            label="Attach files"
+            disabled={
+              !canCompose ||
+              uploads.picking ||
+              uploads.session.sending ||
+              uploads.files.length >= 10
+            }
+            onPress={() => void uploads.pick()}
+          >
+            {uploads.picking ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <Paperclip size={20} color={colors.textSecondary} />
+            )}
+          </IconButton>
           <Label muted style={styles.composerHint}>
             {running
               ? "You can leave this chat and return later."
               : assistant.recoveryRequired
                 ? "Open the saved chat before continuing."
-                : "Review requests before confirming."}
+                : uploads.blocked
+                  ? "Wait for uploads or remove failed files."
+                  : "Attach images or documents · 20 MB each"}
           </Label>
           {running && assistant.conversationId ? (
             <IconButton
@@ -956,6 +1030,7 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
               accessibilityRole="button"
               accessibilityLabel={`Chat with ${chatAgentLabel(agent)}`}
               onPress={() => {
+                setComposerGeneration((value) => value + 1);
                 assistant.openConversation();
                 assistant.setModel(agent.model ?? "nyxagent/chat");
                 navigation.setParams({
@@ -1244,12 +1319,6 @@ function formatDate(value: string) {
         minute: "2-digit",
       });
 }
-function formatSize(bytes: number) {
-  return bytes >= 1024 * 1024
-    ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
-    : `${Math.max(1, Math.round(bytes / 1024))} KB`;
-}
-
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   row: { flexDirection: "row", alignItems: "center", gap: 8 },

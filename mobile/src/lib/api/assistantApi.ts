@@ -9,6 +9,10 @@ import {
   type AssistantTurnEvent,
 } from "../../features/assistant/assistantTypes";
 import { readAssistantResponse } from "../../features/assistant/assistantStreamReader";
+import {
+  assistantTurnBody,
+  type AssistantTurnInput,
+} from "../../features/assistant/assistantTurnRequest";
 import { assistantHistoryRequestPath } from "../../features/assistant/assistantHistoryTarget";
 
 const ROOT = "/assistant/nyxagent";
@@ -51,6 +55,18 @@ export const assistantApi = {
       await requestJson(path(id), { method: "PATCH", body: { title: clean } }),
     );
   },
+  async changeModel(id: string, model: string, signal?: AbortSignal) {
+    const row = conversationSchema.parse(
+      await requestJson(`${path(id)}/model`, {
+        method: "PATCH",
+        body: { model },
+        signal,
+      }),
+    );
+    if (row.id !== id || row.model !== model)
+      throw new Error("The upload draft model could not be confirmed.");
+    return row;
+  },
   async delete(id: string) {
     await requestJson(path(id), { method: "DELETE" });
   },
@@ -74,42 +90,27 @@ export const assistantApi = {
   },
 };
 
-export type AssistantSendInput = {
-  conversationId?: string;
-  agentId?: string;
-  model?: string;
-  text: string;
-  retryOf?: string;
-};
+export type AssistantSendInput = AssistantTurnInput;
 
 /** A disconnected subscription never replays the POST: NyxID continues the durable turn. */
 export async function streamAssistantTurn(
   input: AssistantSendInput,
   onEvent: (event: AssistantTurnEvent) => void,
   controller: AbortController,
+  onAdmitted?: () => void,
 ): Promise<void> {
-  if (!input.text.trim() || [...input.text].length > 32768)
-    throw new Error("Enter a message between 1 and 32,768 characters.");
-  if (input.conversationId) conversationIdSchema.parse(input.conversationId);
+  const body = assistantTurnBody(input);
   const response = await withDeadline(
     requestAuthenticatedResponse(`${ROOT}/turns`, {
       method: "POST",
       signal: controller.signal,
       headers: { Accept: "text/event-stream" },
-      body: {
-        ...(input.conversationId
-          ? { conversation_id: input.conversationId }
-          : {
-              ...(input.agentId ? { agent_id: input.agentId } : {}),
-              ...(input.model ? { model: input.model } : {}),
-            }),
-        text: input.text,
-        ...(input.retryOf ? { retry_of: input.retryOf } : {}),
-      },
+      body,
     }),
     45000,
     controller,
   );
+  onAdmitted?.();
   if (
     !response.headers.get("content-type")?.includes("text/event-stream") ||
     !response.body

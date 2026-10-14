@@ -8,14 +8,17 @@ const activitySchema = z.object({
   started_at: z.string(),
   ended_at: z.string().nullish(),
 });
-const attachmentSchema = z.object({
+export const attachmentSchema = z.object({
   id: z.string(),
   content_type: z.string(),
   size: z.number(),
   label: z.string(),
+  origin: z.string().optional(),
+  pages: z.number().int().nonnegative().nullish(),
   expired: z.boolean().optional(),
   image_input: z.string().nullish(),
 });
+export type AssistantAttachment = z.infer<typeof attachmentSchema>;
 export const conversationSchema = z.object({
   id: conversationIdSchema,
   title: z.string(),

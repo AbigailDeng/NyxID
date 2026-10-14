@@ -3,6 +3,7 @@ import { decodeJwtSub } from "../auth/jwt";
 export type RequestOptions = {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   body?: unknown;
+  rawBody?: ArrayBuffer;
   requiresAuth?: boolean;
   headers?: Record<string, string>;
   retryOnAuthFailure?: boolean;
@@ -41,7 +42,7 @@ export async function executeAuthenticatedRequest<
     init: {
       method: string;
       headers: Record<string, string>;
-      body?: string;
+      body?: string | ArrayBuffer;
       signal?: AbortSignal;
     },
   ) => Promise<R>;
@@ -52,6 +53,8 @@ export async function executeAuthenticatedRequest<
   getAuthEpoch?: () => number;
 }): Promise<{ response: R; assertOwner: () => Promise<void> }> {
   const { options } = input;
+  if (options.body !== undefined && options.rawBody !== undefined)
+    throw new Error("Choose either JSON or raw request bytes.");
   const requiresAuth = options.requiresAuth ?? true;
   const originalEpoch = input.getAuthEpoch?.();
   ensureNotAborted(options.signal);
@@ -98,7 +101,8 @@ export async function executeAuthenticatedRequest<
       method: options.method ?? "GET",
       headers,
       body:
-        options.body === undefined ? undefined : JSON.stringify(options.body),
+        options.rawBody ??
+        (options.body === undefined ? undefined : JSON.stringify(options.body)),
       signal: options.signal,
     });
   };

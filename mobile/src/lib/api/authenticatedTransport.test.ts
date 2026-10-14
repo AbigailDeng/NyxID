@@ -171,3 +171,33 @@ test("same-account sign-out and sign-in rejects an earlier session's response", 
   epoch++;
   await assert.rejects(assertOwner(), { name: "AbortError" });
 });
+
+test("raw attachment bytes preserve binary content and headers without JSON serialization", async () => {
+  const bytes = new Uint8Array([0, 255, 13, 10, 195, 169]).buffer;
+  const f = fixture({
+    method: "POST",
+    rawBody: bytes,
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "X-Attachment-Name": "check.txt",
+    },
+  });
+  const transport = async (
+    _url: string,
+    init: { headers: Record<string, string>; body?: string | ArrayBuffer },
+  ) => {
+    assert.equal(init.body, bytes);
+    assert.equal(init.headers["Content-Type"], "application/octet-stream");
+    assert.equal(init.headers["X-Attachment-Name"], "check.txt");
+    return { status: 200, ok: true, text: async () => "{}" };
+  };
+  await executeAuthenticatedRequest({ ...f.input, transport });
+});
+test("mixed JSON and raw body are refused before session/transport dispatch", async () => {
+  const f = fixture({ body: {}, rawBody: new ArrayBuffer(1) });
+  await assert.rejects(
+    executeAuthenticatedRequest(f.input),
+    /either JSON or raw/,
+  );
+  assert.equal(f.counts().sends, 0);
+});

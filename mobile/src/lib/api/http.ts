@@ -3,6 +3,7 @@ import { fetch as expoFetch } from "expo/fetch";
 import { executeAuthenticatedRequest, type RequestOptions } from "./authenticatedTransport";
 import { mapBackendRequestToChallenge, mapChallengeStatus, type BackendApprovalRequestItem } from "./approvalAdapter";
 import { getAuthEpoch } from "../auth/authEpoch";
+import { readBoundedBytes } from "./readBoundedBytes";
 
 import { ApiError } from "./ApiError";
 import {
@@ -439,6 +440,113 @@ export async function requestJson<T>(path: string, options: RequestOptions = {})
   const payload = await readJsonSafely(response);
   await assertOwner();
   return payload as T;
+}
+
+/** Raw upload shares the same secure admission and single 401 refresh as JSON. */
+export async function requestBinaryJson<T>(
+  path: string,
+  bytes: Uint8Array,
+  options: {
+    headers?: Record<string, string>;
+    signal?: AbortSignal;
+    onProgress?: (percent: number) => void;
+  } = {},
+): Promise<T> {
+  const { response, assertOwner } = await executeAuthenticatedRequest({
+    url: buildUrl(path),
+    options: {
+      method: "POST",
+      headers: options.headers,
+      signal: options.signal,
+      rawBody: new Uint8Array(bytes).buffer,
+    },
+    clientHeaders: clientHeaders(),
+    transport: (url, init) =>
+      new Promise<{ ok: boolean; status: number; text: () => Promise<string> }>(
+        (resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          const abort = () => xhr.abort();
+          const cleanup = () =>
+            init.signal?.removeEventListener("abort", abort);
+          xhr.open(init.method, url);
+          xhr.timeout = 60_000;
+          for (const [name, value] of Object.entries(init.headers))
+            xhr.setRequestHeader(name, value);
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable)
+              options.onProgress?.(
+                Math.min(99, Math.round((event.loaded / event.total) * 100)),
+              );
+          };
+          xhr.onerror = () => {
+            cleanup();
+            reject(
+              new Error("Upload failed. Check your connection and try again."),
+            );
+          };
+          xhr.ontimeout = () => {
+            cleanup();
+            reject(new Error("Upload timed out. Try a smaller file."));
+          };
+          xhr.onabort = () => {
+            cleanup();
+            reject(
+              Object.assign(new Error("Upload cancelled."), {
+                name: "AbortError",
+              }),
+            );
+          };
+          xhr.onload = () => {
+            cleanup();
+            resolve({
+              ok: xhr.status >= 200 && xhr.status < 300,
+              status: xhr.status,
+              text: async () => xhr.responseText,
+            });
+          };
+          if (init.signal?.aborted) {
+            cleanup();
+            reject(
+              Object.assign(new Error("Upload cancelled."), {
+                name: "AbortError",
+              }),
+            );
+            return;
+          }
+          init.signal?.addEventListener("abort", abort, { once: true });
+          xhr.send(init.body);
+        },
+      ),
+    loadSession: loadStoredAuthSession,
+    refresh: refreshAccessTokenWithSingleFlight,
+    invalidate: invalidateSession,
+    toError: buildApiError,
+    getAuthEpoch,
+  });
+  const text = await response.text();
+  await assertOwner();
+  return JSON.parse(text) as T;
+}
+
+/** Bytes are consumed before the owner fence, so a late account response cannot be saved. */
+export async function requestAuthenticatedBytes(
+  path: string,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
+  const { response, assertOwner } = await executeAuthenticatedRequest({
+    url: buildUrl(path),
+    options: { signal },
+    clientHeaders: clientHeaders(),
+    transport: expoFetch,
+    loadSession: loadStoredAuthSession,
+    refresh: refreshAccessTokenWithSingleFlight,
+    invalidate: invalidateSession,
+    toError: buildApiError,
+    getAuthEpoch,
+  });
+  const bytes = await readBoundedBytes(response.body, 20 * 1024 * 1024);
+  await assertOwner();
+  return bytes;
 }
 
 async function listPendingApprovalRequests(

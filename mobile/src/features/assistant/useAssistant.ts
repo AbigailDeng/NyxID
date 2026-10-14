@@ -8,6 +8,11 @@ import { agentsApi } from "../../lib/api/agentsApi";
 import { ApiError } from "../../lib/api/ApiError";
 import { resolveChatAgentId } from "./assistantAgentContext";
 import {
+  assistantTurnBody,
+  restoreRefusedAssistantSend,
+} from "./assistantTurnRequest";
+import type { AssistantUploadedMessage } from "./AssistantUploadSession";
+import {
   acknowledgementForConversation,
   selectAssistantHistoryTarget,
 } from "./assistantHistoryTarget";
@@ -23,6 +28,7 @@ import {
 } from "./assistantState";
 import type {
   AssistantAcknowledgement,
+  AssistantAttachment,
   AssistantConversation,
   AssistantHistory,
   AssistantModel,
@@ -46,6 +52,9 @@ export function useAssistant(
   const [model, setModel] = useState("nyxagent/chat");
   const [live, setLive] = useState<AssistantLiveReply>();
   const [inputText, setInputText] = useState<string>();
+  const [inputAttachments, setInputAttachments] = useState<
+    AssistantAttachment[]
+  >([]);
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -222,6 +231,7 @@ export function useAssistant(
       updateHistory(undefined);
       setLive(undefined);
       setInputText(undefined);
+      setInputAttachments([]);
       setError(undefined);
       setRecoveryRequired(false);
       setLoading(!!id);
@@ -356,11 +366,25 @@ export function useAssistant(
   }, [active, conversationId, needsPolling, loadingOlder, refreshHistory]);
 
   const send = useCallback(
-    async (text: string, retryOf?: string) => {
+    async (
+      text: string,
+      retryOf?: string,
+      uploads?: AssistantUploadedMessage,
+    ) => {
       if (sendLock.current) throw new Error("A message is already being sent.");
       if (!activeRef.current) throw new Error("Reconnect to send a message.");
       if (recoveryRequired)
         throw new Error("Refresh or open the saved chat before sending again.");
+      if (
+        uploads &&
+        selected.current &&
+        uploads.conversationId !== selected.current
+      )
+        throw new Error(
+          "These files belong to a different chat. Choose them again here.",
+        );
+      if (uploads && retryOf)
+        throw new Error("Retry uses the original message's attachments.");
       if (selected.current && !latestHistory.current)
         throw new Error("Wait for this chat's saved history to load.");
       if (latestHistory.current?.conversation.active_turn)
@@ -376,6 +400,15 @@ export function useAssistant(
         (!agent || agent.can_use !== true || agent.status === "destroyed")
       )
         throw new Error("Select an available agent before starting a chat.");
+      // Local validation must refuse before detaching any optimistic message.
+      assistantTurnBody({
+        conversationId: selected.current ?? uploads?.conversationId,
+        agentId,
+        model,
+        text,
+        retryOf,
+        attachmentIds: uploads?.attachmentIds,
+      });
       const localEpoch = epoch.current;
       const controller = new AbortController();
       streamController.current = controller;
@@ -383,14 +416,29 @@ export function useAssistant(
       setSending(true);
       setError(undefined);
       setInputText(text);
+      setInputAttachments(uploads?.attachments ?? []);
       let reply = emptyLiveReply();
-      let id = selected.current;
+      let id = selected.current ?? uploads?.conversationId;
       if (id) reply.conversationId = id;
       setLive(reply);
       let keepDraft = false;
+      let admitted = false;
+      const adoptKnownDraft = () => {
+        if (!id || !mounted.current || epoch.current !== localEpoch) return;
+        selected.current = id;
+        setConversationId(id);
+        adopt.current?.(id);
+      };
       try {
         await streamAssistantTurn(
-          { conversationId: id, agentId, model, text, retryOf },
+          {
+            conversationId: id,
+            agentId,
+            model,
+            text,
+            retryOf,
+            attachmentIds: uploads?.attachmentIds,
+          },
           (event) => {
             if (!mounted.current || epoch.current !== localEpoch) return;
             reply = applyAssistantEvent(reply, event);
@@ -405,15 +453,20 @@ export function useAssistant(
             setLive(reply);
           },
           controller,
+          () => {
+            admitted = true;
+            // The server has already claimed the files, even if SSE fails later.
+            adoptKnownDraft();
+          },
         );
       } catch (cause) {
         if (mounted.current && epoch.current === localEpoch) {
           // An explicit pre-admission client error can safely leave its text editable.
           const refused =
             cause instanceof ApiError &&
-            cause.statusCode >= 400 &&
-            cause.statusCode < 500;
+            restoreRefusedAssistantSend(cause, admitted);
           keepDraft = refused;
+          if (!refused) adoptKnownDraft();
           setRecoveryRequired(!refused);
           setError(
             refused
@@ -426,12 +479,14 @@ export function useAssistant(
           streamController.current = undefined;
         sendLock.current = false;
         if (mounted.current && epoch.current === localEpoch) {
-          if (id) await refreshHistory(id).catch(() => undefined);
+          if (id && selected.current === id)
+            await refreshHistory(id).catch(() => undefined);
           await refreshIndex().catch(() => undefined);
           if (mounted.current && epoch.current === localEpoch) {
             setSending(false);
             setLive(undefined);
             setInputText(undefined);
+            setInputAttachments([]);
           }
         } else if (mounted.current) {
           setSending(false);
@@ -597,6 +652,7 @@ export function useAssistant(
     setModel,
     live,
     inputText,
+    inputAttachments,
     sending,
     loading,
     loadingOlder,
