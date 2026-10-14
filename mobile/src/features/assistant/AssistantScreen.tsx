@@ -19,9 +19,10 @@ import {
   Bot,
   ChevronDown,
   MessageSquare,
-  MoreHorizontal,
+  Check,
+  Info,
   Paperclip,
-  Plus,
+  SquarePen,
   Send,
   Square,
   X,
@@ -103,7 +104,7 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [localError, setLocalError] = useState<string>();
   const composerPress = useRef(createAssistantComposerPressGuard());
@@ -118,6 +119,13 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
     : assistant.agentId
       ? "Agent"
       : "NyxBot";
+  const chatTitle = assistant.conversationId
+    ? (conversation?.title ?? "Loading chat…")
+    : "New chat";
+  const currentModelId = conversation?.model ?? assistant.model;
+  const currentModelLabel =
+    assistant.models.find((item) => item.id === currentModelId)?.label ??
+    currentModelId.replace(/^nyxagent\//, "");
   const running = assistant.sending || !!conversation?.active_turn;
   const liveText = assistant.live ? liveReplyText(assistant.live) : "";
   const liveActivities = conversation?.active_turn?.activities ?? [];
@@ -169,6 +177,13 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
     enabled: canCompose,
     online: assistant.online,
   });
+  const newChatDisabled =
+    assistant.loading ||
+    !assistant.agentId ||
+    ((assistant.sending || uploads.session.sending) &&
+      !assistant.conversationId);
+  const modelLocked =
+    !!assistant.conversationId || assistant.sending || uploads.session.sending;
   const canSend =
     canCompose &&
     !uploads.session.sending &&
@@ -572,78 +587,91 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
   }
 
   return (
-    <WorkspacePage
-      title={conversation?.title ?? "Assistant"}
-      titleNumberOfLines={1}
-      scroll={false}
-    >
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Chatting with ${agentName}. Choose agent`}
-        onPress={() => setAgentsOpen(true)}
-        style={styles.agentSelector}
-      >
-        <Bot size={20} color={colors.primaryOnTint} />
+    <WorkspacePage title={chatTitle} showHeading={false} scroll={false}>
+      <View style={styles.chatHeading}>
         <View style={styles.fill}>
-          <Label>{agentName}</Label>
-          <Label muted>
-            {assistant.agent?.owner_kind === "org"
-              ? (assistant.agent.owner_name ?? "Organization")
-              : currentAgent?.kind === "specialist"
-                ? "Personal specialist"
-                : "Your personal assistant"}
+          <Label muted style={styles.currentChatLabel}>
+            Current chat
           </Label>
-        </View>
-        <ChevronDown size={18} color={colors.textMuted} />
-      </Pressable>
-      <View style={styles.toolbar}>
-        <View style={styles.row}>
-          <IconButton label="Chat history" onPress={() => setHistoryOpen(true)}>
-            <History size={19} color={colors.textSecondary} />
-          </IconButton>
-          <IconButton
-            label="New chat"
-            onPress={newChat}
-            disabled={
-              assistant.loading ||
-              !assistant.agentId ||
-              (assistant.sending && !assistant.conversationId)
-            }
+          <Text
+            accessibilityRole="header"
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            style={[styles.chatTitle, { color: colors.textPrimary }]}
           >
-            <Plus size={21} color={colors.textSecondary} />
-          </IconButton>
-          {assistant.conversationId ? (
-            <IconButton
-              label="Chat settings"
-              onPress={() => {
-                setTitle(conversation?.title ?? "");
-                setSettingsOpen(true);
-              }}
-            >
-              <MoreHorizontal size={21} color={colors.textSecondary} />
-            </IconButton>
-          ) : null}
+            {chatTitle}
+          </Text>
         </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={
-            assistant.conversationId
-              ? "Current assistant model"
-              : "Choose assistant model"
-          }
-          disabled={
-            !!assistant.conversationId ||
-            assistant.sending ||
-            uploads.session.sending
-          }
-          onPress={() => setModelOpen(true)}
-          style={styles.modelPill}
+          accessibilityLabel="Chat details"
+          onPress={() => {
+            setTitle(conversation?.title ?? "");
+            setDetailsOpen(true);
+          }}
+          style={({ pressed }) => [
+            styles.labeledAction,
+            { opacity: pressed ? 0.65 : 1 },
+          ]}
         >
-          <Label muted style={styles.modelLabel}>
-            {conversation?.model ??
-              assistant.models.find((item) => item.id === assistant.model)
-                ?.label ??
-              assistant.model}
+          <Info size={17} color={colors.textSecondary} />
+          <Label muted style={styles.actionLabel}>
+            Details
+          </Label>
+        </Pressable>
+      </View>
+      <View style={styles.chatNavigation}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Chatting with ${agentName}. Choose agent`}
+          onPress={() => setAgentsOpen(true)}
+          style={[styles.agentSelector, { backgroundColor: colors.cardSoft }]}
+        >
+          <Bot size={17} color={colors.primaryOnTint} />
+          <View style={styles.fill}>
+            <Label numberOfLines={1} style={styles.agentName}>
+              {agentName}
+            </Label>
+            {assistant.agent?.owner_kind === "org" ? (
+              <Label muted numberOfLines={1} style={styles.ownerLabel}>
+                {assistant.agent.owner_name ?? "Organization"}
+              </Label>
+            ) : null}
+          </View>
+          <ChevronDown size={15} color={colors.textMuted} />
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Chat history"
+          onPress={() => setHistoryOpen(true)}
+          style={({ pressed }) => [
+            styles.labeledAction,
+            { opacity: pressed ? 0.65 : 1 },
+          ]}
+        >
+          <History size={17} color={colors.textSecondary} />
+          <Label muted style={styles.actionLabel}>
+            History
+          </Label>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="New chat"
+          accessibilityState={{ disabled: newChatDisabled }}
+          disabled={newChatDisabled}
+          onPress={newChat}
+          style={({ pressed }) => [
+            styles.labeledAction,
+            styles.newChatAction,
+            {
+              backgroundColor: colors.primaryGlow,
+              opacity: newChatDisabled ? 0.4 : pressed ? 0.65 : 1,
+            },
+          ]}
+        >
+          <SquarePen size={17} color={colors.primaryOnTint} />
+          <Label style={[styles.actionLabel, { color: colors.primaryOnTint }]}>
+            New chat
           </Label>
         </Pressable>
       </View>
@@ -1076,11 +1104,7 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
         <ActionButton
           label="New chat"
           onPress={newChat}
-          disabled={
-            assistant.loading ||
-            !assistant.agentId ||
-            (assistant.sending && !assistant.conversationId)
-          }
+          disabled={newChatDisabled}
         />
         {!assistant.conversations.length && !assistant.loadingIndex ? (
           <Label muted>Your saved chats will appear here.</Label>
@@ -1089,6 +1113,10 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
           <Pressable
             key={item.id}
             accessibilityRole="button"
+            accessibilityLabel={`Open chat ${item.title}${item.active_turn ? ", Working" : ""}${item.pending_acknowledgements ? `, ${item.pending_acknowledgements} requests` : ""}, ${formatDate(item.last_message_at)}`}
+            accessibilityState={{
+              selected: item.id === assistant.conversationId,
+            }}
             onPress={() => {
               assistant.openConversation(item.id);
               navigation.setParams({
@@ -1101,8 +1129,37 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
               setHistoryOpen(false);
             }}
           >
-            <Card>
-              <Label style={styles.cardTitle}>{item.title}</Label>
+            <Card
+              style={
+                item.id === assistant.conversationId
+                  ? {
+                      borderColor: colors.primary,
+                      backgroundColor: colors.primaryGlow,
+                    }
+                  : undefined
+              }
+            >
+              <View style={styles.row}>
+                <Label
+                  numberOfLines={2}
+                  style={[styles.cardTitle, styles.fill]}
+                >
+                  {item.title}
+                </Label>
+                {item.id === assistant.conversationId ? (
+                  <View style={styles.currentChatBadge}>
+                    <Check size={16} color={colors.primaryOnTint} />
+                    <Label
+                      style={[
+                        styles.actionLabel,
+                        { color: colors.primaryOnTint },
+                      ]}
+                    >
+                      Current
+                    </Label>
+                  </View>
+                ) : null}
+              </View>
               <Label muted>
                 {item.agent?.display_name ?? item.agent?.name ?? "NyxBot"}
                 {item.active_turn ? " · Working" : ""}
@@ -1138,8 +1195,9 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
             <Pressable
               key={item.id}
               accessibilityRole="button"
-              disabled={!item.available}
+              disabled={!item.available || modelLocked}
               onPress={() => {
+                if (modelLocked) return;
                 assistant.setModel(item.id);
                 setModelOpen(false);
               }}
@@ -1168,56 +1226,101 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
         )}
       </Sheet>
       <Sheet
-        visible={settingsOpen}
-        title="Chat settings"
-        onClose={() => setSettingsOpen(false)}
+        visible={detailsOpen}
+        title="Chat details"
+        onClose={() => setDetailsOpen(false)}
       >
-        <Field
-          label="Chat title"
-          value={title}
-          onChangeText={setTitle}
-          maxLength={200}
-          autoCapitalize="sentences"
-        />
-        <ActionButton
-          label="Save title"
-          loading={assistant.mutating}
-          disabled={!title.trim()}
-          onPress={() =>
-            void perform(async () => {
-              if (await assistant.rename(title)) setSettingsOpen(false);
-            })
-          }
-        />
-        <ActionButton
-          label="Delete chat"
-          variant="danger"
-          disabled={assistant.mutating}
-          onPress={() =>
-            Alert.alert(
-              "Delete this chat?",
-              "This deletes its saved messages and permissions. Active work will be stopped.",
-              [
-                { text: "Cancel", style: "cancel" },
-                {
-                  text: "Delete",
-                  style: "destructive",
-                  onPress: () => {
-                    setSettingsOpen(false);
-                    void assistant.remove().then((removed) => {
-                      if (removed)
-                        navigation.setParams({
-                          conversationId: undefined,
-                          acknowledgementId: undefined,
+        <Card>
+          <Label style={styles.cardTitle}>Agent</Label>
+          <Label>{agentName}</Label>
+          <Label muted>
+            {assistant.agent?.owner_kind === "org"
+              ? (assistant.agent.owner_name ?? "Organization")
+              : currentAgent?.kind === "specialist"
+                ? "Personal specialist"
+                : "Your personal assistant"}
+          </Label>
+        </Card>
+        <Card>
+          <Label style={styles.cardTitle}>Model</Label>
+          <Label>{currentModelLabel}</Label>
+          <Label muted>
+            {assistant.conversationId
+              ? "The model used by this saved chat. Model selection is available when starting a new chat."
+              : "Choose the model for this new chat."}
+          </Label>
+          {!assistant.conversationId ? (
+            <ActionButton
+              label="Choose model"
+              variant="secondary"
+              disabled={modelLocked}
+              onPress={() => {
+                setDetailsOpen(false);
+                setModelOpen(true);
+              }}
+            />
+          ) : null}
+        </Card>
+        {currentAgent?.id ? (
+          <ActionButton
+            label="Agent details"
+            variant="secondary"
+            onPress={() => {
+              setDetailsOpen(false);
+              navigation.navigate("Agents", { agentId: currentAgent.id });
+            }}
+          />
+        ) : null}
+        {assistant.conversationId ? (
+          <View style={styles.detailActions}>
+            <Field
+              label="Chat title"
+              value={title}
+              onChangeText={setTitle}
+              maxLength={200}
+              autoCapitalize="sentences"
+            />
+            <ActionButton
+              label="Save title"
+              loading={assistant.mutating}
+              disabled={!title.trim()}
+              onPress={() =>
+                void perform(async () => {
+                  if (await assistant.rename(title)) setDetailsOpen(false);
+                })
+              }
+            />
+            <ActionButton
+              label="Delete chat"
+              variant="danger"
+              disabled={assistant.mutating}
+              onPress={() =>
+                Alert.alert(
+                  "Delete this chat?",
+                  "This deletes its saved messages and permissions. Active work will be stopped.",
+                  [
+                    { text: "Cancel", style: "cancel" },
+                    {
+                      text: "Delete",
+                      style: "destructive",
+                      onPress: () => {
+                        setDetailsOpen(false);
+                        void assistant.remove().then((removed) => {
+                          if (removed)
+                            navigation.setParams({
+                              conversationId: undefined,
+                              acknowledgementId: undefined,
+                            });
+                          if (removed) updateDraft("");
                         });
-                      if (removed) updateDraft("");
-                    });
-                  },
-                },
-              ],
-            )
-          }
-        />
+                      },
+                    },
+                  ],
+                )
+              }
+            />
+          </View>
+        ) : null}
       </Sheet>
     </WorkspacePage>
   );
@@ -1322,19 +1425,44 @@ function formatDate(value: string) {
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   row: { flexDirection: "row", alignItems: "center", gap: 8 },
-  agentSelector: {
+  chatHeading: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    minHeight: 52,
-    paddingVertical: 8,
-  },
-  toolbar: {
-    flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
     gap: 12,
   },
+  currentChatLabel: { fontSize: 10, lineHeight: 15 },
+  chatTitle: { fontFamily: fonts.displaySemi, fontSize: 22, lineHeight: 30 },
+  chatNavigation: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  agentSelector: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    minHeight: 44,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.md,
+  },
+  agentName: { fontSize: 12, fontFamily: fonts.bodySemi },
+  ownerLabel: { fontSize: 10, lineHeight: 13 },
+  labeledAction: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingHorizontal: 8,
+    borderRadius: radius.md,
+  },
+  actionLabel: { fontSize: 11, fontFamily: fonts.bodySemi },
+  newChatAction: { paddingHorizontal: 10 },
+  currentChatBadge: { flexDirection: "row", alignItems: "center", gap: 4 },
+  detailActions: { gap: 14 },
   iconButton: {
     minWidth: 44,
     minHeight: 44,
@@ -1342,8 +1470,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderRadius: radius.md,
   },
-  modelPill: { flexShrink: 1, paddingVertical: 10, paddingHorizontal: 8 },
-  modelLabel: { fontSize: 11 },
   transcript: { paddingVertical: 8, flexGrow: 1 },
   transcriptHeader: { marginBottom: 20 },
   transcriptSeparator: { height: 20 },

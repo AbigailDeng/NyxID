@@ -18,6 +18,8 @@ This increment starts the mobile migration against the existing NyxID Web and ba
 
 The [chat ownership and navigation follow-up](RN_CHAT_NAVIGATION_QA.md) aligns one-to-one Agent selection with Web: saved thread owner first, explicit Agent second, NyxBot by default. History is Agent-scoped, New chat retains the current Agent, selecting an Agent opens its latest thread, and the drawer Chats entry returns to NyxBot. Workspace header returns preserve local detail/form history before route history. These paths were operated in the actual iOS app; multi-agent Groups remain follow-on work.
 
+The [chat header follow-up](RN_CHAT_HEADER_QA.md) separates the current title from labeled History/New chat actions, marks the selected history item Current, and replaces the anonymous menu with Details. Actual model context stays in Details with new-draft selection; saved-chat rename/delete retain their existing contracts.
+
 Backend contracts remain in [NyxAgent handlers](../../backend/src/handlers/assistant_nyxagent.rs), [Agent management handlers](../../backend/src/handlers/assistant_team.rs), [key handlers](../../backend/src/handlers/keys.rs), [catalog handlers](../../backend/src/handlers/catalog.rs), [provider authorization handlers](../../backend/src/handlers/user_tokens.rs), and [auth/MFA handlers](../../backend/src/handlers/auth.rs). No changes to these files are required or included.
 
 - User management uses the user's first-party login session. A restricted Agent Key is not a substitute for full account management authorization. Existing SecureStore, single-flight refresh, push registration and QR validation are reused.
@@ -41,6 +43,8 @@ The following existing Web capabilities are **not yet migrated** by this first i
 Artifacts/Assistant Activity/folder placeholders are not treated as new durable backend resources. Machines remain excluded. The password-change correction above takes precedence over the earlier design feasibility assessment.
 
 ## Verification status
+
+The chat header follow-up was operated in the existing production-backed iOS Simulator: saved-history switching, long-title truncation, Current marking, temporary rename and restoration, Delete Cancel, New chat, new-draft model selection/restoration, and Agent details with contextual Back. Its 54 related tests are separate from earlier verification batches. Alternative-model inference, history load-more, extreme Dynamic Type/narrow devices, Android and physical-device behavior were not verified by this batch.
 
 The [attachments follow-up](RN_ATTACHMENTS_QA.md) adds native file selection, serial uploads under the existing Web limits (10 files, 20 MiB each), attachment-only sends, and owner-authenticated saved attachment access. The actual production-backed iOS batch uploaded a generated PNG and text document, sent both without message text, and observed NyxBot describe the image and read the exact test text. Image preview and system Save to Files also passed. This establishes one live attachment turn; it does not establish all providers, supported document formats, Android or background execution.
 
