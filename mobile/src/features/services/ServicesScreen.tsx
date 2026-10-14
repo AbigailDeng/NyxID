@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
-  BackHandler,
   Linking,
   Pressable,
   StyleSheet,
@@ -30,6 +29,7 @@ import {
 } from "../../components/workspace/WorkspaceUI";
 import { ApiError } from "../../lib/api/ApiError";
 import { servicesApi } from "../../lib/api/servicesApi";
+import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import { fonts } from "../../theme/designTokens";
 import { useTheme } from "../../theme/ThemeContext";
 import {
@@ -115,17 +115,14 @@ export function ServicesScreen() {
     setTokenOnlyRemoval(false);
     setReplacement("");
   }
-  useEffect(() => {
-    if (!focused || (!selectedId && !adding)) return;
-    const subscription = BackHandler.addEventListener(
-      "hardwareBackPress",
-      () => {
-        if (!actionLock.current) closeDetail();
-        return true;
-      },
-    );
-    return () => subscription.remove();
-  }, [focused, selectedId, adding]);
+  useWorkspaceBack({
+    active: Boolean(selectedId) || Boolean(adding),
+    disabled: busy,
+    label: "Back to services",
+    onBack: () => {
+      if (!actionLock.current) closeDetail();
+    },
+  });
 
   async function run(action: () => Promise<void>) {
     if (actionLock.current) return;

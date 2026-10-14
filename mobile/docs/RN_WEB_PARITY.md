@@ -15,6 +15,8 @@ This increment starts the mobile migration against the existing NyxID Web and ba
 
 ## Contract boundaries
 
+The [chat ownership and navigation follow-up](RN_CHAT_NAVIGATION_QA.md) aligns one-to-one Agent selection with Web: saved thread owner first, explicit Agent second, NyxBot by default. History is Agent-scoped, New chat retains the current Agent, selecting an Agent opens its latest thread, and the drawer Chats entry returns to NyxBot. Workspace header returns preserve local detail/form history before route history. These paths were operated in the actual iOS app; multi-agent Groups remain follow-on work.
+
 Backend contracts remain in [NyxAgent handlers](../../backend/src/handlers/assistant_nyxagent.rs), [Agent management handlers](../../backend/src/handlers/assistant_team.rs), [key handlers](../../backend/src/handlers/keys.rs), [catalog handlers](../../backend/src/handlers/catalog.rs), [provider authorization handlers](../../backend/src/handlers/user_tokens.rs), and [auth/MFA handlers](../../backend/src/handlers/auth.rs). No changes to these files are required or included.
 
 - User management uses the user's first-party login session. A restricted Agent Key is not a substitute for full account management authorization. Existing SecureStore, single-flight refresh, push registration and QR validation are reused.

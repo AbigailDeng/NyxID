@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
-  BackHandler,
   Pressable,
   StyleSheet,
   Switch,
@@ -23,6 +22,7 @@ import {
 } from "../../components/workspace/WorkspaceUI";
 import { agentsApi } from "../../lib/api/agentsApi";
 import { servicesApi } from "../../lib/api/servicesApi";
+import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import { fonts } from "../../theme/designTokens";
 import { useTheme } from "../../theme/ThemeContext";
 import type { ServiceConnection } from "../services/serviceContracts";
@@ -45,7 +45,11 @@ const errorMessage = (cause: unknown) =>
     : cause instanceof Error
       ? cause.message
       : "Could not complete this action. Try again.";
-type OpenChat = (context: { agentId: string; conversationId?: string }) => void;
+type OpenChat = (context: {
+  agentId: string;
+  conversationId?: string;
+  openLatest?: boolean;
+}) => void;
 
 export function AgentsScreen({
   agentId,
@@ -125,17 +129,14 @@ export function AgentsScreen({
     setError(undefined);
     setConfirmation(undefined);
   }
-  useEffect(() => {
-    if (!focused || (!selectedId && !creating)) return;
-    const subscription = BackHandler.addEventListener(
-      "hardwareBackPress",
-      () => {
-        if (!lock.current) back();
-        return true;
-      },
-    );
-    return () => subscription.remove();
-  }, [focused, selectedId, creating]);
+  useWorkspaceBack({
+    active: Boolean(selectedId) || creating,
+    disabled: busy,
+    label: "Back to agents",
+    onBack: () => {
+      if (!lock.current) back();
+    },
+  });
 
   async function run(
     action: () => Promise<void>,
@@ -274,7 +275,7 @@ export function AgentsScreen({
                   onPress={() =>
                     onOpenChat({
                       agentId: agent.id,
-                      conversationId: agent.home_conversation_id ?? undefined,
+                      openLatest: true,
                     })
                   }
                 />
@@ -529,7 +530,7 @@ export function AgentsScreen({
       />
       {list.data && (
         <Label mono muted>
-          {live} / {list.data.limits.max_live_subagents} live specialists
+          {live} / {list.data.limits.max_live_subagents} personal specialists
         </Label>
       )}
       {atLimit && (

@@ -16,6 +16,8 @@ import * as WebBrowser from "expo-web-browser";
 import Markdown, { type RenderRules } from "react-native-markdown-display";
 import {
   History,
+  Bot,
+  ChevronDown,
   MessageSquare,
   MoreHorizontal,
   Plus,
@@ -24,6 +26,7 @@ import {
   X,
 } from "lucide-react-native";
 import type { RootStackParamList } from "../../app/AppNavigator";
+import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import {
   WorkspacePage,
   ActionButton,
@@ -35,6 +38,7 @@ import {
 import { useTheme } from "../../theme/ThemeContext";
 import { fonts, radius } from "../../theme/designTokens";
 import { useAssistant } from "./useAssistant";
+import { chatAgentLabel } from "./assistantAgentContext";
 import { liveReplyText } from "./assistantStream";
 import {
   ASSISTANT_SEND_PRESS_GRACE_MS,
@@ -52,15 +56,28 @@ import type {
 } from "./assistantTypes";
 
 type AssistantScreenProps = {
-  route?: { params?: { conversationId?: string; agentId?: string } };
+  route?: {
+    params?: {
+      conversationId?: string;
+      agentId?: string;
+      draft?: boolean;
+      openLatest?: boolean;
+    };
+  };
 };
 
 export function AssistantScreen({ route }: AssistantScreenProps) {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { colors } = useTheme();
+  const adoptedId = useRef<string | undefined>(undefined);
   const assistant = useAssistant(
     route?.params?.conversationId,
     route?.params?.agentId,
+    (id) => {
+      if (route?.params?.conversationId === id) return;
+      adoptedId.current = id;
+      navigation.setParams({ conversationId: id, openLatest: false });
+    },
   );
   const [draft, setDraft] = useState("");
   const draftRevision = useRef(0);
@@ -69,6 +86,7 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
     setDraft(value);
   }
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [agentsOpen, setAgentsOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -79,6 +97,12 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
   const following = useRef(true);
   const transcriptMetrics = useRef({ height: 0, viewportHeight: 0 });
   const conversation = assistant.history?.conversation;
+  const currentAgent = assistant.agent ?? conversation?.agent;
+  const agentName = currentAgent
+    ? chatAgentLabel(currentAgent)
+    : assistant.agentId
+      ? "Agent"
+      : "NyxBot";
   const running = assistant.sending || !!conversation?.active_turn;
   const destroyed = conversation?.agent?.destroyed;
   const streamPersisted =
@@ -109,7 +133,33 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
     assistant.online &&
     !assistant.loading &&
     !assistant.loadingOlder &&
-    !assistant.recoveryRequired;
+    !assistant.recoveryRequired &&
+    !route?.params?.openLatest &&
+    assistant.agent?.can_use !== false &&
+    (!!assistant.conversationId ||
+      (assistant.agent?.can_use === true &&
+        assistant.agent.status !== "destroyed"));
+
+  useEffect(() => {
+    if (
+      !route?.params?.openLatest ||
+      route.params.conversationId ||
+      !route.params.agentId ||
+      assistant.indexedAgentId !== route.params.agentId
+    )
+      return;
+    const id = assistant.conversations[0]?.id;
+    navigation.setParams({ conversationId: id, openLatest: false });
+    if (id) assistant.openConversation(id);
+  }, [
+    route?.params?.openLatest,
+    route?.params?.conversationId,
+    route?.params?.agentId,
+    assistant.indexedAgentId,
+    assistant.conversations,
+    assistant.openConversation,
+    navigation,
+  ]);
 
   useLayoutEffect(() => {
     following.current = true;
@@ -117,6 +167,14 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
     setLocalError(undefined);
   }, [assistant.conversationId]);
   useEffect(() => {
+    // Persisting the first turn's identity is not a user switching chats.
+    if (
+      adoptedId.current &&
+      route?.params?.conversationId === adoptedId.current
+    ) {
+      adoptedId.current = undefined;
+      return;
+    }
     draftRevision.current += 1;
     setDraft("");
   }, [route?.params?.agentId, route?.params?.conversationId]);
@@ -143,11 +201,40 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
   }
 
   function newChat() {
+    const agentId = assistant.agentId;
     assistant.openConversation();
-    navigation.setParams({ conversationId: undefined });
+    assistant.setModel(assistant.agent?.model ?? "nyxagent/chat");
+    navigation.setParams({
+      conversationId: undefined,
+      agentId,
+      draft: true,
+      openLatest: false,
+    });
     updateDraft("");
     setHistoryOpen(false);
   }
+
+  useWorkspaceBack({
+    active:
+      !navigation.canGoBack() &&
+      Boolean(assistant.conversationId || currentAgent?.kind === "specialist"),
+    disabled:
+      assistant.loading || (assistant.sending && !assistant.conversationId),
+    label: assistant.conversationId ? `Back to ${agentName}` : "Back to NyxBot",
+    onBack: () => {
+      if (assistant.conversationId) newChat();
+      else {
+        assistant.openConversation();
+        navigation.setParams({
+          conversationId: undefined,
+          agentId: undefined,
+          draft: false,
+          openLatest: false,
+        });
+        updateDraft("");
+      }
+    },
+  });
 
   async function sendDraft() {
     if (!canSend || !composerPress.current("send")) return;
@@ -421,6 +508,25 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
       titleNumberOfLines={1}
       scroll={false}
     >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Chatting with ${agentName}. Choose agent`}
+        onPress={() => setAgentsOpen(true)}
+        style={styles.agentSelector}
+      >
+        <Bot size={20} color={colors.primaryOnTint} />
+        <View style={styles.fill}>
+          <Label>{agentName}</Label>
+          <Label muted>
+            {assistant.agent?.owner_kind === "org"
+              ? (assistant.agent.owner_name ?? "Organization")
+              : currentAgent?.kind === "specialist"
+                ? "Personal specialist"
+                : "Your personal assistant"}
+          </Label>
+        </View>
+        <ChevronDown size={18} color={colors.textMuted} />
+      </Pressable>
       <View style={styles.toolbar}>
         <View style={styles.row}>
           <IconButton label="Chat history" onPress={() => setHistoryOpen(true)}>
@@ -429,7 +535,11 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
           <IconButton
             label="New chat"
             onPress={newChat}
-            disabled={assistant.sending && !assistant.conversationId}
+            disabled={
+              assistant.loading ||
+              !assistant.agentId ||
+              (assistant.sending && !assistant.conversationId)
+            }
           >
             <Plus size={21} color={colors.textSecondary} />
           </IconButton>
@@ -467,6 +577,16 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
       {!assistant.online ? (
         <Notice message="You're offline. Reconnect to refresh this chat and send messages." />
       ) : null}
+      {assistant.agentsError ? (
+        <View style={styles.errorRow}>
+          <Notice message={assistant.agentsError} tone="error" />
+          <ActionButton
+            label="Reload agents"
+            variant="secondary"
+            onPress={() => void assistant.reloadAgents()}
+          />
+        </View>
+      ) : null}
       {assistant.error || localError ? (
         <View style={styles.errorRow}>
           <Notice message={localError ?? assistant.error ?? ""} tone="error" />
@@ -479,6 +599,9 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
       ) : null}
       {destroyed ? (
         <Notice message="This agent was destroyed. This chat is read-only." />
+      ) : null}
+      {route?.params?.openLatest ? (
+        <Notice message={`Opening ${agentName}'s latest chat…`} />
       ) : null}
       <FlatList
         key={assistant.conversationId ?? "new-chat"}
@@ -575,7 +698,9 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
                 What would you like to do?
               </Text>
               <Label muted>
-                Ask NyxBot to help with your connected services.
+                {currentAgent?.kind === "specialist"
+                  ? `Start a conversation with ${agentName}.`
+                  : `Ask ${agentName} to help with your connected services.`}
               </Label>
               {["Show my connected services", "Check my pending approvals"].map(
                 (prompt) => (
@@ -701,8 +826,12 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
           value={draft}
           onChangeText={updateDraft}
           multiline
-          editable={!destroyed && !assistant.recoveryRequired}
-          placeholder="Message NyxBot…"
+          editable={
+            !destroyed &&
+            !assistant.recoveryRequired &&
+            !route?.params?.openLatest
+          }
+          placeholder={`Message ${agentName}…`}
           placeholderTextColor={colors.textMuted}
           selectionColor={colors.primary}
           style={[styles.composerInput, { color: colors.textPrimary }]}
@@ -750,11 +879,76 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
       </View>
 
       <Sheet
+        visible={agentsOpen}
+        title="Choose agent"
+        onClose={() => setAgentsOpen(false)}
+      >
+        {assistant.agentsLoading ? (
+          <ActivityIndicator color={colors.primary} />
+        ) : null}
+        {assistant.agentsError ? (
+          <Notice message={assistant.agentsError} tone="error" />
+        ) : null}
+        {assistant.agents
+          .filter(
+            (agent) => agent.status !== "destroyed" && agent.can_use === true,
+          )
+          .map((agent) => (
+            <Pressable
+              key={agent.id}
+              accessibilityRole="button"
+              accessibilityLabel={`Chat with ${chatAgentLabel(agent)}`}
+              onPress={() => {
+                assistant.openConversation();
+                assistant.setModel(agent.model ?? "nyxagent/chat");
+                navigation.setParams({
+                  agentId: agent.id,
+                  conversationId: undefined,
+                  draft: false,
+                  openLatest: true,
+                });
+                updateDraft("");
+                setAgentsOpen(false);
+              }}
+            >
+              <Card>
+                <Label>
+                  {chatAgentLabel(agent)}
+                  {assistant.agentId === agent.id ? " · Selected" : ""}
+                </Label>
+                <Label muted>
+                  {agent.owner_kind === "org"
+                    ? (agent.owner_name ?? "Organization")
+                    : "Personal"}{" "}
+                  · @{agent.name}
+                </Label>
+              </Card>
+            </Pressable>
+          ))}
+        <ActionButton
+          label="Manage agents"
+          variant="secondary"
+          onPress={() => {
+            setAgentsOpen(false);
+            navigation.navigate("Agents");
+          }}
+        />
+      </Sheet>
+
+      <Sheet
         visible={historyOpen}
-        title="Chat history"
+        title={`${agentName} · Chat history`}
         onClose={() => setHistoryOpen(false)}
       >
-        <ActionButton label="New chat" onPress={newChat} />
+        <ActionButton
+          label="New chat"
+          onPress={newChat}
+          disabled={
+            assistant.loading ||
+            !assistant.agentId ||
+            (assistant.sending && !assistant.conversationId)
+          }
+        />
         {!assistant.conversations.length && !assistant.loadingIndex ? (
           <Label muted>Your saved chats will appear here.</Label>
         ) : null}
@@ -764,7 +958,11 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
             accessibilityRole="button"
             onPress={() => {
               assistant.openConversation(item.id);
-              navigation.setParams({ conversationId: item.id });
+              navigation.setParams({
+                conversationId: item.id,
+                agentId: item.agent?.id ?? assistant.agentId,
+                openLatest: false,
+              });
               updateDraft("");
               setHistoryOpen(false);
             }}
@@ -993,6 +1191,13 @@ function formatSize(bytes: number) {
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   row: { flexDirection: "row", alignItems: "center", gap: 8 },
+  agentSelector: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    minHeight: 52,
+    paddingVertical: 8,
+  },
   toolbar: {
     flexDirection: "row",
     justifyContent: "space-between",

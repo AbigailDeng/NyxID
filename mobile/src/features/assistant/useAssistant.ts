@@ -2,8 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
 import NetInfo from "@react-native-community/netinfo";
+import { useQuery } from "@tanstack/react-query";
 import { assistantApi, streamAssistantTurn } from "../../lib/api/assistantApi";
+import { agentsApi } from "../../lib/api/agentsApi";
 import { ApiError } from "../../lib/api/ApiError";
+import { resolveChatAgentId } from "./assistantAgentContext";
 import {
   applyAssistantEvent,
   emptyLiveReply,
@@ -21,13 +24,18 @@ import type {
   AssistantModel,
 } from "./assistantTypes";
 
-export function useAssistant(initialId?: string, agentId?: string) {
+export function useAssistant(
+  initialId?: string,
+  routeAgentId?: string,
+  onConversationAdopted?: (id: string) => void,
+) {
   const focused = useIsFocused();
   const [conversationId, setConversationId] = useState(initialId);
   const [conversations, setConversations] = useState<AssistantConversation[]>(
     [],
   );
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [indexedAgentId, setIndexedAgentId] = useState<string>();
   const [history, setHistory] = useState<AssistantHistory>();
   const [models, setModels] = useState<AssistantModel[]>([]);
   const [model, setModel] = useState("nyxagent/chat");
@@ -57,11 +65,34 @@ export function useAssistant(initialId?: string, agentId?: string) {
   const sendLock = useRef(false);
   const decisionLock = useRef(false);
   const lastDecision = useRef(0);
-  const previousAgent = useRef(agentId);
+  const previousAgent = useRef(routeAgentId);
+  const adopt = useRef(onConversationAdopted);
+  adopt.current = onConversationAdopted;
   const continuations = useRef(new Map<string, AssistantAcknowledgement[]>());
   const active = focused && foreground && online;
   const activeRef = useRef(active);
   activeRef.current = active;
+  const agents = useQuery({
+    queryKey: ["workspace", "agents", "list"],
+    queryFn: ({ signal }) => agentsApi.list(signal),
+    enabled: active,
+    retry: false,
+    staleTime: 15_000,
+  });
+  const agentId = resolveChatAgentId(
+    agents.data?.agents,
+    history?.conversation.agent?.id,
+    routeAgentId,
+  );
+  const agent = agents.data?.agents.find((item) => item.id === agentId);
+  const indexOwner = useRef(agentId);
+  indexOwner.current = agentId;
+  const modelOwner = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!agent || modelOwner.current === agentId) return;
+    modelOwner.current = agentId;
+    setModel(agent.model ?? "nyxagent/chat");
+  }, [agentId, agent]);
 
   const updateHistory = useCallback((value: AssistantHistory | undefined) => {
     latestHistory.current = value;
@@ -70,11 +101,18 @@ export function useAssistant(initialId?: string, agentId?: string) {
 
   const refreshIndex = useCallback(
     async (cursor?: string) => {
+      // A late refresh from the previous agent must not invalidate the new index.
+      if (!agentId || indexOwner.current !== agentId) return;
       const sequence = ++indexSequence.current;
       if (mounted.current) setLoadingIndex(true);
       try {
         const page = await assistantApi.list(cursor, agentId);
-        if (!mounted.current || sequence !== indexSequence.current) return;
+        if (
+          !mounted.current ||
+          sequence !== indexSequence.current ||
+          indexOwner.current !== agentId
+        )
+          return;
         setConversations((previous) => {
           const merged = new Map(
             (cursor ? previous : []).map((row) => [row.id, row]),
@@ -85,6 +123,7 @@ export function useAssistant(initialId?: string, agentId?: string) {
           );
         });
         setNextCursor(page.next_cursor);
+        setIndexedAgentId(agentId);
       } finally {
         if (mounted.current && sequence === indexSequence.current)
           setLoadingIndex(false);
@@ -92,6 +131,13 @@ export function useAssistant(initialId?: string, agentId?: string) {
     },
     [agentId],
   );
+  useEffect(() => {
+    indexSequence.current += 1;
+    setConversations([]);
+    setNextCursor(null);
+    setIndexedAgentId(undefined);
+    setLoadingIndex(false);
+  }, [agentId]);
 
   const refreshHistory = useCallback(
     async (id: string, beforeSeq?: number) => {
@@ -162,11 +208,11 @@ export function useAssistant(initialId?: string, agentId?: string) {
   );
 
   useEffect(() => {
-    const agentChanged = previousAgent.current !== agentId;
-    previousAgent.current = agentId;
+    const agentChanged = previousAgent.current !== routeAgentId;
+    previousAgent.current = routeAgentId;
     if (agentChanged || initialId !== selected.current)
       openConversation(initialId);
-  }, [initialId, agentId, openConversation]);
+  }, [initialId, routeAgentId, openConversation]);
 
   const recover = useCallback(async () => {
     const recovery = ++recoverSequence.current;
@@ -295,6 +341,11 @@ export function useAssistant(initialId?: string, agentId?: string) {
         throw new Error(
           "This agent was destroyed. Its conversation is read-only.",
         );
+      if (
+        !selected.current &&
+        (!agent || agent.can_use !== true || agent.status === "destroyed")
+      )
+        throw new Error("Select an available agent before starting a chat.");
       const localEpoch = epoch.current;
       const controller = new AbortController();
       streamController.current = controller;
@@ -317,6 +368,7 @@ export function useAssistant(initialId?: string, agentId?: string) {
               id = event.conversation_id;
               selected.current = id;
               setConversationId(id);
+              adopt.current?.(id);
             } else if (!reply.conversationId) {
               throw new Error("Assistant did not identify the conversation.");
             }
@@ -357,7 +409,7 @@ export function useAssistant(initialId?: string, agentId?: string) {
       }
       return !keepDraft;
     },
-    [agentId, model, recoveryRequired, refreshHistory, refreshIndex],
+    [agentId, agent, model, recoveryRequired, refreshHistory, refreshIndex],
   );
 
   useEffect(() => {
@@ -498,6 +550,13 @@ export function useAssistant(initialId?: string, agentId?: string) {
   }
 
   return {
+    agentId,
+    agent,
+    agents: agents.data?.agents ?? [],
+    agentsLoading: agents.isPending,
+    agentsError: agents.isError ? errorMessage(agents.error) : undefined,
+    reloadAgents: () => agents.refetch(),
+    indexedAgentId,
     conversationId,
     conversations,
     history,

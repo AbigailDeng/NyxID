@@ -397,7 +397,14 @@ function ThemedAppShell({
     setDrawerOpen(false);
     if (!navigationRef.isReady()) return;
     switch (route) {
-      case "Assistant": navigationRef.navigate("Assistant"); break;
+      case "Assistant":
+        navigationRef.navigate("Assistant", {
+          conversationId: undefined,
+          agentId: undefined,
+          draft: false,
+          openLatest: false,
+        });
+        break;
       case "Activity": navigationRef.navigate("Activity"); break;
       case "Services": navigationRef.navigate("Services"); break;
       case "Agents": navigationRef.navigate("Agents"); break;

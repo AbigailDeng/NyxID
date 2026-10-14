@@ -1,5 +1,7 @@
 # RN runtime QA — 2026-10-13–14
 
+The [October 14 chat and navigation follow-up](RN_CHAT_NAVIGATION_QA.md) records actual native verification of Agent identity, filtered history, New chat ownership, latest-thread selection and page returns against the existing production session. It also confirms the menu's iOS 26 circular-background fix. Its navigation observations are separate from the earlier fixture/backend batches below; stream and Android acceptance limits remain explicit.
+
 ## Acceptance status
 
 **The actual iOS native verification batch is complete, with explicit remaining acceptance limits.** The RN app was operated in a dedicated iPhone 16e simulator. The [fixture-native record](qa/2026-10-13-native-ios.json) contains **78 observations: 66 pass, 8 retained before-fix fail and 4 partial**, with 55 reviewed screenshots. The independent [real-backend native record](qa/2026-10-14-native-backend.json) contains **11 pass observations**, ten corroborated by read-only HTTP/Mongo checks and one observing native logout only. Defects found during actual native use were repaired and the affected paths rerun. PR #1866 remains draft because Android and material device/external integration boundaries are unverified; this is not full Web or all-platform acceptance. Native fixture results, real-backend native results and API/schema checks have separate scopes and are not added into one pass total.
