@@ -15,7 +15,7 @@ import type {
   NativeStackNavigationOptions,
   NativeStackNavigationProp,
 } from "@react-navigation/native-stack";
-import { BackHandler, Pressable, StyleSheet, View } from "react-native";
+import { BackHandler, Pressable, StyleSheet } from "react-native";
 import { ChevronLeft, Menu } from "lucide-react-native";
 import { useTheme } from "../theme/ThemeContext";
 import type { RootStackParamList } from "./AppNavigator";
@@ -37,28 +37,20 @@ function WorkspaceHeaderButtons({
 }) {
   const { colors } = useTheme();
   return (
-    <View style={styles.controls}>
-      {canGoBack && (
-        <Pressable
-          onPress={onBack}
-          accessibilityRole="button"
-          accessibilityLabel={label}
-          accessibilityState={{ disabled }}
-          disabled={disabled}
-          style={[styles.button, disabled && styles.disabled]}
-        >
-          <ChevronLeft color={colors.textPrimary} size={24} />
-        </Pressable>
-      )}
-      <Pressable
-        onPress={onOpenMenu}
-        accessibilityRole="button"
-        accessibilityLabel="Open navigation"
-        style={styles.button}
-      >
+    <Pressable
+      onPress={canGoBack ? onBack : onOpenMenu}
+      accessibilityRole="button"
+      accessibilityLabel={canGoBack ? label : "Open navigation"}
+      accessibilityState={{ disabled: canGoBack && disabled }}
+      disabled={canGoBack && disabled}
+      style={[styles.button, canGoBack && disabled && styles.disabled]}
+    >
+      {canGoBack ? (
+        <ChevronLeft color={colors.textPrimary} size={24} />
+      ) : (
         <Menu color={colors.textPrimary} size={22} />
-      </Pressable>
-    </View>
+      )}
+    </Pressable>
   );
 }
 
@@ -151,8 +143,8 @@ export function useWorkspaceBack({
 }
 
 const styles = StyleSheet.create({
-  controls: { flexDirection: "row", marginLeft: -8 },
   button: {
+    marginLeft: -8,
     minWidth: 44,
     height: 44,
     justifyContent: "center",
