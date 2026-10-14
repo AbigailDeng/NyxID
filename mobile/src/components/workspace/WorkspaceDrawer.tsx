@@ -6,7 +6,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import {
   Bot,
   KeyRound,
@@ -66,7 +66,8 @@ export function WorkspaceDrawer({
       animationType="fade"
       onRequestClose={onClose}
     >
-      <View style={styles.root}>
+      {/* Modal content has its own native root and needs a local provider. */}
+      <SafeAreaProvider style={styles.root}>
         <Pressable
           accessibilityLabel="Close navigation"
           accessibilityRole="button"
@@ -83,7 +84,7 @@ export function WorkspaceDrawer({
           ]}
         >
           <View style={styles.brandRow}>
-            <Text style={[styles.brand, { color: colors.primaryOnTint }]}>
+            <Text style={[styles.brand, { color: colors.textPrimary }]}>
               NyxID
             </Text>
             <Pressable
@@ -95,7 +96,7 @@ export function WorkspaceDrawer({
               <X color={colors.textSecondary} size={20} />
             </Pressable>
           </View>
-          <ScrollView contentContainerStyle={styles.body}>
+          <ScrollView style={styles.scroll} contentContainerStyle={styles.body}>
             <Text style={[styles.section, { color: colors.textMuted }]}>
               YOUR WORKSPACE
             </Text>
@@ -185,7 +186,7 @@ export function WorkspaceDrawer({
             </View>
           </Pressable>
         </SafeAreaView>
-      </View>
+      </SafeAreaProvider>
     </Modal>
   );
 }
@@ -194,6 +195,7 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   panel: { flex: 1, width: "86%", maxWidth: 360, borderRightWidth: 1 },
   brandRow: {
+    flexShrink: 0,
     paddingLeft: 24,
     paddingRight: 12,
     flexDirection: "row",
@@ -201,13 +203,14 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingVertical: 12,
   },
-  brand: { fontFamily: fonts.displayBold, fontSize: 25, letterSpacing: -0.8 },
+  brand: { fontFamily: fonts.bodySemi, fontSize: 19 },
   iconButton: {
     width: 44,
     height: 44,
     alignItems: "center",
     justifyContent: "center",
   },
+  scroll: { flex: 1 },
   body: { padding: 16, gap: 6 },
   section: {
     fontFamily: fonts.bodySemi,
@@ -227,6 +230,7 @@ const styles = StyleSheet.create({
   },
   rowText: { fontFamily: fonts.body, fontSize: 14 },
   account: {
+    flexShrink: 0,
     marginHorizontal: 16,
     borderTopWidth: 1,
     paddingVertical: 16,
