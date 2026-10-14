@@ -45,6 +45,8 @@ import {
   createAssistantComposerPressGuard,
 } from "./assistantComposerPress";
 import { submitAssistantDraft } from "./assistantComposerDraft";
+import { AssistantActivityDisclosure } from "./AssistantActivityDisclosure";
+import { describeToolActivity } from "./assistantActivityText";
 import { transcriptEndOffset } from "./assistantTranscriptScroll";
 import {
   acknowledgementTitle,
@@ -105,6 +107,12 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
       ? "Agent"
       : "NyxBot";
   const running = assistant.sending || !!conversation?.active_turn;
+  const liveText = assistant.live ? liveReplyText(assistant.live) : "";
+  const liveActivities = conversation?.active_turn?.activities ?? [];
+  const runningActivity = liveActivities
+    .filter((activity) => activity.status === "running")
+    .at(-1);
+  const waitingActivity = runningActivity ?? liveActivities.at(-1);
   const destroyed = conversation?.agent?.destroyed;
   const streamPersisted =
     assistant.live?.turnId &&
@@ -347,6 +355,15 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
           {item.via ? ` · ${item.via}` : ""}
           {item.steering ? " · guidance" : ""}
         </Label>
+        <AssistantActivityDisclosure
+          key={item.id}
+          activities={item.activities}
+          onToggle={() => {
+            // Opening details is an explicit reading action. Keep the header
+            // in view instead of following the newly expanded list to its end.
+            following.current = false;
+          }}
+        />
         {isUser ? (
           <Text
             selectable
@@ -363,16 +380,6 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
             {item.text || (item.status === "failed" ? "" : "No text response.")}
           </Markdown>
         )}
-        {item.activities.map((activity) => (
-          <Label muted key={activity.id} style={styles.metadata}>
-            {activity.status === "running"
-              ? "◌"
-              : activity.status === "completed"
-                ? "✓"
-                : "!"}{" "}
-            {activity.label}
-          </Label>
-        ))}
         {item.attachments.map((attachment) => (
           <Label muted key={attachment.id} style={styles.metadata}>
             {attachment.label} ·{" "}
@@ -758,34 +765,48 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
                     ? "Stopping"
                     : "Working"}
                 </Label>
-                {assistant.live && liveReplyText(assistant.live) ? (
+                <AssistantActivityDisclosure
+                  key={
+                    conversation?.active_turn?.turn_id ??
+                    assistant.live?.turnId ??
+                    "pending-turn"
+                  }
+                  activities={liveActivities}
+                  onToggle={() => {
+                    following.current = false;
+                  }}
+                />
+                {liveText ? (
                   <Markdown
                     style={markdownStyle}
                     rules={markdownRules}
                     onLinkPress={openSafeLink}
                   >
-                    {liveReplyText(assistant.live)}
+                    {liveText}
                   </Markdown>
                 ) : (
-                  <ActivityIndicator
-                    style={styles.thinking}
-                    size="small"
-                    color={colors.primary}
-                  />
+                  <View style={[styles.row, styles.thinking]}>
+                    <ActivityIndicator size="small" color={colors.primary} />
+                    {waitingActivity ? (
+                      <Label
+                        muted
+                        numberOfLines={1}
+                        style={styles.runningActivity}
+                      >
+                        {describeToolActivity(
+                          waitingActivity.label,
+                          waitingActivity.status === "completed"
+                            ? "done"
+                            : waitingActivity.status,
+                        )}
+                        {waitingActivity.status === "running" ? "…" : ""}
+                      </Label>
+                    ) : null}
+                  </View>
                 )}
                 {assistant.live?.notice ? (
                   <Label muted>{assistant.live.notice}</Label>
                 ) : null}
-                {conversation?.active_turn?.activities.map((activity) => (
-                  <Label muted key={activity.id}>
-                    {activity.status === "running"
-                      ? "◌"
-                      : activity.status === "completed"
-                        ? "✓"
-                        : "!"}{" "}
-                    {activity.label}
-                  </Label>
-                ))}
               </View>
             ) : null}
             {assistant.history?.waiting.map((waiting, index) => (
@@ -1229,6 +1250,7 @@ const styles = StyleSheet.create({
   messageLabel: { fontSize: 11, fontFamily: fonts.bodySemi },
   messageText: { fontFamily: fonts.bodyRegular, fontSize: 14, lineHeight: 23 },
   metadata: { fontSize: 11 },
+  runningActivity: { flexShrink: 1, fontSize: 11 },
   timestamp: { fontSize: 10 },
   footer: { gap: 16, paddingTop: 20 },
   welcome: { alignItems: "center", gap: 16, paddingVertical: 36 },
