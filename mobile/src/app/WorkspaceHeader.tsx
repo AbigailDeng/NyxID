@@ -15,7 +15,7 @@ import type {
   NativeStackNavigationOptions,
   NativeStackNavigationProp,
 } from "@react-navigation/native-stack";
-import { BackHandler, Pressable, StyleSheet } from "react-native";
+import { BackHandler, Pressable, StyleSheet, View } from "react-native";
 import { ChevronLeft, Menu } from "lucide-react-native";
 import { useTheme } from "../theme/ThemeContext";
 import type { RootStackParamList } from "./AppNavigator";
@@ -65,44 +65,41 @@ export function workspaceHeaderOptions({
   disabled?: boolean;
   label?: string;
 }): NativeStackNavigationOptions {
-  const leftButton = (canGoBack?: boolean) => {
+  const leftButtons = (canGoBack?: boolean) => {
     const hasBack = localBack || canGoBack === true;
     return (
-      <WorkspaceHeaderButton
-        back={hasBack}
-        onPress={hasBack ? onBack : onOpenMenu}
-        disabled={hasBack && disabled}
-        label={hasBack ? label : "Open navigation"}
-      />
+      <View style={styles.navigation}>
+        {hasBack ? (
+          <WorkspaceHeaderButton
+            back
+            onPress={onBack}
+            disabled={disabled}
+            label={label}
+          />
+        ) : null}
+        <WorkspaceHeaderButton
+          onPress={onOpenMenu}
+          disabled={hasBack && disabled}
+          label="Open navigation"
+        />
+      </View>
     );
   };
-  const menuButton = (canGoBack?: boolean) =>
-    localBack || canGoBack === true ? (
-      <WorkspaceHeaderButton
-        onPress={onOpenMenu}
-        disabled={disabled}
-        label="Open navigation"
-      />
-    ) : null;
   return {
     headerShown: true,
     headerBackVisible: false,
     headerBackButtonMenuEnabled: false,
-    headerLeft: ({ canGoBack }) => leftButton(canGoBack),
-    headerRight: ({ canGoBack }) => menuButton(canGoBack),
+    headerLeft: ({ canGoBack }) => leftButtons(canGoBack),
+    // Clear both right-side options when setOptions merges a previous header.
+    headerRight: () => null,
     unstable_headerLeftItems: ({ canGoBack }) => [
       {
         type: "custom",
-        element: leftButton(canGoBack),
+        element: leftButtons(canGoBack),
         hidesSharedBackground: true,
       },
     ],
-    unstable_headerRightItems: ({ canGoBack }) => {
-      const element = menuButton(canGoBack);
-      return element
-        ? [{ type: "custom", element, hidesSharedBackground: true }]
-        : [];
-    },
+    unstable_headerRightItems: () => [],
   };
 }
 
@@ -158,6 +155,7 @@ export function useWorkspaceBack({
 }
 
 const styles = StyleSheet.create({
+  navigation: { flexDirection: "row", alignItems: "center" },
   button: {
     minWidth: 44,
     height: 44,
