@@ -13,7 +13,10 @@ import {
 } from "react-native";
 import { useNavigation, type NavigationProp } from "@react-navigation/native";
 import * as WebBrowser from "expo-web-browser";
-import Markdown, { type RenderRules } from "react-native-markdown-display";
+import Markdown, {
+  MarkdownIt,
+  type RenderRules,
+} from "react-native-markdown-display";
 import {
   History,
   Bot,
@@ -55,6 +58,10 @@ import { describeToolActivity } from "./assistantActivityText";
 import { NativeAuthoredSkillReview } from "../plugins/NativeAuthoredSkillReview";
 import { transcriptEndOffset } from "./assistantTranscriptScroll";
 import {
+  assistantMarkdownOptions,
+  safeAssistantLinkUrl,
+} from "./assistantMarkdown";
+import {
   acknowledgementTitle,
   retryInput,
   storedAssistantError,
@@ -75,6 +82,10 @@ type AssistantScreenProps = {
     };
   };
 };
+
+// Both persisted and streamed replies share Web's automatic URL recognition.
+const assistantMarkdown = MarkdownIt(assistantMarkdownOptions);
+assistantMarkdown.validateLink = (url) => safeAssistantLinkUrl(url) !== null;
 
 export function AssistantScreen({ route }: AssistantScreenProps) {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
@@ -333,7 +344,10 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
       lineHeight: 25,
       color: colors.textPrimary,
     },
-    link: { color: colors.primaryOnTint },
+    link: {
+      color: colors.primaryOnTint,
+      textDecorationLine: "underline" as const,
+    },
     code_inline: {
       fontFamily: fonts.mono,
       backgroundColor: colors.cardSoft,
@@ -356,6 +370,16 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
     tr: { borderColor: colors.border },
   };
   const markdownRules: RenderRules = {
+    link: (node, children) => (
+      <Text
+        key={node.key}
+        accessibilityRole="link"
+        style={markdownStyle.link}
+        onPress={() => openSafeLink(node.attributes.href)}
+      >
+        {children}
+      </Text>
+    ),
     // Match Web: model-provided remote images require an explicit link tap.
     image: (node) => (
       <Text
@@ -429,6 +453,7 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
           ) : null
         ) : (
           <Markdown
+            markdownit={assistantMarkdown}
             style={markdownStyle}
             rules={markdownRules}
             onLinkPress={openSafeLink}
@@ -881,6 +906,7 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
                 />
                 {liveText ? (
                   <Markdown
+                    markdownit={assistantMarkdown}
                     style={markdownStyle}
                     rules={markdownRules}
                     onLinkPress={openSafeLink}
@@ -1401,14 +1427,8 @@ function Sheet({
 }
 
 function openSafeLink(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol === "https:" && !parsed.username && !parsed.password) {
-      void WebBrowser.openBrowserAsync(parsed.href).catch(() => undefined);
-    }
-  } catch {
-    /* A malformed link remains plain text. */
-  }
+  const href = safeAssistantLinkUrl(url);
+  if (href) void WebBrowser.openBrowserAsync(href).catch(() => undefined);
   return false;
 }
 function formatDate(value: string) {
