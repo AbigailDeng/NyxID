@@ -47,6 +47,7 @@ import {
 import { submitAssistantDraft } from "./assistantComposerDraft";
 import { AssistantActivityDisclosure } from "./AssistantActivityDisclosure";
 import { describeToolActivity } from "./assistantActivityText";
+import { NativeAuthoredSkillReview } from "../plugins/NativeAuthoredSkillReview";
 import { transcriptEndOffset } from "./assistantTranscriptScroll";
 import {
   acknowledgementTitle,
@@ -62,6 +63,7 @@ type AssistantScreenProps = {
   route?: {
     params?: {
       conversationId?: string;
+      acknowledgementId?: string;
       agentId?: string;
       draft?: boolean;
       openLatest?: boolean;
@@ -79,8 +81,13 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
     (id) => {
       if (route?.params?.conversationId === id) return;
       adoptedId.current = id;
-      navigation.setParams({ conversationId: id, openLatest: false });
+      navigation.setParams({
+        conversationId: id,
+        acknowledgementId: undefined,
+        openLatest: false,
+      });
     },
+    route?.params?.acknowledgementId,
   );
   const [draft, setDraft] = useState("");
   const draftRevision = useRef(0);
@@ -158,7 +165,11 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
     )
       return;
     const id = assistant.conversations[0]?.id;
-    navigation.setParams({ conversationId: id, openLatest: false });
+    navigation.setParams({
+      conversationId: id,
+      acknowledgementId: undefined,
+      openLatest: false,
+    });
     if (id) assistant.openConversation(id);
   }, [
     route?.params?.openLatest,
@@ -215,6 +226,7 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
     assistant.setModel(assistant.agent?.model ?? "nyxagent/chat");
     navigation.setParams({
       conversationId: undefined,
+      acknowledgementId: undefined,
       agentId,
       draft: true,
       openLatest: false,
@@ -236,6 +248,7 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
         assistant.openConversation();
         navigation.setParams({
           conversationId: undefined,
+          acknowledgementId: undefined,
           agentId: undefined,
           draft: false,
           openLatest: false,
@@ -421,7 +434,17 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
     const pending = row.status === "pending";
     const expired = Date.parse(row.expires_at) <= Date.now();
     return (
-      <Card key={row.id}>
+      <Card
+        key={row.id}
+        style={
+          row.id === route?.params?.acknowledgementId
+            ? { borderColor: colors.primary }
+            : undefined
+        }
+      >
+        {row.id === route?.params?.acknowledgementId && (
+          <Label style={{ color: colors.primary }}>Selected confirmation</Label>
+        )}
         <Label style={styles.cardTitle}>{acknowledgementTitle(row)}</Label>
         <Label>{row.summary}</Label>
         {row.service_name || row.service_slug ? (
@@ -458,8 +481,18 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
                 : `${row.confirmation.access_mode === "ask_every_time" ? "Ask Every Time" : row.confirmation.access_mode === "nyxmode" ? "NyxMode" : row.confirmation.access_mode === "autopilot" ? "Autopilot" : "Your access mode"} requires this confirmation.`}
           </Label>
         ) : null}
-        {row.authored_skill && pending ? (
-          <Notice message="Review this skill's draft and validation in NyxID Web before confirming publication." />
+        {row.authored_skill ? (
+          <NativeAuthoredSkillReview
+            acknowledgement={row}
+            initiallyOpen={row.id === route?.params?.acknowledgementId}
+            disabled={Boolean(assistant.deciding) || assistant.loadingOlder}
+            online={assistant.online}
+            onDecision={(choice) => assistant.decide(row.id, choice)}
+            onRefresh={() => {
+              if (conversation?.id)
+                return assistant.openConversation(conversation.id);
+            }}
+          />
         ) : pending ? (
           <>
             <Label muted>
@@ -928,6 +961,7 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
                 navigation.setParams({
                   agentId: agent.id,
                   conversationId: undefined,
+                  acknowledgementId: undefined,
                   draft: false,
                   openLatest: true,
                 });
@@ -984,6 +1018,7 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
               assistant.openConversation(item.id);
               navigation.setParams({
                 conversationId: item.id,
+                acknowledgementId: undefined,
                 agentId: item.agent?.id ?? assistant.agentId,
                 openLatest: false,
               });
@@ -1096,7 +1131,10 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
                     setSettingsOpen(false);
                     void assistant.remove().then((removed) => {
                       if (removed)
-                        navigation.setParams({ conversationId: undefined });
+                        navigation.setParams({
+                          conversationId: undefined,
+                          acknowledgementId: undefined,
+                        });
                       if (removed) updateDraft("");
                     });
                   },

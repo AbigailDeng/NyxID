@@ -168,7 +168,7 @@ function buildApiError(payload: unknown, status: number): ApiError | Error {
         ? obj.message
         : errorKey;
 
-    return new ApiError({ errorKey, errorCode, statusCode: status, message });
+    return new ApiError({ errorKey, errorCode, statusCode: status, message, details: obj.details });
   }
 
   if (typeof payload === "string" && payload.length > 0) {

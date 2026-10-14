@@ -407,6 +407,7 @@ function ThemedAppShell({
         break;
       case "Activity": navigationRef.navigate("Activity"); break;
       case "Services": navigationRef.navigate("Services"); break;
+      case "Plugins": navigationRef.navigate("Plugins"); break;
       case "Agents": navigationRef.navigate("Agents"); break;
       case "AccountSettings": navigationRef.navigate("AccountSettings"); break;
     }

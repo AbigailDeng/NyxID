@@ -13,6 +13,10 @@ import { ActivityDetailScreen } from "../features/activity/ActivityDetailScreen"
 import { AssistantScreen } from "../features/assistant/AssistantScreen";
 import { ServicesScreen } from "../features/services/ServicesScreen";
 import { AgentsScreen } from "../features/agents/AgentsScreen";
+import {
+  PluginsScreen,
+  AgentSkillsScreen,
+} from "../features/plugins/PluginsScreen";
 import { TermsOfServiceScreen } from "../features/legal/TermsOfServiceScreen";
 import { PrivacyPolicyScreen } from "../features/legal/PrivacyPolicyScreen";
 import { FullScreenLoading } from "../components/FullScreenLoading";
@@ -28,12 +32,16 @@ export type RootStackParamList = {
   Assistant:
     | {
         conversationId?: string;
+        acknowledgementId?: string;
         agentId?: string;
         draft?: boolean;
         openLatest?: boolean;
       }
     | undefined;
   Services: undefined;
+  Plugins: { tab?: "connectors" | "skills"; agentId?: string } | undefined;
+  ServiceSetup: { connectionId?: string; catalogSlug?: string };
+  AgentSkills: { agentId: string };
   Agents: { agentId?: string } | undefined;
   Activity: { challengeId?: string } | undefined;
   ActivityDetail: { challengeId: string };
@@ -57,6 +65,43 @@ function AgentsRoute({
     <AgentsScreen
       agentId={route.params?.agentId}
       onOpenChat={(params) => navigation.navigate("Assistant", params)}
+      onOpenSkills={(agentId) => navigation.push("AgentSkills", { agentId })}
+    />
+  );
+}
+
+function PluginsRoute({
+  route,
+}: NativeStackScreenProps<RootStackParamList, "Plugins">) {
+  return (
+    <PluginsScreen
+      initialTab={route.params?.tab}
+      agentId={route.params?.agentId}
+    />
+  );
+}
+
+function ServiceSetupRoute({
+  navigation,
+  route,
+}: NativeStackScreenProps<RootStackParamList, "ServiceSetup">) {
+  return (
+    <ServicesScreen
+      key={route.key}
+      initialConnectionId={route.params.connectionId}
+      initialCatalogSlug={route.params.catalogSlug}
+      onClose={() => navigation.goBack()}
+    />
+  );
+}
+
+function AgentSkillsRoute({
+  route,
+}: NativeStackScreenProps<RootStackParamList, "AgentSkills">) {
+  return (
+    <AgentSkillsScreen
+      key={route.params.agentId}
+      agentId={route.params.agentId}
     />
   );
 }
@@ -96,6 +141,42 @@ export function AppNavigator({ onOpenMenu }: { onOpenMenu: () => void }) {
                   onBack: navigation.goBack,
                 }),
                 title: "NyxID",
+              })}
+            />
+            <Stack.Screen
+              name="Plugins"
+              component={PluginsRoute}
+              options={({ navigation }) => ({
+                ...workspaceHeaderOptions({
+                  onOpenMenu,
+                  onBack: navigation.goBack,
+                }),
+                title: "Plugins",
+                headerTitleStyle: { fontFamily: fonts.bodySemi, fontSize: 19 },
+              })}
+            />
+            <Stack.Screen
+              name="ServiceSetup"
+              component={ServiceSetupRoute}
+              options={({ navigation, route }) => ({
+                ...workspaceHeaderOptions({
+                  onOpenMenu,
+                  onBack: navigation.goBack,
+                }),
+                title: route.params.catalogSlug
+                  ? "Connect service"
+                  : "Manage connection",
+              })}
+            />
+            <Stack.Screen
+              name="AgentSkills"
+              component={AgentSkillsRoute}
+              options={({ navigation }) => ({
+                ...workspaceHeaderOptions({
+                  onOpenMenu,
+                  onBack: navigation.goBack,
+                }),
+                title: "Agent skills",
               })}
             />
             <Stack.Screen

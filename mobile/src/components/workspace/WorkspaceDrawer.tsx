@@ -26,12 +26,13 @@ export type WorkspaceRoute =
   | "Assistant"
   | "Activity"
   | "Services"
+  | "Plugins"
   | "Agents"
   | "AccountSettings";
 const destinations = [
   { route: "Assistant", label: "Chats", Icon: MessageSquare },
   { route: "Agents", label: "Agents", Icon: Bot },
-  { route: "Services", label: "Services", Icon: Plug },
+  { route: "Plugins", label: "Plugins", Icon: Plug },
   { route: "Activity", label: "Approvals", Icon: ShieldCheck },
   { route: "AccountSettings", label: "Settings", Icon: Settings },
 ] as const;

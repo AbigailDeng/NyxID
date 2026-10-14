@@ -85,7 +85,12 @@ export const acknowledgementSchema = z.object({
   continuation_owner: z.literal("server").nullish(),
   trigger_run_id: z.string().nullish(),
   authored_skill: z
-    .object({ agent_id: z.string(), proposal_id: z.string() })
+    .object({
+      agent_id: z.string(),
+      proposal_id: z.string(),
+      revision: z.number().int().nonnegative().optional(),
+      skills_revision: z.number().int().nonnegative().optional(),
+    })
     .nullish(),
 });
 export const historySchema = z.object({

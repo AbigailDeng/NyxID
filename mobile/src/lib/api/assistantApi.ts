@@ -9,6 +9,7 @@ import {
   type AssistantTurnEvent,
 } from "../../features/assistant/assistantTypes";
 import { readAssistantResponse } from "../../features/assistant/assistantStreamReader";
+import { assistantHistoryRequestPath } from "../../features/assistant/assistantHistoryTarget";
 
 const ROOT = "/assistant/nyxagent";
 const path = (id: string) =>
@@ -23,11 +24,17 @@ export const assistantApi = {
       await requestJson(`${ROOT}/conversations?${query}`, { signal }),
     );
   },
-  async history(id: string, beforeSeq?: number, signal?: AbortSignal) {
-    const query = new URLSearchParams({ limit: "50" });
-    if (beforeSeq) query.set("before_seq", String(beforeSeq));
+  async history(
+    id: string,
+    beforeSeq?: number,
+    signal?: AbortSignal,
+    acknowledgementId?: string,
+  ) {
     const result = historySchema.parse(
-      await requestJson(`${path(id)}?${query}`, { signal }),
+      await requestJson(
+        assistantHistoryRequestPath(id, beforeSeq, acknowledgementId),
+        { signal },
+      ),
     );
     if (result.conversation.id !== id)
       throw new Error("Assistant conversation mismatch.");

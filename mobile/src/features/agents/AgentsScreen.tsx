@@ -54,7 +54,12 @@ type OpenChat = (context: {
 export function AgentsScreen({
   agentId,
   onOpenChat,
-}: { agentId?: string; onOpenChat?: OpenChat } = {}) {
+  onOpenSkills,
+}: {
+  agentId?: string;
+  onOpenChat?: OpenChat;
+  onOpenSkills?: (agentId: string) => void;
+} = {}) {
   const { colors } = useTheme();
   const queryClient = useQueryClient();
   const focused = useIsFocused();
@@ -278,6 +283,14 @@ export function AgentsScreen({
                       openLatest: true,
                     })
                   }
+                />
+              )}
+              {alive && maintain && onOpenSkills && (
+                <ActionButton
+                  label="Agent skills"
+                  variant="secondary"
+                  onPress={() => onOpenSkills(agent.id)}
+                  disabled={busy}
                 />
               )}
             </Card>

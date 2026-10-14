@@ -11,11 +11,12 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useIsFocused } from "@react-navigation/native";
+import { useIsFocused, useNavigation } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as WebBrowser from "expo-web-browser";
 import {
   ChevronRight,
+  ChevronDown,
   KeyRound,
   PlugZap,
   ShieldCheck,
@@ -30,6 +31,7 @@ import {
 } from "../../components/workspace/WorkspaceUI";
 import { ApiError } from "../../lib/api/ApiError";
 import { servicesApi } from "../../lib/api/servicesApi";
+import { NYXID_FRONTEND_URL } from "../../lib/env";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import { fonts } from "../../theme/designTokens";
 import { useTheme } from "../../theme/ThemeContext";
@@ -44,6 +46,7 @@ import {
   type CatalogEntry,
   type ServiceConnection,
 } from "./serviceContracts";
+import { PluginConnectionHistory } from "../plugins/PluginConnectionHistory";
 
 const ROOT = ["workspace", "services"] as const;
 const messageOf = (cause: unknown) =>
@@ -51,8 +54,17 @@ const messageOf = (cause: unknown) =>
     ? cause.message
     : "Could not complete this action. Try again.";
 
-export function ServicesScreen() {
+export function ServicesScreen({
+  initialConnectionId,
+  initialCatalogSlug,
+  onClose,
+}: {
+  initialConnectionId?: string;
+  initialCatalogSlug?: string;
+  onClose?: () => void;
+} = {}) {
   const { colors } = useTheme();
+  const navigation = useNavigation();
   const focused = useIsFocused();
   const queryClient = useQueryClient();
   const [foreground, setForeground] = useState(
@@ -60,15 +72,23 @@ export function ServicesScreen() {
   );
   const [tab, setTab] = useState<"connected" | "catalog">("connected");
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string>();
+  const [selectedId, setSelectedId] = useState<string | undefined>(
+    initialConnectionId,
+  );
   const [adding, setAdding] = useState<CatalogEntry>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const [flowComplete, setFlowComplete] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [tokenOnlyRemoval, setTokenOnlyRemoval] = useState(false);
   const [replacement, setReplacement] = useState("");
+  const [managementTab, setManagementTab] = useState<
+    "overview" | "advanced" | "history"
+  >("overview");
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
   const actionLock = useRef(false);
+  const launchedCatalog = useRef(false);
   const connections = useQuery({
     queryKey: [...ROOT, "connections"],
     queryFn: ({ signal }) => servicesApi.connections(signal),
@@ -88,6 +108,37 @@ export function ServicesScreen() {
     enabled: focused && foreground && Boolean(selectedId),
     retry: false,
   });
+  const detailSlug = detail.data?.catalog_service_slug;
+  useEffect(() => {
+    navigation.setOptions({
+      title: selectedId
+        ? "Manage connection"
+        : adding
+          ? `Connect ${adding.name}`
+          : initialCatalogSlug
+            ? "Connect service"
+            : "Services",
+    });
+  }, [navigation, selectedId, adding, initialCatalogSlug]);
+  useEffect(() => {
+    setManagementTab("overview");
+    setPermissionsOpen(false);
+  }, [selectedId]);
+  const detailCatalog = useQuery({
+    queryKey: [...ROOT, "catalog-entry", detailSlug],
+    queryFn: ({ signal }) => servicesApi.catalogEntry(detailSlug!, signal),
+    enabled: focused && foreground && Boolean(detailSlug),
+    staleTime: 60_000,
+    retry: false,
+  });
+  useEffect(() => {
+    if (!initialCatalogSlug || launchedCatalog.current || !catalog.data) return;
+    const entry = catalog.data.find((item) => item.slug === initialCatalogSlug);
+    if (entry) {
+      launchedCatalog.current = true;
+      setAdding(entry);
+    }
+  }, [initialCatalogSlug, catalog.data]);
 
   const reload = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ROOT });
@@ -109,17 +160,21 @@ export function ServicesScreen() {
   }, [focused]);
 
   function closeDetail() {
+    if (actionLock.current) return;
     setSelectedId(undefined);
     setAdding(undefined);
     setError(undefined);
     setConfirmRemove(false);
     setTokenOnlyRemoval(false);
     setReplacement("");
+    onClose?.();
   }
   useWorkspaceBack({
-    active: Boolean(selectedId) || Boolean(adding),
+    // A dedicated setup route already has native history. Guard it only while
+    // writing; a local detail screen must instead consume its own Back action.
+    active: onClose ? busy : Boolean(selectedId) || Boolean(adding),
     disabled: busy,
-    label: "Back to services",
+    label: onClose ? "Back to plugins" : "Back to services",
     onBack: () => {
       if (!actionLock.current) closeDetail();
     },
@@ -175,13 +230,18 @@ export function ServicesScreen() {
       const result = await servicesApi.remove(connection.id, tokenOnlyRemoval);
       if (!result.deleted)
         throw new Error(result.message || "The connection was not removed.");
-      closeDetail();
+      // Removal completes this flow; the action lock only guards user taps.
+      setSelectedId(undefined);
+      setConfirmRemove(false);
+      setTokenOnlyRemoval(false);
+      setReplacement("");
       await reload();
       setNotice(
         result.upstream_revocation_scheduled
           ? "Connection removed. Provider authorization revocation was scheduled."
           : "Connection removed.",
       );
+      if (onClose) setFlowComplete(true);
     } catch (cause) {
       if (cause instanceof ApiError && cause.errorCode === 11500) {
         setTokenOnlyRemoval(true);
@@ -194,12 +254,27 @@ export function ServicesScreen() {
     }
   }
 
+  if (flowComplete)
+    return (
+      <WorkspacePage title="Connection removed">
+        <Notice message={notice ?? "Connection removed."} tone="success" />
+        <ActionButton
+          label="Back to plugins"
+          variant="secondary"
+          disabled={busy}
+          onPress={closeDetail}
+        />
+      </WorkspacePage>
+    );
+
   if (adding) {
     return (
       <ConnectForm
         entry={adding}
         busy={busy}
         error={error}
+        cancelLabel={onClose ? "Cancel connection setup" : "Cancel"}
+        onRefresh={reload}
         onCancel={closeDetail}
         onSubmit={(values) =>
           void run(async () => {
@@ -223,90 +298,251 @@ export function ServicesScreen() {
   if (selectedId) {
     const connection = detail.data;
     const entry =
-      connection && catalogForConnection(connection, catalog.data ?? []);
+      connection &&
+      (detailCatalog.data ??
+        catalogForConnection(connection, catalog.data ?? []));
     const editable = connection && canEditConnection(connection);
     const replaceable =
       editable &&
       Boolean(connection.api_key_id) &&
       !["oauth2", "node_managed"].includes(connection.credential_type) &&
+      !connection.credential_missing &&
       connection.status !== "pending_auth" &&
       connection.credential_binding !== "platform" &&
+      (!connection.catalog_service_slug || Boolean(entry)) &&
       (!entry ||
         (supportsCredentialForm(entry) &&
           !entry.token_exchange_credential_fields?.length));
     return (
-      <WorkspacePage
-        title={
-          connection?.catalog_service_name ?? connection?.label ?? "Connection"
-        }
-        subtitle="Manage this service connection"
-      >
-        <ActionButton
-          label="Back to services"
-          onPress={closeDetail}
-          disabled={busy}
-          variant="secondary"
-        />
+      <WorkspacePage title="Manage connection" showHeading={false}>
+        <View
+          style={[
+            styles.tabs,
+            { backgroundColor: colors.cardSoft, borderColor: colors.border },
+          ]}
+        >
+          {(["overview", "advanced", "history"] as const).map((value) => (
+            <Pressable
+              key={value}
+              accessibilityRole="tab"
+              accessibilityLabel={
+                value.charAt(0).toUpperCase() + value.slice(1)
+              }
+              accessibilityState={{
+                selected: managementTab === value,
+                disabled: busy,
+              }}
+              disabled={busy}
+              onPress={() => {
+                setManagementTab(value);
+                setReplacement("");
+              }}
+              style={[
+                styles.tab,
+                styles.managementTab,
+                {
+                  backgroundColor:
+                    managementTab === value ? colors.ghostBg : "transparent",
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.tabLabel,
+                  {
+                    color:
+                      managementTab === value
+                        ? colors.textPrimary
+                        : colors.textMuted,
+                  },
+                ]}
+              >
+                {value.charAt(0).toUpperCase() + value.slice(1)}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
         {notice && <Notice message={notice} tone="success" />}
         {error && <Notice message={error} tone="error" />}
-        {detail.isPending && (
+        {managementTab !== "history" && detail.isPending && (
           <ActivityIndicator
             color={colors.primary}
             accessibilityLabel="Loading connection"
           />
         )}
-        {detail.isError && (
+        {managementTab !== "history" && detail.isError && (
           <>
             <Notice message={messageOf(detail.error)} tone="error" />
             <ActionButton label="Retry" onPress={() => void detail.refetch()} />
           </>
         )}
-        {connection && (
+        {managementTab === "history" ? (
+          <PluginConnectionHistory serviceId={selectedId} />
+        ) : null}
+        {connection && managementTab === "advanced" ? (
+          <Card>
+            <Label style={styles.sectionTitle}>Advanced settings</Label>
+            <Label muted>
+              Configure routing, connection permissions and service options in
+              Web.
+            </Label>
+            {connection.proxy_url ? (
+              <Label selectable mono muted style={styles.cardMetadata}>
+                {connection.proxy_url}
+              </Label>
+            ) : null}
+            <ActionButton
+              label="Open advanced settings in Web"
+              variant="secondary"
+              disabled={busy}
+              onPress={() =>
+                void run(async () => {
+                  const url = new URL(
+                    `/keys/${encodeURIComponent(connection.id)}`,
+                    validateBrowserUrl(NYXID_FRONTEND_URL),
+                  );
+                  url.searchParams.set("tab", "advanced");
+                  await WebBrowser.openBrowserAsync(url.href);
+                  await reload();
+                })
+              }
+            />
+          </Card>
+        ) : null}
+        {connection && managementTab === "overview" && (
           <>
-            <Card>
-              <Label>{connection.label}</Label>
-              <Label mono muted>
-                {connection.slug}
-              </Label>
-              <Label muted>
-                {connectionOwner(connection)} ·{" "}
-                {connection.credential_binding === "platform"
-                  ? "Platform key"
-                  : connection.credential_type}
-              </Label>
-              <View style={styles.statusRow}>
-                <Text
-                  style={[
-                    styles.status,
-                    {
-                      color:
-                        connection.status === "active"
-                          ? colors.success
-                          : colors.warning,
-                    },
-                  ]}
+            {detailCatalog.isError && (
+              <>
+                <Notice
+                  message="Service setup details could not be loaded. Reload them to check available authorization and credential actions."
+                  tone="error"
+                />
+                <ActionButton
+                  label="Reload service details"
+                  variant="secondary"
+                  onPress={() => void detailCatalog.refetch()}
+                />
+              </>
+            )}
+            <Card style={styles.serviceCard}>
+              <Text
+                style={[
+                  styles.connectionStatus,
+                  {
+                    color: !connection.is_active
+                      ? colors.textMuted
+                      : connection.status === "active" &&
+                          !connection.credential_missing &&
+                          connection.connection_status !== "expired"
+                        ? colors.success
+                        : colors.warning,
+                  },
+                ]}
+              >
+                ● {connection.is_active ? "Enabled" : "Disabled"}
+              </Text>
+              <View style={styles.row}>
+                <View
+                  style={[styles.icon, { backgroundColor: colors.ghostBg }]}
                 >
-                  {connection.credential_missing
-                    ? "Credential missing"
-                    : connection.status.replaceAll("_", " ")}
-                </Text>
-                <Label muted>
-                  {connection.is_active ? "Enabled" : "Disabled"}
-                </Label>
+                  <PlugZap size={18} color={colors.primary} />
+                </View>
+                <View style={styles.flex}>
+                  <Text style={[styles.title, { color: colors.textPrimary }]}>
+                    {connection.label}
+                  </Text>
+                  <Label muted style={styles.cardMetadata}>
+                    {connectionOwner(connection)} ·{" "}
+                    {connection.credential_binding === "platform"
+                      ? "Platform key"
+                      : connection.credential_type === "none"
+                        ? "No auth"
+                        : connection.credential_type === "oauth2"
+                          ? "OAuth"
+                          : connection.credential_type.replaceAll("_", " ")}
+                  </Label>
+                </View>
               </View>
-              {(connection.description ?? entry?.description) && (
-                <Label muted>
-                  {connection.description ?? entry?.description}
+              <Label muted style={styles.cardDescription}>
+                Service is {connection.is_active ? "enabled" : "disabled"}.
+                Credential status:{" "}
+                {connection.credential_missing
+                  ? "missing"
+                  : (
+                      connection.connection_status ?? connection.status
+                    ).replaceAll("_", " ")}
+                .
+              </Label>
+              {connection.last_used_at ? (
+                <Label muted style={styles.cardMetadata}>
+                  Last used {new Date(connection.last_used_at).toLocaleString()}
                 </Label>
-              )}
+              ) : null}
               {connection.error_message && (
                 <Notice message={connection.error_message} tone="error" />
               )}
-              {connection.proxy_url && (
-                <Label mono muted>
-                  {connection.proxy_url}
+            </Card>
+            <Card style={styles.permissionsCard}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Saved permissions"
+                accessibilityState={{ expanded: permissionsOpen }}
+                onPress={() => setPermissionsOpen((value) => !value)}
+                style={styles.permissionsToggle}
+              >
+                <Label style={[styles.sectionTitle, styles.flex]}>
+                  Saved permissions
                 </Label>
-              )}
+                {permissionsOpen ? (
+                  <ChevronDown size={18} color={colors.textMuted} />
+                ) : (
+                  <ChevronRight size={18} color={colors.textMuted} />
+                )}
+              </Pressable>
+              {permissionsOpen ? (
+                <View style={styles.permissionsContent}>
+                  {connection.granted_scopes?.length ? (
+                    connection.granted_scopes.map((scope, index) => (
+                      <Label
+                        selectable
+                        muted
+                        mono
+                        style={styles.cardMetadata}
+                        key={`${scope}:${index}`}
+                      >
+                        {scope}
+                      </Label>
+                    ))
+                  ) : (
+                    <Label muted style={styles.cardDescription}>
+                      No saved permission scopes were returned for this
+                      connection.
+                    </Label>
+                  )}
+                  <Label muted style={styles.cardDescription}>
+                    Saved scopes describe this connection. Agent access is
+                    managed separately.
+                  </Label>
+                  {editable && entry?.provider_type === "oauth2" && (
+                    <ActionButton
+                      label="Manage permissions in Web"
+                      variant="secondary"
+                      disabled={busy}
+                      onPress={() =>
+                        void run(async () => {
+                          const url = new URL(
+                            `/keys/${encodeURIComponent(connection.id)}`,
+                            validateBrowserUrl(NYXID_FRONTEND_URL),
+                          );
+                          url.searchParams.set("tab", "overview");
+                          await WebBrowser.openBrowserAsync(url.href);
+                          await reload();
+                        })
+                      }
+                    />
+                  )}
+                </View>
+              ) : null}
             </Card>
             {!editable && (
               <Notice
@@ -329,7 +565,11 @@ export function ServicesScreen() {
                   <Switch
                     accessibilityLabel="Allow this connection"
                     value={connection.is_active}
-                    disabled={busy}
+                    disabled={
+                      busy ||
+                      (Boolean(connection.credential_missing) &&
+                        !connection.is_active)
+                    }
                     trackColor={{ true: colors.primary }}
                     onValueChange={(active) =>
                       void run(async () => {
@@ -451,8 +691,45 @@ export function ServicesScreen() {
               disabled={busy || detail.isFetching}
               onPress={() => void run(reload)}
             />
+            <Label muted style={styles.cardMetadata}>
+              Service access and credential status are separate. Disabling keeps
+              the credential.
+            </Label>
           </>
         )}
+      </WorkspacePage>
+    );
+  }
+
+  if (initialCatalogSlug && !launchedCatalog.current) {
+    return (
+      <WorkspacePage title="Connect service">
+        {catalog.isPending ? (
+          <ActivityIndicator
+            accessibilityLabel="Loading service"
+            color={colors.primary}
+          />
+        ) : (
+          <Notice
+            message={
+              catalog.isError
+                ? messageOf(catalog.error)
+                : "This service is no longer available in the catalog."
+            }
+            tone="error"
+          />
+        )}
+        <ActionButton
+          label="Retry"
+          variant="secondary"
+          onPress={() => void catalog.refetch()}
+          disabled={catalog.isFetching}
+        />
+        <ActionButton
+          label="Back to plugins"
+          variant="secondary"
+          onPress={closeDetail}
+        />
       </WorkspacePage>
     );
   }
@@ -697,12 +974,16 @@ function ConnectForm({
   entry,
   busy,
   error,
+  cancelLabel,
+  onRefresh,
   onCancel,
   onSubmit,
 }: {
   entry: CatalogEntry;
   busy: boolean;
   error?: string;
+  cancelLabel: string;
+  onRefresh: () => Promise<void>;
   onCancel: () => void;
   onSubmit: (values: {
     label: string;
@@ -719,6 +1000,8 @@ function ConnectForm({
   const [fields, setFields] = useState<Record<string, string>>({});
   const [platform, setPlatform] = useState(false);
   const [linkError, setLinkError] = useState<string>();
+  const [linkBusy, setLinkBusy] = useState(false);
+  const linkLock = useRef(false);
   const focused = useIsFocused();
   const [foreground, setForeground] = useState(
     AppState.currentState === "active",
@@ -742,20 +1025,35 @@ function ConnectForm({
   const supported =
     platform || supportsCredentialForm(entry) || supportsManagedOAuth(entry);
   const oauth = !platform && supportsManagedOAuth(entry);
+  async function openWebSetup() {
+    if (linkLock.current || busy) return;
+    linkLock.current = true;
+    setLinkBusy(true);
+    setLinkError(undefined);
+    try {
+      const url = new URL("/keys", validateBrowserUrl(NYXID_FRONTEND_URL));
+      url.searchParams.set("slug", entry.slug);
+      await WebBrowser.openBrowserAsync(url.href);
+      await onRefresh();
+    } catch (cause) {
+      setLinkError(messageOf(cause));
+    } finally {
+      linkLock.current = false;
+      setLinkBusy(false);
+    }
+  }
   return (
-    <WorkspacePage
-      title={`Connect ${entry.name}`}
-      subtitle="Add a personal connection"
-    >
-      <ActionButton
-        label="Back to catalog"
-        variant="secondary"
-        onPress={onCancel}
-        disabled={busy}
-      />
+    <WorkspacePage title={`Connect ${entry.name}`} showHeading={false}>
       {error && <Notice message={error} tone="error" />}
       {linkError && <Notice message={linkError} tone="error" />}
       {entry.description && <Label muted>{entry.description}</Label>}
+      <Card>
+        <Label style={styles.sectionTitle}>Owner</Label>
+        <Label>Personal</Label>
+        <Label muted style={styles.cardDescription}>
+          This connection will be available within your personal account.
+        </Label>
+      </Card>
       <Card>
         <Field
           label="Connection name"
@@ -837,18 +1135,51 @@ function ConnectForm({
         {oauth && (
           <Notice message="Continue in your browser to authorize this connection. Return here to check its status." />
         )}
-        {!supported && (
-          <Notice message="This service needs a specialized connection setup. Complete its setup in the Web dashboard, then refresh your connections here." />
+        {!supported ? (
+          <>
+            <Notice message="Continue in Web to complete this service's connection setup. Return here to refresh your connections." />
+            <ActionButton
+              label="Open Web setup"
+              variant="secondary"
+              loading={linkBusy}
+              disabled={busy || !focused || !foreground}
+              onPress={() => void openWebSetup()}
+            />
+            <ActionButton
+              label="Refresh connections"
+              variant="secondary"
+              disabled={busy || linkBusy}
+              onPress={() => {
+                if (linkLock.current) return;
+                linkLock.current = true;
+                setLinkBusy(true);
+                setLinkError(undefined);
+                void onRefresh()
+                  .catch((cause) => setLinkError(messageOf(cause)))
+                  .finally(() => {
+                    linkLock.current = false;
+                    setLinkBusy(false);
+                  });
+              }}
+            />
+          </>
+        ) : (
+          <ActionButton
+            label={oauth ? "Continue to authorization" : "Add connection"}
+            loading={busy}
+            disabled={!supported || !label.trim() || !focused || !foreground}
+            onPress={() =>
+              onSubmit({ label, credential, endpointUrl, fields, platform })
+            }
+          />
         )}
-        <ActionButton
-          label={oauth ? "Continue to authorization" : "Add connection"}
-          loading={busy}
-          disabled={!supported || !label.trim() || !focused || !foreground}
-          onPress={() =>
-            onSubmit({ label, credential, endpointUrl, fields, platform })
-          }
-        />
       </Card>
+      <ActionButton
+        label={cancelLabel}
+        variant="secondary"
+        onPress={onCancel}
+        disabled={busy || linkBusy}
+      />
       {entry.api_key_url && (
         <ActionButton
           label="Get a credential"
@@ -921,6 +1252,16 @@ const styles = StyleSheet.create({
     borderRadius: 7,
   },
   tabLabel: { fontFamily: fonts.bodySemi, fontSize: 12, lineHeight: 18 },
+  managementTab: { minHeight: 44 },
+  permissionsCard: { padding: 0, gap: 0 },
+  permissionsToggle: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 14,
+  },
+  permissionsContent: { gap: 8, paddingHorizontal: 14, paddingBottom: 14 },
   search: { gap: 8 },
   searchLabel: { fontFamily: fonts.bodySemi, fontSize: 12, lineHeight: 16 },
   searchInput: {

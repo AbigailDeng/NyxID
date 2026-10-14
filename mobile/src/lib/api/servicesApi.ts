@@ -8,6 +8,13 @@ import {
 const keyPath = (id: string) => `/keys/${encodeURIComponent(id)}`;
 
 export const servicesApi = {
+  async pluginConnections(signal?: AbortSignal) {
+    // Match Web Plugins: tool bindings belong to service management.
+    const response = z
+      .object({ keys: z.array(serviceConnectionSchema) })
+      .parse(await requestJson("/keys", { signal }));
+    return response.keys;
+  },
   async connections(signal?: AbortSignal) {
     const response = z
       .object({ keys: z.array(serviceConnectionSchema) })
@@ -19,6 +26,16 @@ export const servicesApi = {
       .object({ entries: z.array(catalogEntrySchema) })
       .parse(await requestJson("/catalog", { signal }));
     return response.entries;
+  },
+  async catalogEntry(slug: string, signal?: AbortSignal) {
+    const entry = catalogEntrySchema.parse(
+      await requestJson(`/catalog/${encodeURIComponent(slug)}`, { signal }),
+    );
+    if (entry.slug !== slug)
+      throw new Error(
+        "The server returned a different service. Please reload.",
+      );
+    return entry;
   },
   async connection(id: string, signal?: AbortSignal) {
     const connection = serviceConnectionSchema.parse(

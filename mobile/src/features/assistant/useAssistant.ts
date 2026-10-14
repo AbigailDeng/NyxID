@@ -8,6 +8,10 @@ import { agentsApi } from "../../lib/api/agentsApi";
 import { ApiError } from "../../lib/api/ApiError";
 import { resolveChatAgentId } from "./assistantAgentContext";
 import {
+  acknowledgementForConversation,
+  selectAssistantHistoryTarget,
+} from "./assistantHistoryTarget";
+import {
   applyAssistantEvent,
   emptyLiveReply,
   type AssistantLiveReply,
@@ -28,6 +32,7 @@ export function useAssistant(
   initialId?: string,
   routeAgentId?: string,
   onConversationAdopted?: (id: string) => void,
+  initialAcknowledgementId?: string,
 ) {
   const focused = useIsFocused();
   const [conversationId, setConversationId] = useState(initialId);
@@ -54,6 +59,13 @@ export function useAssistant(
     AppState.currentState === "active",
   );
   const selected = useRef(initialId);
+  const historyTarget = useRef(
+    selectAssistantHistoryTarget(
+      undefined,
+      initialId,
+      initialAcknowledgementId,
+    ),
+  );
   const latestHistory = useRef<AssistantHistory | undefined>(undefined);
   const mounted = useRef(true);
   const epoch = useRef(0);
@@ -66,6 +78,7 @@ export function useAssistant(
   const decisionLock = useRef(false);
   const lastDecision = useRef(0);
   const previousAgent = useRef(routeAgentId);
+  const previousAcknowledgement = useRef(initialAcknowledgementId);
   const adopt = useRef(onConversationAdopted);
   adopt.current = onConversationAdopted;
   const continuations = useRef(new Map<string, AssistantAcknowledgement[]>());
@@ -142,7 +155,12 @@ export function useAssistant(
   const refreshHistory = useCallback(
     async (id: string, beforeSeq?: number) => {
       const sequence = ++historySequence.current;
-      const page = await assistantApi.history(id, beforeSeq);
+      const page = await assistantApi.history(
+        id,
+        beforeSeq,
+        undefined,
+        acknowledgementForConversation(historyTarget.current, id),
+      );
       if (
         !mounted.current ||
         id !== selected.current ||
@@ -162,8 +180,13 @@ export function useAssistant(
   );
 
   const openConversation = useCallback(
-    (id?: string) => {
+    (id?: string, acknowledgementId?: string) => {
       const operation = ++reopenSequence.current;
+      historyTarget.current = selectAssistantHistoryTarget(
+        historyTarget.current,
+        id,
+        acknowledgementId,
+      );
       if (id && id === selected.current) {
         // React does not rerun the selected-id effect for the same saved chat.
         // Keep its rows and live subscription while explicitly refreshing it.
@@ -209,10 +232,17 @@ export function useAssistant(
 
   useEffect(() => {
     const agentChanged = previousAgent.current !== routeAgentId;
+    const acknowledgementChanged =
+      previousAcknowledgement.current !== initialAcknowledgementId;
     previousAgent.current = routeAgentId;
-    if (agentChanged || initialId !== selected.current)
-      openConversation(initialId);
-  }, [initialId, routeAgentId, openConversation]);
+    previousAcknowledgement.current = initialAcknowledgementId;
+    if (
+      agentChanged ||
+      initialId !== selected.current ||
+      acknowledgementChanged
+    )
+      openConversation(initialId, initialAcknowledgementId);
+  }, [initialId, routeAgentId, initialAcknowledgementId, openConversation]);
 
   const recover = useCallback(async () => {
     const recovery = ++recoverSequence.current;
@@ -456,6 +486,8 @@ export function useAssistant(
     } catch (cause) {
       if (mounted.current && selected.current === id)
         setError(errorMessage(cause));
+      // Modal confirmations also need the failure inside their own visible UI.
+      throw cause;
     } finally {
       decisionLock.current = false;
       if (mounted.current) setDeciding(undefined);
