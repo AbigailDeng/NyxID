@@ -44,6 +44,7 @@ import {
   ASSISTANT_SEND_PRESS_GRACE_MS,
   createAssistantComposerPressGuard,
 } from "./assistantComposerPress";
+import { submitAssistantDraft } from "./assistantComposerDraft";
 import { transcriptEndOffset } from "./assistantTranscriptScroll";
 import {
   acknowledgementTitle,
@@ -239,13 +240,15 @@ export function AssistantScreen({ route }: AssistantScreenProps) {
   async function sendDraft() {
     if (!canSend || !composerPress.current("send")) return;
     setStopProtected(true);
-    const text = draft.trim();
-    const revision = draftRevision.current;
     following.current = true;
-    await perform(async () => {
-      if ((await assistant.send(text)) && revision === draftRevision.current)
-        updateDraft("");
-    });
+    await perform(() =>
+      submitAssistantDraft({
+        draft,
+        updateDraft,
+        getRevision: () => draftRevision.current,
+        send: assistant.send,
+      }),
+    );
   }
 
   const markdownStyle = {
