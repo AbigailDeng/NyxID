@@ -55,18 +55,26 @@ function AgentsRoute({
 export function AppNavigator({ onOpenMenu }: { onOpenMenu: () => void }) {
   const { isAuthenticated, isRestoring } = useAuthSession();
   const { colors } = useTheme();
+  const menuButton = () => (
+    <Pressable
+      onPress={onOpenMenu}
+      accessibilityRole="button"
+      accessibilityLabel="Open navigation"
+      style={styles.menu}
+    >
+      <Menu color={colors.textPrimary} size={22} />
+    </Pressable>
+  );
   const drawerHeader = {
     headerShown: true,
-    headerLeft: () => (
-      <Pressable
-        onPress={onOpenMenu}
-        accessibilityRole="button"
-        accessibilityLabel="Open navigation"
-        style={styles.menu}
-      >
-        <Menu color={colors.textPrimary} size={22} />
-      </Pressable>
-    ),
+    headerLeft: menuButton,
+    unstable_headerLeftItems: () => [
+      {
+        type: "custom" as const,
+        element: menuButton(),
+        hidesSharedBackground: true,
+      },
+    ],
   };
   if (isRestoring)
     return (
