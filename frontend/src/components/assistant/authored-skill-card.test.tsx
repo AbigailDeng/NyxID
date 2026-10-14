@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { NyxAgentAcknowledgementCard } from "./nyxagent-acknowledgement-card";
-import type { NyxAgentAcknowledgement } from "@/schemas/assistant-nyxagent";
+import type { NyxAgentAcknowledgement, NyxAgentAccessMode } from "@/schemas/assistant-nyxagent";
 import { authoredSkillPreviewSchema } from "@/schemas/agent-skills";
 const mocks = vi.hoisted(() => ({ json: vi.fn() }));
 vi.mock("@/lib/assistant/assistant-http", () => ({ assistantJson: mocks.json }));
@@ -19,14 +19,28 @@ const preview = {
   state: "active", actions: ["deny", "publish"], lease_live: false,
   files: [{ path: "SKILL.md", content: "---\nname: weekly-review\n---\n# Review every Friday" }, { path: "references/checklist.md", content: "Verify every date" }],
 };
-function show(value = card, decide = vi.fn().mockResolvedValue(undefined)) {
+function show(value = card, decide = vi.fn().mockResolvedValue(undefined), accessMode?: NyxAgentAccessMode) {
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })}>
-    <NyxAgentAcknowledgementCard acknowledgement={value} deciding={false} onDecision={decide} />
+    <NyxAgentAcknowledgementCard acknowledgement={value} accessMode={accessMode} deciding={false} onDecision={decide} />
   </QueryClientProvider>);
   return decide;
 }
 beforeEach(() => { mocks.json.mockReset().mockResolvedValue(preview); });
 afterEach(cleanup);
+it.each(["autopilot", "nyxmode", "ask_every_time"] as const)("keeps an expired authored card free of confirmation controls only in %s", async (accessMode) => {
+  mocks.json.mockResolvedValue({ ...preview, actions: ["renew", "discard"] });
+  const decide = show({ ...card, status: "expired" }, undefined, accessMode);
+  await waitFor(() => expect(mocks.json).toHaveBeenCalled());
+  if (accessMode === "autopilot") {
+    expect(screen.getByRole("status")).toHaveTextContent("Expired · Review skill draft");
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Review skill draft" })).not.toBeInTheDocument();
+  } else {
+    expect(await screen.findByRole("button", { name: "Request a new confirmation" })).toBeVisible();
+    expect(screen.getByText("Verify every date")).toBeVisible();
+  }
+  expect(decide).not.toHaveBeenCalled();
+});
 it("shows every file and publishes only after one explicit owner click", async () => {
   const decide = show();
   expect(await screen.findByText("Verify every date")).toBeVisible();
@@ -93,7 +107,7 @@ it.each(["changed", "unavailable"])("blocks approval when content is %s", async 
   if (state === "changed") mocks.json.mockResolvedValue({ ...preview, state: "changed", actions: [] });
   else mocks.json.mockRejectedValue(new Error("Unavailable"));
   show();
-  if (state === "changed") await screen.findByText("This confirmation no longer matches the draft.");
+  if (state === "changed") await screen.findByText(/This confirmation no longer matches the draft/);
   else await screen.findByRole("alert");
   expect(screen.queryByRole("button", { name: "Allow and publish" })).not.toBeInTheDocument();
 });
@@ -128,7 +142,7 @@ it("renews an expired card for read-only reconciliation", async () => {
 it.each(["rejected", "invalidated"])('renders %s as terminal rather than a failure', async (status) => {
   mocks.json.mockResolvedValue({ ...preview, status, state: status === "rejected" ? "discarded" : "invalidated", actions: [], failure_code: "evidence_unavailable", files: [] });
   show({ ...card, status: "allowed" });
-  expect(await screen.findByText(status === "rejected" ? "Skill draft discarded" : "Skill draft is no longer available")).toBeVisible();
+  expect(await screen.findByText(status === "rejected" ? /Skill draft discarded/ : /Skill draft is no longer available/)).toBeVisible();
   expect(screen.queryByText(/Publication could not finish/)).not.toBeInTheDocument();
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });
@@ -156,7 +170,7 @@ it("keeps a conflicting uncertain version available for read-only checks", async
 it("shows the settled publication result", async () => {
   mocks.json.mockResolvedValue({ ...preview, status: "pinned", state: "pinned", actions: [], files: [] });
   show({ ...card, status: "used" });
-  expect(await screen.findByText("Skill published and attached")).toBeVisible();
+  expect(await screen.findByText(/Skill weekly-review 1.0 published and attached to Operations/)).toBeVisible();
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });
 it("shows an active publication without offering another check", async () => {
