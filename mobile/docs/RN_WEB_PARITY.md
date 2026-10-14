@@ -44,6 +44,8 @@ Artifacts/Assistant Activity/folder placeholders are not treated as new durable 
 
 ## Verification status
 
+The [workspace header menu follow-up](RN_HEADER_MENU_QA.md) keeps direct drawer access when a page has a return path: Back on the left and Menu on the right, with a single left Menu on root pages. The actual iOS app verified saved-chat Menu opening/closing with an unsent draft preserved, drawer navigation to Plugins and native Back to the same chat, and local Back to the new-chat root. This batch does not establish Android, VoiceOver traversal or busy-state navigation behavior.
+
 The [chat hyperlinks follow-up](RN_CHAT_LINKS_QA.md) enables bare HTTPS auto-linking in saved and streamed assistant Markdown, with underlining and native link semantics. The exact saved reply from the reported screenshot was opened in the actual iOS app; tapping its link opened the expected NyxID host in the system browser, and closing returned to the chat. The browser reached login, so device setup is not claimed. Eight focused parser/URL tests cover queries, existing Markdown links, code and unsafe destinations; this is not complete GFM grammar parity.
 
 The chat header follow-up was operated in the existing production-backed iOS Simulator: saved-history switching, long-title truncation, Current marking, temporary rename and restoration, Delete Cancel, New chat, new-draft model selection/restoration, and Agent details with contextual Back. Its 54 related tests are separate from earlier verification batches. Alternative-model inference, history load-more, extreme Dynamic Type/narrow devices, Android and physical-device behavior were not verified by this batch.

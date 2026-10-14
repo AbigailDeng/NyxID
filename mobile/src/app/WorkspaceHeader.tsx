@@ -22,30 +22,28 @@ import type { RootStackParamList } from "./AppNavigator";
 
 export const WorkspaceMenuContext = createContext(() => {});
 
-function WorkspaceHeaderButtons({
-  canGoBack,
-  onBack,
-  onOpenMenu,
+function WorkspaceHeaderButton({
+  back = false,
+  onPress,
   disabled,
   label,
 }: {
-  canGoBack: boolean;
-  onBack: () => void;
-  onOpenMenu: () => void;
+  back?: boolean;
+  onPress: () => void;
   disabled: boolean;
   label: string;
 }) {
   const { colors } = useTheme();
   return (
     <Pressable
-      onPress={canGoBack ? onBack : onOpenMenu}
+      onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={canGoBack ? label : "Open navigation"}
-      accessibilityState={{ disabled: canGoBack && disabled }}
-      disabled={canGoBack && disabled}
-      style={[styles.button, canGoBack && disabled && styles.disabled]}
+      accessibilityLabel={label}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      style={[styles.button, disabled && styles.disabled]}
     >
-      {canGoBack ? (
+      {back ? (
         <ChevronLeft color={colors.textPrimary} size={24} />
       ) : (
         <Menu color={colors.textPrimary} size={22} />
@@ -67,27 +65,44 @@ export function workspaceHeaderOptions({
   disabled?: boolean;
   label?: string;
 }): NativeStackNavigationOptions {
-  const buttons = (canGoBack?: boolean) => (
-    <WorkspaceHeaderButtons
-      canGoBack={localBack || canGoBack === true}
-      onBack={onBack}
-      onOpenMenu={onOpenMenu}
-      disabled={disabled}
-      label={label}
-    />
-  );
+  const leftButton = (canGoBack?: boolean) => {
+    const hasBack = localBack || canGoBack === true;
+    return (
+      <WorkspaceHeaderButton
+        back={hasBack}
+        onPress={hasBack ? onBack : onOpenMenu}
+        disabled={hasBack && disabled}
+        label={hasBack ? label : "Open navigation"}
+      />
+    );
+  };
+  const menuButton = (canGoBack?: boolean) =>
+    localBack || canGoBack === true ? (
+      <WorkspaceHeaderButton
+        onPress={onOpenMenu}
+        disabled={disabled}
+        label="Open navigation"
+      />
+    ) : null;
   return {
     headerShown: true,
     headerBackVisible: false,
     headerBackButtonMenuEnabled: false,
-    headerLeft: ({ canGoBack }) => buttons(canGoBack),
+    headerLeft: ({ canGoBack }) => leftButton(canGoBack),
+    headerRight: ({ canGoBack }) => menuButton(canGoBack),
     unstable_headerLeftItems: ({ canGoBack }) => [
       {
         type: "custom",
-        element: buttons(canGoBack),
+        element: leftButton(canGoBack),
         hidesSharedBackground: true,
       },
     ],
+    unstable_headerRightItems: ({ canGoBack }) => {
+      const element = menuButton(canGoBack);
+      return element
+        ? [{ type: "custom", element, hidesSharedBackground: true }]
+        : [];
+    },
   };
 }
 
@@ -144,7 +159,6 @@ export function useWorkspaceBack({
 
 const styles = StyleSheet.create({
   button: {
-    marginLeft: -8,
     minWidth: 44,
     height: 44,
     justifyContent: "center",
