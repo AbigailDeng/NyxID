@@ -10,6 +10,7 @@ import { isNyxAgentConversationId } from "@/lib/assistant/conversation-ids";
 import { markAdmitted } from "@/lib/assistant/send-admission";
 import type { ChatImage, ChatSessionState, ChatMessage } from "@/lib/assistant/chat-types";
 import type { RuntimeToolCallInfo } from "@/lib/assistant/runtime-event-semantics";
+import { deriveTurnStatus } from "@/lib/assistant/turn-status";
 import {
   nyxAgentAcknowledgementSchema,
   nyxAgentSteeringSchema,
@@ -37,6 +38,7 @@ interface LiveTurn {
   conversation: NyxAgentConversation;
   controller: AbortController;
   resetBeforeMessageId?: string;
+  retrying?: boolean;
 }
 
 function toolCalls(
@@ -53,6 +55,7 @@ function toolCalls(
         activity.status === "running" ? "running" : activity.status === "error" ? "error" : "done",
       startedAt: Date.parse(activity.started_at),
       finishedAt: activity.ended_at ? Date.parse(activity.ended_at) : undefined,
+      failure: activity.failure,
     })),
   };
 }
@@ -83,7 +86,7 @@ function path(id: string): string {
 export function storedError(code: string | null): string {
   if (code === "tool_budget_exhausted" || code === "turn_timeout") return "This task reached its automatic continuation limit. Its context is saved; resume to continue, or adjust the limit in NyxBot settings.";
   if (code === "continuation_no_progress") return "Paused because the task repeated without progress. Its context is saved; give it new guidance.";
-  if (code === "idle_timeout") return "The assistant stopped responding. Try again.";
+  if (code === "idle_timeout") return "The assistant stopped responding. Check what it already did before asking it to continue.";
   if (code === "outcome_unknown") {
     return "The previous operation may have taken effect. Check its result before trying again.";
   }
@@ -147,6 +150,7 @@ async function subscriptionDeadline<T>(
 /** Only a presentation cache. MongoDB owns transcripts, running turns and stop. */
 export class NyxAgentTransport {
   private generation = 0;
+  private interrupted = new Set<string>();
   private owner = getAssistantIdentityUserId();
   private revision = 0;
   private mutationRevision = 0;
@@ -183,6 +187,7 @@ export class NyxAgentTransport {
 
   clear() {
     this.generation += 1;
+    this.interrupted.clear();
     this.mutationRevision += 1;
     this.rowRevisions.clear();
     this.pendingTitles.clear();
@@ -353,6 +358,7 @@ export class NyxAgentTransport {
       messages: [...merged.values()].sort((a, b) => a.seq - b.seq),
     };
     this.histories.set(id, history);
+    if (!history.conversation.active_turn) this.interrupted.delete(id);
     this.index.set(id, page.conversation);
     this.changed();
     return history;
@@ -430,12 +436,12 @@ export class NyxAgentTransport {
     this.changed();
   }
 
-  async decide(id: string, acknowledgementId: string, decision: "allow" | "deny") {
+  async decide(id: string, acknowledgementId: string, decision: "allow" | "deny", acceptReducedScope = false) {
     const generation = this.identity();
     const acknowledgement = nyxAgentAcknowledgementSchema.parse(
       await assistantJson(`${path(id)}/acknowledgements/${encodeURIComponent(acknowledgementId)}`, {
         method: "POST",
-        body: { decision },
+        body: { decision, ...(acceptReducedScope ? { accept_reduced_scope: true } : {}) },
       }),
     );
     this.current(generation);
@@ -501,13 +507,14 @@ export class NyxAgentTransport {
         content: message.text,
         timestamp: Date.parse(message.created_at),
         turnId: message.turn_id,
-        status: failed ? "error" : "complete",
+        status: failed ? "error" : message.error_code === "cancelled" ? "stopped" : "complete",
         error: failed ? storedError(message.error_code) : undefined,
         errorDetail: message.error_detail ? { stage: message.error_detail.stage, httpStatus: message.error_detail.http_status, upstreamRequestId: message.error_detail.upstream_request_id, responseId: message.error_detail.response_id, continuations: message.error_detail.continuations, turnId: message.error_detail.turn_id, occurredAt: message.error_detail.occurred_at } : undefined,
         errorCode: message.error_code,
         ...toolCalls(message.activities, id),
         ...images(id, message.attachments),
         via: message.via,
+        activityTotal: message.activity_total,
         steering: message.steering,
         continuation_of: message.continuation_of,
       };
@@ -520,11 +527,23 @@ export class NyxAgentTransport {
     const polledTurn = history?.conversation.active_turn;
     const liveActivity =
       polledTurn && (!liveTurnId || polledTurn.turn_id === liveTurnId)
-        ? { ...toolCalls(polledTurn.activities, id), ...images(id, polledTurn.attachments) }
+        ? { ...toolCalls(polledTurn.activities, id), ...images(id, polledTurn.attachments), activityTotal: polledTurn.activity_total }
         : {};
     const settledImages = new Map(
       (history?.messages ?? []).map((message) => [message.id, images(id, message.attachments)]),
     );
+    const turnStatus = conversation
+      ? deriveTurnStatus({
+          activeTurn: conversation.active_turn,
+          live: Boolean(live),
+          pendingApproval: Boolean(
+            (history?.acknowledgements ?? []).some((row) => row.status === "pending")
+            || (history?.approvals ?? []).length,
+          ),
+          retrying: Boolean(live?.retrying),
+          interrupted: this.interrupted.has(id ?? "draft"),
+        })
+      : null;
     if (live) {
       const settledMessages = new Map(
         (history?.messages ?? []).map((message) => [message.id, message]),
@@ -533,6 +552,8 @@ export class NyxAgentTransport {
         const streaming =
           message.role === "assistant" && message === live.state.messages.at(-1);
         const settled = settledMessages.get(message.id);
+        const settledView = settled && this.settledViews.get(settled);
+        if (!streaming && settledView) return settledView;
         const cached = streaming ? undefined : this.liveViews.get(message);
         if (cached && cached.id === id && cached.settled === settled) return cached.view;
         const view: ChatMessage = {
@@ -547,6 +568,7 @@ export class NyxAgentTransport {
           content: message.blocks.map((block) => block.text).join("\n\n"),
           timestamp: Date.parse(message.created_at),
           status: streaming ? "streaming" : "complete",
+          ...(streaming ? { turnStatus } : {}),
           ...(message.attachments?.length
             ? images(id, message.attachments)
             : streaming
@@ -561,15 +583,14 @@ export class NyxAgentTransport {
       for (const message of history?.messages ?? []) {
         if (!message.steering || messages.some((m) => m.id === message.id)) continue;
         const position = messages.findIndex((m) => m.status === "streaming");
-        messages.splice(position < 0 ? messages.length : position, 0, {
-          id: message.id, role: message.role, content: message.text,
-          timestamp: Date.parse(message.created_at), status: "complete",
-          turnId: message.turn_id, steering: message.steering,
-        });
+        const view = this.settledViews.get(message);
+        if (view) {
+          messages.splice(position < 0 ? messages.length : position, 0, view);
+        }
       }
     }
     const running = Boolean(live || conversation?.active_turn);
-    if (running && messages.at(-1)?.role !== "assistant") {
+    if (running && messages.at(-1)?.status !== "streaming") {
       messages.push({
         id: `${conversation?.active_turn?.turn_id ?? "pending"}-assistant`,
         role: "assistant",
@@ -577,6 +598,7 @@ export class NyxAgentTransport {
         timestamp: Date.now(),
         status: "streaming",
         ...liveActivity,
+        turnStatus,
       });
     }
     const resetAt = conversation?.context_reset_at;
@@ -717,6 +739,7 @@ export class NyxAgentTransport {
         ],
       },
     };
+    this.interrupted.delete(key);
     this.live.set(key, turn);
     this.changed();
     let adopted = Boolean(id) && !options.adoptExisting;
@@ -818,6 +841,11 @@ export class NyxAgentTransport {
                 }
               }
             }
+            if (event.event === "turn.notice" && event.code === "retrying") {
+              turn.retrying = true;
+            } else if (event.event !== "turn.notice") {
+              turn.retrying = false;
+            }
             if (event.event === "turn.notice" && event.code === "image_input_unavailable") {
               await this.history(key).catch(() => undefined);
               this.current(generation);
@@ -852,6 +880,8 @@ export class NyxAgentTransport {
         if (adopted) await this.history(key).catch(() => undefined);
         this.current(generation);
         this.live.delete(key);
+        if (!terminal && this.getHistory(key)?.conversation.active_turn) this.interrupted.add(key);
+        else this.interrupted.delete(key);
         this.changed();
       }
     }

@@ -13,7 +13,7 @@ use crate::{
             AssistantAcknowledgement, COLLECTION_NAME as ACKNOWLEDGEMENTS_COLLECTION_NAME,
         },
         assistant_agent_learning::{
-            AssistantAgentLearningProposal, PROPOSALS_COLLECTION_NAME, ProposalSource,
+            AssistantAgentLearningProposal, DraftScope, PROPOSALS_COLLECTION_NAME, ProposalSource,
         },
     },
 };
@@ -25,7 +25,7 @@ use mongodb::{
 };
 use serde::Deserialize;
 use serde_json::Value;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 pub const TOOL_NAME: &str = "draft_agent_skill";
@@ -51,6 +51,56 @@ pub async fn require_author(db: &Database, chat: &ChatAuthority) -> AppResult<()
     if !enabled(db, &chat.user_id).await? {
         return Err(AppError::Forbidden(
             "Agent skill authoring is not enabled".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn attempt_id(chat: &ChatAuthority) -> AppResult<(String, &str)> {
+    let turn_id = chat
+        .turn_id
+        .as_deref()
+        .ok_or_else(|| AppError::Forbidden("Draft from an active owner turn".into()))?;
+    let id = Uuid::new_v5(
+        &Uuid::NAMESPACE_OID,
+        format!("{}:{turn_id}", chat.conversation_id).as_bytes(),
+    )
+    .to_string();
+    Ok((id, turn_id))
+}
+
+async fn record_format_rejection(db: &Database, chat: &ChatAuthority) -> AppResult<i32> {
+    let (id, turn_id) = attempt_id(chat)?;
+    let row = db
+        .collection::<crate::models::assistant_skill_draft_attempt::AssistantSkillDraftAttempt>(
+            crate::models::assistant_skill_draft_attempt::COLLECTION_NAME,
+        )
+        .find_one_and_update(
+            doc! {"_id": &id, "user_id": &chat.user_id},
+            doc! {"$inc":{"rejections":1}, "$setOnInsert":{
+                "user_id":&chat.user_id, "conversation_id":&chat.conversation_id,
+                "turn_id":turn_id, "created_at":bson::DateTime::now()
+            }},
+        )
+        .upsert(true)
+        .return_document(mongodb::options::ReturnDocument::After)
+        .await?;
+    Ok(row.map(|value| value.rejections).unwrap_or(1))
+}
+
+async fn require_repair_budget(db: &Database, chat: &ChatAuthority) -> AppResult<()> {
+    let (id, _) = attempt_id(chat)?;
+    if db
+        .collection::<crate::models::assistant_skill_draft_attempt::AssistantSkillDraftAttempt>(
+            crate::models::assistant_skill_draft_attempt::COLLECTION_NAME,
+        )
+        .find_one(doc! {"_id":id,"user_id":&chat.user_id})
+        .await?
+        .is_some_and(|row| row.rejections >= 3)
+    {
+        return Err(invalid(
+            "repair_cap_report_remaining_rules_to_owner",
+            "draft",
         ));
     }
     Ok(())
@@ -131,6 +181,7 @@ pub struct DraftInput {
     files: Vec<GeneratedFile>,
     #[serde(default)]
     base_skill: Option<BaseInput>,
+    scope: DraftScope,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -157,6 +208,7 @@ pub(crate) fn parse_input(value: &Value) -> AppResult<DraftInput> {
             "skill_md",
             "files",
             "base_skill",
+            "scope",
         ],
     )?;
     for field in ["agent", "name", "description", "skill_md"] {
@@ -167,6 +219,40 @@ pub(crate) fn parse_input(value: &Value) -> AppResult<DraftInput> {
         validation::object(base, "base_skill", &["skill_id", "version"])?;
         for field in ["skill_id", "version"] {
             validation::string(&base[field], &format!("base_skill.{field}"))?;
+        }
+    }
+    {
+        let scope = value
+            .get("scope")
+            .filter(|v| !v.is_null())
+            .ok_or_else(|| invalid("required", "scope"))?;
+        validation::object(scope, "scope", &["status", "omissions"])?;
+        let status = scope["status"]
+            .as_str()
+            .ok_or_else(|| invalid("invalid_shape", "scope.status"))?;
+        if !matches!(status, "complete" | "reduced") {
+            return Err(invalid("invalid_scope", "scope.status"));
+        }
+        let omissions = scope
+            .get("omissions")
+            .and_then(Value::as_array)
+            .ok_or_else(|| invalid("invalid_shape", "scope.omissions"))?;
+        if status == "complete" && !omissions.is_empty()
+            || status == "reduced" && !(1..=8).contains(&omissions.len())
+        {
+            return Err(invalid("invalid_scope", "scope.omissions"));
+        }
+        for (index, omission) in omissions.iter().enumerate() {
+            let text = omission
+                .as_str()
+                .ok_or_else(|| invalid("invalid_shape", &format!("scope.omissions[{index}]")))?;
+            validation::text(&format!("scope.omissions[{index}]"), text, 200, true)?;
+            if text.contains(['<', '>']) {
+                return Err(invalid(
+                    "invalid_scope",
+                    &format!("scope.omissions[{index}]"),
+                ));
+            }
         }
     }
     serde_json::from_value(value.clone()).map_err(|_| invalid("invalid_shape", "draft"))
@@ -182,6 +268,7 @@ pub async fn create(
     validator: &impl super::agent_skill_service::OrnnReader,
 ) -> AppResult<Value> {
     require_author(&state.db, chat).await?;
+    require_repair_budget(&state.db, chat).await?;
     let agent = team::maintained_agent(&state.db, &chat.user_id, &input.agent).await?;
     if agent.destroyed_at.is_some() {
         return Err(AppError::NotFound("Agent not found".into()));
@@ -242,13 +329,30 @@ pub async fn create(
     let encoded = validate_body(&body)?;
     validation::ornn_rules(&body)?;
     review::validate_proposal_base(&state.db, &agent, &body, ProposalSource::Authored).await?;
-    ornn_preflight(validator, &body).await?;
+    if let Err(error) = ornn_preflight(validator, &body).await {
+        if let AppError::SkillDraftValidation(diagnostic) = &error
+            && diagnostic.rule == "ornn_format_rejected"
+            && record_format_rejection(&state.db, chat).await? >= 3
+        {
+            let mut capped = crate::errors::skill_draft::SkillDraftValidation::at(
+                "repair_cap_report_remaining_rules_to_owner",
+                "draft",
+            );
+            capped.ornn_rules = diagnostic.ornn_rules.clone();
+            return Err(capped.into());
+        }
+        return Err(error);
+    }
     let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(state.audit_chain_hmac_key.as_slice())
         .expect("HMAC key");
     mac.update(b"nyxid-authored-skill-v1\0");
     mac.update(agent.id.as_bytes());
     mac.update(&encoded);
+    let scope_bytes = serde_json::to_vec(&input.scope).expect("scope serializes");
+    mac.update(b"\0scope\0");
+    mac.update(&scope_bytes);
     let fingerprint = hex::encode(mac.finalize().into_bytes());
+    let scope_digest = hex::encode(Sha256::digest(&scope_bytes));
     let now = Utc::now();
     let candidate = AssistantAgentLearningProposal {
         source: ProposalSource::Authored,
@@ -265,6 +369,9 @@ pub async fn create(
         model_contract: "authored-skill-v1".into(),
         publication: None,
         failure_code: None,
+        failure_rules: Vec::new(),
+        scope_encrypted: Some(state.encryption_keys.encrypt(&scope_bytes).await?),
+        scope_digest: Some(scope_digest),
         evidence: Vec::new(),
         body_encrypted: state.encryption_keys.encrypt(&encoded).await?,
         body_bytes: encoded.len() as i64,
@@ -532,6 +639,9 @@ async fn submit_owner_draft(
             model_contract: "authored-skill-v1".into(),
             publication: None,
             failure_code: None,
+            failure_rules: Vec::new(),
+            scope_encrypted: None,
+            scope_digest: None,
             evidence: Vec::new(),
             body_encrypted: state.encryption_keys.encrypt(&encoded).await?,
             body_bytes: encoded.len() as i64,
@@ -641,12 +751,25 @@ pub async fn publish_automatically(
         agent.id,
         id
     );
-    let summary = format!(
+    let mut summary = format!(
         "Skill {} {} published and attached to {}",
         name,
         result["version"].as_str().unwrap_or_default(),
         agent.name
     );
+    // Full access bypasses every request to proceed, including reduced-scope
+    // consent. Persist only its count; the linked preview decrypts the declaration.
+    if let Some(encrypted) = &proposal.scope_encrypted {
+        let scope: DraftScope =
+            serde_json::from_slice(&state.encryption_keys.decrypt(encrypted).await?)
+                .map_err(|_| AppError::Conflict("Skill draft changed".into()))?;
+        if scope.status == "reduced" {
+            summary.push_str(&format!(
+                "; Reduced scope: {} declared omission(s); separate consent bypassed by Full access",
+                scope.omissions.len(),
+            ));
+        }
+    }
     acks::record_auto_allowed_with_link(
         &state.db,
         chat,
@@ -759,3 +882,7 @@ pub async fn raise_review_card(
 #[cfg(test)]
 #[path = "assistant_skill_authoring_tests.rs"]
 mod tests;
+
+pub(crate) fn credential_shaped(value: &str) -> bool {
+    validation::credential_position(value).is_some()
+}

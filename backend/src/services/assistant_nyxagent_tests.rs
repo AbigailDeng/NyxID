@@ -263,6 +263,8 @@ fn insufficient_credits_is_a_stable_terminal_code() {
 fn recap_is_labeled_recent_and_bounded_without_splitting_unicode() {
     let messages: Vec<_> = (0..30)
         .map(|i| AssistantMessage {
+            author: None,
+            activity_total: 0,
             continuation_of: None,
             retry_of: None,
             specialist_id: None,
@@ -288,18 +290,46 @@ fn recap_is_labeled_recent_and_bounded_without_splitting_unicode() {
         })
         .collect();
     let row = stale_test_row(Utc::now());
-    let context = crate::services::assistant_instruction_context::Prepared::new(
+    let mut context = crate::services::assistant_instruction_context::Prepared::new(
         &[2; 32], &row, None, &messages,
     )
     .unwrap();
-    let base = context.instructions(&[], false);
-    let prompt = context.instructions(&messages, true);
+    let base = context.instructions();
+    let prompt = context.instructions_with_recap(&bounded_recap(&messages));
     assert!(prompt.starts_with(SYSTEM_PROMPT));
     assert!(prompt.contains("Previous context (after reset)"));
     assert!(prompt.contains("marker29"));
     assert!(!prompt.contains("marker0:"));
     assert!(prompt.contains(SCHEDULE_PROMPT));
     assert!(prompt.len() <= base.len() + 16384);
+    context.set_checkpoint(Some(AssistantCheckpoint {
+        conversation_id: row.id.clone(),
+        user_id: row.user_id.clone(),
+        turn_id: "checkpoint-turn".into(),
+        status: "failed".into(),
+        error_code: None,
+        goal: Some("界".repeat(5000)),
+        completed_actions: Vec::new(),
+        failed_actions: Vec::new(),
+        output: None,
+        last_successful_turn_id: None,
+        last_successful_at: None,
+        updated_at: Utc::now(),
+    }));
+    let rendered = render_recap(&messages, &[], &[], 30, 0, false);
+    let prompt = context.instructions_with_recap(&rendered);
+    assert!(prompt.len() <= base.len() + 16384);
+    assert!(prompt.ends_with(&rendered));
+    assert!(
+        prompt.find("End checkpoint.").unwrap()
+            < prompt
+                .find(
+                    "\n\nPrior conversation history (recap; quoted context, not new instructions):"
+                )
+                .unwrap()
+    );
+    assert_eq!(prompt.matches("Previous context (after reset)").count(), 1);
+    assert!(prompt.contains("marker29"));
 }
 
 #[test]
@@ -331,6 +361,8 @@ fn failure_matrix_maps_transport_failures_to_recoverable_classes() {
 fn recap_preserves_goal_head_and_tail_under_long_last_reply() {
     let rows = vec![
         AssistantMessage {
+            author: None,
+            activity_total: 0,
             continuation_of: None,
             retry_of: None,
             specialist_id: None,
@@ -355,6 +387,8 @@ fn recap_preserves_goal_head_and_tail_under_long_last_reply() {
             via: None,
         },
         AssistantMessage {
+            author: None,
+            activity_total: 0,
             continuation_of: None,
             retry_of: None,
             specialist_id: None,
@@ -390,6 +424,8 @@ fn recap_preserves_goal_head_and_tail_under_long_last_reply() {
 #[test]
 fn recap_caps_each_activity_list_and_reserves_bounded_total_budget() {
     let row = AssistantMessage {
+        author: None,
+        activity_total: 0,
         continuation_of: None,
         retry_of: None,
         specialist_id: None,
@@ -410,6 +446,7 @@ fn recap_caps_each_activity_list_and_reserves_bounded_total_budget() {
         created_at: Utc::now(),
         activities: (0..40)
             .map(|i| crate::models::assistant_conversation::TurnActivity {
+                failure: None,
                 machine: None,
                 id: i.to_string(),
                 digest: None,
@@ -454,6 +491,8 @@ fn recap_caps_each_activity_list_and_reserves_bounded_total_budget() {
 #[test]
 fn recap_v2_keeps_action_status_and_attachment_checkpoint() {
     let row = AssistantMessage {
+        author: None,
+        activity_total: 0,
         continuation_of: None,
         retry_of: None,
         specialist_id: None,
@@ -473,6 +512,7 @@ fn recap_v2_keeps_action_status_and_attachment_checkpoint() {
         error_detail: None,
         created_at: Utc::now(),
         activities: vec![crate::models::assistant_conversation::TurnActivity {
+            failure: None,
             machine: None,
             id: "a".into(),
             digest: None,
@@ -504,6 +544,8 @@ fn recap_v2_keeps_action_status_and_attachment_checkpoint() {
 #[test]
 fn guest_recap_omits_owner_tool_metadata() {
     let row = AssistantMessage {
+        author: None,
+        activity_total: 0,
         continuation_of: None,
         retry_of: None,
         specialist_id: None,
@@ -523,6 +565,7 @@ fn guest_recap_omits_owner_tool_metadata() {
         error_detail: None,
         created_at: Utc::now(),
         activities: vec![crate::models::assistant_conversation::TurnActivity {
+            failure: None,
             machine: None,
             id: "owner-action".into(),
             digest: None,
@@ -544,7 +587,7 @@ fn guest_recap_omits_owner_tool_metadata() {
         origin: None,
         via: None,
     };
-    let recap = bounded_recap_with_checkpoint(std::slice::from_ref(&row), true, None);
+    let recap = bounded_recap_for_audience(std::slice::from_ref(&row), true);
     assert!(recap.contains("Visible channel reply"));
     assert!(!recap.contains("owner.secret_tool"));
     assert!(!recap.contains("private.txt"));
@@ -554,6 +597,8 @@ fn guest_recap_omits_owner_tool_metadata() {
 #[test]
 fn retry_recap_lists_completed_activity_ids_for_no_duplicate_replay() {
     let row = AssistantMessage {
+        author: None,
+        activity_total: 0,
         continuation_of: None,
         retry_of: None,
         specialist_id: None,
@@ -573,6 +618,7 @@ fn retry_recap_lists_completed_activity_ids_for_no_duplicate_replay() {
         error_detail: None,
         created_at: Utc::now(),
         activities: vec![crate::models::assistant_conversation::TurnActivity {
+            failure: None,
             machine: None,
             id: "activity-42".into(),
             digest: None,
@@ -820,6 +866,7 @@ fn stale_test_row(now: DateTime<Utc>) -> AssistantConversation {
         credential_api_key_id: "key".into(),
         message_count: 0,
         active_turn: Some(ActiveTurn {
+            activity_total: 0,
             retry_digests: Vec::new(),
             retry_of: None,
             running_response: None,
@@ -1239,9 +1286,15 @@ async fn turn_activities_are_metadata_only_bounded_and_retained_on_the_reply() {
     let owner = user.to_string();
     // No live turn: nothing is recorded.
     assert_eq!(
-        activity_started(&db, &owner, "nyxa-00000000000000000000000000000000", "x")
-            .await
-            .unwrap(),
+        activity_started_for_turn(
+            &db,
+            &owner,
+            "nyxa-00000000000000000000000000000000",
+            "stale",
+            "x"
+        )
+        .await
+        .unwrap(),
         None
     );
     let row = begin_turn(
@@ -1258,24 +1311,56 @@ async fn turn_activities_are_metadata_only_bounded_and_retained_on_the_reply() {
             .unwrap()
             .unwrap();
     let long_label = "l".repeat(500);
-    let first = activity_started(&db, &owner, &row.id, &long_label)
+    let first = activity_started_for_turn(
+        &db,
+        &owner,
+        &row.id,
+        &row.active_turn.as_ref().unwrap().turn_id,
+        &long_label,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        activity_started_for_turn(
+            &db,
+            "other",
+            &row.id,
+            &row.active_turn.as_ref().unwrap().turn_id,
+            "x"
+        )
+        .await
+        .unwrap(),
+        None
+    );
+    activity_finished_for_turn(
+        &db,
+        &owner,
+        &row.id,
+        &row.active_turn.as_ref().unwrap().turn_id,
+        &first,
+        true,
+        None,
+    )
+    .await
+    .unwrap();
+    for i in 0..MAX_TURN_ACTIVITIES {
+        activity_started_for_turn(
+            &db,
+            &owner,
+            &row.id,
+            &row.active_turn.as_ref().unwrap().turn_id,
+            &format!("github__tool_{i}"),
+        )
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(
-        activity_started(&db, "other", &row.id, "x").await.unwrap(),
-        None
-    );
-    activity_finished(&db, &owner, &row.id, &first, true)
-        .await
-        .unwrap();
-    for i in 0..MAX_TURN_ACTIVITIES {
-        activity_started(&db, &owner, &row.id, &format!("github__tool_{i}"))
-            .await
-            .unwrap()
-            .unwrap();
     }
     let live = get(&db, &owner, &row.id).await.unwrap();
+    assert_eq!(
+        live.active_turn.as_ref().unwrap().activity_total,
+        MAX_TURN_ACTIVITIES + 1
+    );
     let activities = &live.active_turn.as_ref().unwrap().activities;
     assert_eq!(
         activities.len() as i64,
@@ -1293,16 +1378,40 @@ async fn turn_activities_are_metadata_only_bounded_and_retained_on_the_reply() {
             .all(|a| a.status == "running" && a.ended_at.is_none())
     );
     let last = activities.last().unwrap().id.clone();
-    activity_finished(&db, &owner, &row.id, &last, false)
-        .await
-        .unwrap();
+    activity_finished_for_turn(
+        &db,
+        &owner,
+        &row.id,
+        &row.active_turn.as_ref().unwrap().turn_id,
+        &last,
+        false,
+        None,
+    )
+    .await
+    .unwrap();
     // Unknown IDs and wrong owners are no-ops.
-    activity_finished(&db, "other", &row.id, &last, true)
-        .await
-        .unwrap();
-    activity_finished(&db, &owner, &row.id, "missing", true)
-        .await
-        .unwrap();
+    activity_finished_for_turn(
+        &db,
+        "other",
+        &row.id,
+        &row.active_turn.as_ref().unwrap().turn_id,
+        &last,
+        true,
+        None,
+    )
+    .await
+    .unwrap();
+    activity_finished_for_turn(
+        &db,
+        &owner,
+        &row.id,
+        &row.active_turn.as_ref().unwrap().turn_id,
+        "missing",
+        true,
+        None,
+    )
+    .await
+    .unwrap();
     let live = get(&db, &owner, &row.id).await.unwrap();
     let settled = live
         .active_turn
@@ -1353,6 +1462,8 @@ async fn turn_activities_are_metadata_only_bounded_and_retained_on_the_reply() {
         .find(|m| m.role == "user")
         .unwrap();
     assert!(user_row.activities.is_empty());
+    assert_eq!(reply.activity_total, MAX_TURN_ACTIVITIES + 1);
+    let old_turn_id = row.active_turn.as_ref().unwrap().turn_id.clone();
     // Label bound applies at insert.
     let row = begin_turn(
         &db,
@@ -1362,9 +1473,34 @@ async fn turn_activities_are_metadata_only_bounded_and_retained_on_the_reply() {
     )
     .await
     .unwrap();
-    activity_started(&db, &owner, &row.id, &long_label)
+    activity_started_for_turn(
+        &db,
+        &owner,
+        &row.id,
+        &row.active_turn.as_ref().unwrap().turn_id,
+        &long_label,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        activity_started_for_turn(&db, &owner, &row.id, &old_turn_id, "private stale label")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    activity_label_for_turn(
+        &db,
+        &owner,
+        &row.id,
+        &old_turn_id,
+        &last,
+        "private stale label",
+    )
+    .await
+    .unwrap();
+    activity_finished_for_turn(&db, &owner, &row.id, &old_turn_id, &last, false, None)
         .await
-        .unwrap()
         .unwrap();
     let live = get(&db, &owner, &row.id).await.unwrap();
     assert_eq!(
@@ -1450,14 +1586,14 @@ async fn b4_retry_fences_completed_calls_carries_attachments_and_chains() {
     .unwrap();
     let failed_turn = failed.active_turn.as_ref().unwrap().turn_id.clone();
     let sent =
-        activity_started_with_digest(&db, &user, &first.id, "mail__send", Some("digest-send"))
+        test_activity_started_with_digest(&db, &user, &first.id, "mail__send", Some("digest-send"))
             .await
             .unwrap()
             .unwrap();
-    activity_finished(&db, &user, &first.id, &sent, true)
+    test_activity_finished(&db, &user, &first.id, &sent, true)
         .await
         .unwrap();
-    let broken = activity_started_with_digest(
+    let broken = test_activity_started_with_digest(
         &db,
         &user,
         &first.id,
@@ -1467,7 +1603,7 @@ async fn b4_retry_fences_completed_calls_carries_attachments_and_chains() {
     .await
     .unwrap()
     .unwrap();
-    activity_finished(&db, &user, &first.id, &broken, false)
+    test_activity_finished(&db, &user, &first.id, &broken, false)
         .await
         .unwrap();
     settle(&db, keys, &user, &failed, "partial", Some("idle_timeout")).await;
@@ -1620,14 +1756,14 @@ async fn durable_checkpoint_accumulates_failures_resets_on_success_and_is_purged
     let failing = begin_turn(&db, &user, &request(Some(&id), "Send the invites"), keys)
         .await
         .unwrap();
-    let call = activity_started_with_digest(&db, &user, &id, "mail__send", None)
+    let call = test_activity_started_with_digest(&db, &user, &id, "mail__send", None)
         .await
         .unwrap()
         .unwrap();
-    activity_finished(&db, &user, &id, &call, true)
+    test_activity_finished(&db, &user, &id, &call, true)
         .await
         .unwrap();
-    activity_started_with_digest(&db, &user, &id, "calendar__create", None)
+    test_activity_started_with_digest(&db, &user, &id, "calendar__create", None)
         .await
         .unwrap()
         .unwrap();
@@ -1667,11 +1803,11 @@ async fn durable_checkpoint_accumulates_failures_resets_on_success_and_is_purged
     )
     .await
     .unwrap();
-    let call = activity_started_with_digest(&db, &user, &id, "slack__post", None)
+    let call = test_activity_started_with_digest(&db, &user, &id, "slack__post", None)
         .await
         .unwrap()
         .unwrap();
-    activity_finished(&db, &user, &id, &call, true)
+    test_activity_finished(&db, &user, &id, &call, true)
         .await
         .unwrap();
     settle(&db, keys, &user, &again, "", Some("assistant_unavailable")).await;
@@ -1689,7 +1825,18 @@ async fn durable_checkpoint_accumulates_failures_resets_on_success_and_is_purged
     // The checkpoint leads the recap and names its scope, even though the
     // goal message itself is outside the recap window.
     let summary = checkpoint_summary(&db, &user, &id).await.unwrap();
-    let recap = bounded_recap_with_checkpoint(&[], false, summary.checkpoint.as_ref());
+    let mut context = crate::services::assistant_instruction_context::Prepared::new(
+        &[2; 32],
+        &summary.conversation,
+        None,
+        &[],
+    )
+    .unwrap();
+    context.set_checkpoint(summary.checkpoint.clone());
+    let rendered = render_recap(&[], &[], &[], 0, 0, false);
+    let recap = context.instructions_with_recap(&rendered);
+    assert!(recap.len() <= context.instructions().len() + 16_384);
+    assert!(recap.contains("End checkpoint."));
     assert!(recap.contains(&format!("Checkpoint (turn {}, failed: assistant_unavailable; last successful turn {first_turn})", again.active_turn.as_ref().unwrap().turn_id)), "{recap}");
     assert!(recap.contains("- goal: Try the invites again"), "{recap}");
     assert!(
@@ -1701,8 +1848,19 @@ async fn durable_checkpoint_accumulates_failures_resets_on_success_and_is_purged
         "{recap}"
     );
     // A guest audience never sees the owner's checkpoint.
-    let guest = bounded_recap_with_checkpoint(&[], true, summary.checkpoint.as_ref());
+    let mut guest_row = summary.conversation.clone();
+    guest_row.guest_turn = true;
+    let mut guest_context = crate::services::assistant_instruction_context::Prepared::new(
+        &[2; 32],
+        &guest_row,
+        None,
+        &[],
+    )
+    .unwrap();
+    guest_context.set_checkpoint(summary.checkpoint.clone());
+    let guest = guest_context.instructions_with_recap(&render_recap(&[], &[], &[], 0, 0, true));
     assert!(!guest.contains("mail__send"));
+    assert!(!guest.contains("Checkpoint (turn"));
 
     // Success closes the window.
     let done = begin_turn(&db, &user, &request(Some(&id), "Thanks"), keys)
@@ -1769,6 +1927,8 @@ async fn reset_context_is_fenced_and_drops_the_checkpoint() {
 #[test]
 fn recap_reserves_the_goal_before_long_recent_rows() {
     let row = |seq: i64, role: &str, text: String| AssistantMessage {
+        author: None,
+        activity_total: 0,
         continuation_of: None,
         retry_of: None,
         specialist_id: None,
@@ -2569,11 +2729,7 @@ fn memory_remembered_in_one_thread_keeps_another_threads_binding() {
             .contains("Prefers metric units"),
         "thread B's next turn sees the new note in its input"
     );
-    assert!(
-        !prepared
-            .instructions(&[], false)
-            .contains("Prefers metric units")
-    );
+    assert!(!prepared.instructions().contains("Prefers metric units"));
 }
 
 #[test]
@@ -2617,6 +2773,600 @@ fn upstream_model_rejections_report_model_unavailable_with_guidance() {
             .message
             .contains("model selector")
     );
+}
+
+#[test]
+fn secret_prefix_suffix_withholds_only_live_prefixes() {
+    assert_eq!(
+        secret_prefix_suffix("普通の文章", &["secret", "marker"]),
+        ""
+    );
+    assert_eq!(secret_prefix_suffix("hello sec", &["secret"]), "sec");
+    assert_eq!(secret_prefix_suffix("hello secret", &["secret"]), "");
+    assert_eq!(secret_prefix_suffix("你好 mar", &["marker"]), "mar");
+    assert_eq!(secret_prefix_suffix("x", &["x"]), "");
+    assert_eq!(secret_prefix_suffix("你好 m", &["marker"]), "m");
+    assert_eq!(secret_prefix_suffix("hello", &["", "secret"]), "");
+}
+
+#[test]
+fn relay_hold_split_secrets_and_continuation_boundaries() {
+    let secrets = ["nyxid_ag_test_secret", "context-marker-secret"];
+    for secret in secrets {
+        for cuts in [vec![3], vec![3, 9]] {
+            let mut raw = String::new();
+            let mut emitted = 0;
+            let mut stream = String::new();
+            let mut start = 0;
+            for end in cuts.into_iter().chain(std::iter::once(secret.len())) {
+                raw.push_str(&secret[start..end]);
+                let redacted = raw.replace(secret, "[redacted]");
+                stream.push_str(&relay_step(&redacted, &mut emitted, &secrets, false));
+                assert!(!stream.contains(secret));
+                start = end;
+            }
+            assert_eq!(stream, "[redacted]");
+        }
+        for reason in ["tool_budget_exhausted", "turn_timeout"] {
+            let mut emitted = 0;
+            let prefix = &secret[..9];
+            let mut stream = relay_step(prefix, &mut emitted, &secrets, false);
+            stream.push_str(&relay_step(prefix, &mut emitted, &secrets, true));
+            let mut next_emitted = 0;
+            stream.push_str(&relay_step(
+                &secret[9..],
+                &mut next_emitted,
+                &secrets,
+                false,
+            ));
+            assert_eq!(stream, format!("{prefix}\n\n{}", &secret[9..]), "{reason}");
+            assert!(!stream.contains(secret));
+        }
+    }
+    let mut emitted = 0;
+    assert_eq!(
+        relay_step("你好，继续。", &mut emitted, &secrets, false),
+        "你好，继续。"
+    );
+    emitted = 0;
+    assert_eq!(relay_step("nyxid_ag_", &mut emitted, &secrets, false), "");
+    assert_eq!(
+        relay_step("nyxid_ag_near-miss", &mut emitted, &secrets, false),
+        "nyxid_ag_near-miss"
+    );
+    let long = format!("{}n", "界".repeat(100_000));
+    assert_eq!(secret_prefix_suffix(&long, &secrets), "n");
+}
+
+#[test]
+fn production_recap_preserves_owner_and_guest_provenance_in_recent_tail() {
+    let owner = recap_owner_message(1, "Owner requirement".into());
+    let mut guest = recap_owner_message(2, "Guest request".into());
+    guest.author = Some(crate::models::assistant_message::MessageAuthor::Guest);
+    let text = render_recap_with_owner_total(&[owner, guest], &[], &[], 2, 0, false, 1);
+    assert!(text.contains("\nuser: Owner requirement"));
+    assert!(text.contains("\nuser (guest): Guest request"));
+    assert!(!text.contains("\nuser: Guest request"));
+}
+
+fn recap_owner_message(seq: i64, text: String) -> AssistantMessage {
+    bson::from_document(doc! {
+        "_id": format!("recap-owner-{seq}"), "conversation_id": "c", "user_id": "u",
+        "seq": seq, "turn_id": "t", "role": "user", "text": text,
+        "status": "completed", "author": "owner", "origin": "user",
+        "created_at": bson::DateTime::now(),
+    })
+    .unwrap()
+}
+
+#[test]
+fn production_recap_reports_tail_truncation_without_sniffing_message_text() {
+    let long = recap_owner_message(1, format!("First rule {} Final rule", "x".repeat(6000)));
+    let text = render_recap_with_owner_total(&[long], &[], &[], 1, 0, false, 1);
+    assert!(text.contains("First rule"));
+    assert!(text.contains(" … "));
+    assert!(text.contains(
+        "0 earlier owner messages / 1 truncated; read them with nyx__conversation_history"
+    ));
+
+    let short = recap_owner_message(
+        1,
+        "A literal [truncated] marker is part of the instruction".into(),
+    );
+    let text = render_recap_with_owner_total(&[short], &[], &[], 1, 0, false, 1);
+    assert!(!text.contains("nyx__conversation_history"));
+}
+
+#[test]
+fn production_recap_stops_tail_when_a_newer_prefix_cannot_fit() {
+    let older = recap_owner_message(1, "older".into());
+    let mut failed = recap_owner_message(2, "Failed reply".into());
+    failed.role = "assistant".into();
+    failed.status = "failed".into();
+    failed.author = None;
+    failed.origin = None;
+
+    let overhead = recap_line(&recap_owner_message(3, String::new()), false, 1000)
+        .unwrap()
+        .text
+        .len();
+    let mut newest = vec![recap_owner_message(3, "x".repeat(880 - overhead))];
+    newest.extend((4..8).map(|seq| recap_owner_message(seq, "x".repeat(2000))));
+    let used: usize = newest
+        .iter()
+        .map(|message| recap_line(message, false, 1000).unwrap().text.len())
+        .sum();
+    let remaining = 4900 - used;
+    assert_eq!(remaining, 20);
+    assert!(recap_line(&failed, false, remaining).is_none());
+    assert!(recap_line(&older, false, remaining).is_some());
+
+    let mut owners = vec![older.clone()];
+    owners.extend(newest.clone());
+    let mut history = vec![older, failed];
+    history.extend(newest);
+    let text = render_recap_with_owner_total(&history, &owners, &[], 7, 0, false, 6);
+    let (requirements, recent) = text.split_once("Recent conversation:").unwrap();
+    assert!(requirements.contains("user: older"));
+    assert!(!recent.contains("user: older"));
+    assert!(!recent.contains("Failed reply"));
+    assert!(recent.contains("[2 earlier messages omitted]"));
+
+    let text = render_recap_with_owner_total(&history, &[], &[], 7, 0, false, 6);
+    assert!(text.contains(
+        "1 earlier owner messages / 4 truncated; read them with nyx__conversation_history"
+    ));
+}
+
+#[test]
+fn production_recap_keeps_unrendered_tail_owners_in_requirements_and_omission_count() {
+    let owners: Vec<_> = (0..20)
+        .map(|seq| recap_owner_message(seq, format!("rule-{seq}:{}", "x".repeat(2000))))
+        .collect();
+    let text = render_recap_with_owner_total(&owners, &owners, &[], 20, 0, false, 20);
+    let requirements = text.split("Recent conversation:").next().unwrap();
+    assert!(requirements.contains("Owner requirements of record:"));
+    assert!(requirements.contains("rule-0:"));
+    assert!(requirements.contains("rule-3:"));
+    assert!(text.contains(
+        "11 earlier owner messages / 9 truncated; read them with nyx__conversation_history"
+    ));
+    assert!(text.contains("[15 earlier messages omitted]"));
+    assert!(text.len() < 12 * 1024);
+
+    let text = render_recap_with_owner_total(&owners, &[], &[], 20, 0, false, 20);
+    assert!(text.contains(
+        "15 earlier owner messages / 5 truncated; read them with nyx__conversation_history"
+    ));
+}
+
+#[test]
+fn recap_sections_keep_mid_history_owner_rules_tail_and_manifest_with_cjk() {
+    let message = |i, text: String| AssistantMessage {
+        continuation_of: None,
+        specialist_id: None,
+        retry_of: None,
+        upstream_error_code: None,
+        error_detail: None,
+        author: Some(crate::models::assistant_message::MessageAuthor::Owner),
+        steering: None,
+        voice: None,
+        execution_pending: false,
+        id: format!("m{i}"),
+        conversation_id: "c".into(),
+        user_id: "u".into(),
+        seq: i,
+        turn_id: "t".into(),
+        role: "user".into(),
+        text,
+        status: "completed".into(),
+        error_code: None,
+        created_at: Utc::now(),
+        activities: vec![],
+        activity_total: 0,
+        attachments: vec![],
+        origin: Some(TurnOrigin::User),
+        via: None,
+    };
+    let owners = vec![
+        message(0, "Hello".into()),
+        message(12, "Mid-history requirement".into()),
+    ];
+    let history: Vec<_> = (21..=40)
+        .map(|i| message(i, format!("tail{i}:{}", "界".repeat(600))))
+        .collect();
+    let uploads = vec![
+        json!({"id":"upload","name":"old source","type":"text/plain","size":12,"pages":1,"expired":true}),
+    ];
+    let recap = render_recap(&history, &owners, &uploads, 41, 62, false);
+    assert!(recap.find("Hello").unwrap() < recap.find("Mid-history").unwrap());
+    assert!(recap.contains("tail40"));
+    assert!(recap.contains("[expired]"));
+    assert!(recap.contains("[61 older uploads"));
+    assert!(recap.contains("earlier messages omitted"));
+    assert!(recap.len() < 12 * 1024);
+    let guest = render_recap(&history, &owners, &uploads, 41, 62, true);
+    assert!(!guest.contains("Owner requirements"));
+    assert!(!guest.contains("old source"));
+}
+
+#[test]
+fn recap_owner_overflow_points_to_history_tool() {
+    let message = |i: i64| AssistantMessage {
+        continuation_of: None,
+        specialist_id: None,
+        retry_of: None,
+        upstream_error_code: None,
+        error_detail: None,
+        author: Some(crate::models::assistant_message::MessageAuthor::Owner),
+        steering: None,
+        voice: None,
+        execution_pending: false,
+        id: format!("owner-{i}"),
+        conversation_id: "c".into(),
+        user_id: "u".into(),
+        seq: i,
+        turn_id: "t".into(),
+        role: "user".into(),
+        text: format!("rule {i} {}", "x".repeat(500)),
+        status: "completed".into(),
+        error_code: None,
+        created_at: Utc::now(),
+        activities: vec![],
+        activity_total: 0,
+        attachments: vec![],
+        origin: Some(TurnOrigin::User),
+        via: None,
+    };
+    let owners: Vec<_> = (0..45).map(message).collect();
+    let text = render_recap_with_owner_total(&[], &owners, &[], 45, 0, false, 45);
+    assert!(text.contains("earlier owner messages"));
+    assert!(text.contains("nyx__conversation_history"));
+}
+
+#[tokio::test]
+async fn reset_recap_queries_owner_rules_and_expired_manifest_outside_tail() {
+    let db = connect_transaction_test_database("nyxa_recap_independent").await;
+    let state = test_app_state(db.clone());
+    let row = begin_turn(
+        &db,
+        "owner",
+        &request(None, "Hello"),
+        &state.encryption_keys,
+    )
+    .await
+    .unwrap();
+    let mut template = messages(&db, "owner", &row.id, 10, None)
+        .await
+        .unwrap()
+        .remove(0);
+    template.author = Some(crate::models::assistant_message::MessageAuthor::Owner);
+    template.turn_id = "earlier".into();
+    for seq in 1..65 {
+        let mut message = template.clone();
+        message.id = Uuid::new_v4().to_string();
+        message.seq = seq;
+        message.text = match seq {
+            1 => "Greeting of record".into(),
+            30 => "Mid-history owner rule: preserve source detail".into(),
+            _ => format!("Owner line {seq}"),
+        };
+        if seq == 2 {
+            let upload_id = Uuid::new_v4().to_string();
+            message
+                .attachments
+                .push(crate::models::assistant_conversation::TurnAttachment {
+                    chat_delivery: None,
+                    id: upload_id.clone(),
+                    label: "Old source.txt".into(),
+                    content_type: "text/plain".into(),
+                    size: 123,
+                    pages: Some(1),
+                    origin: "user_upload".into(),
+                    image_input: None,
+                });
+            db.collection::<bson::Document>(crate::models::assistant_upload_retention::TOMBSTONES)
+                .insert_one(doc! {"_id":upload_id,"user_id":"owner","conversation_id":&row.id})
+                .await
+                .unwrap();
+        }
+        db.collection::<AssistantMessage>(MESSAGES)
+            .insert_one(message)
+            .await
+            .unwrap();
+    }
+    let history = messages(&db, "owner", &row.id, 20, None).await.unwrap();
+    assert!(!history.iter().any(|message| message.seq == 30));
+    let text = recap(
+        &db,
+        &row,
+        &history,
+        &row.active_turn.as_ref().unwrap().turn_id,
+    )
+    .await
+    .unwrap();
+    assert!(text.contains("Mid-history owner rule"));
+    assert!(
+        text.find("Greeting of record").unwrap() < text.find("Mid-history owner rule").unwrap()
+    );
+    assert!(text.contains("Old source.txt") && text.contains("[expired]"));
+    assert!(text.contains("earlier messages omitted"));
+    let mut guest = row.clone();
+    guest.guest_turn = true;
+    let text = recap(
+        &db,
+        &guest,
+        &history,
+        &row.active_turn.as_ref().unwrap().turn_id,
+    )
+    .await
+    .unwrap();
+    assert!(!text.contains("Mid-history owner rule") && !text.contains("Old source.txt"));
+    db.drop().await.unwrap();
+}
+
+#[test]
+fn relay_step_never_moves_the_emitted_boundary_backwards() {
+    let mut emitted = 3;
+    assert_eq!(relay_step("secr", &mut emitted, &["secret"], false), "");
+    assert_eq!(emitted, 3);
+}
+
+#[test]
+fn recap_omits_unknown_or_zero_page_counts() {
+    let uploads = [
+        json!({"id":"unknown","name":"unknown.txt","size":3,"type":"text/plain","pages":null}),
+        json!({"id":"zero","name":"zero.txt","size":3,"type":"text/plain","pages":0}),
+        json!({"id":"known","name":"known.pdf","size":3,"type":"application/pdf","pages":2}),
+    ];
+    let text = render_recap(&[], &[], &uploads, 0, 3, false);
+    assert!(!text.contains("null pages"));
+    assert!(!text.contains("0 pages"));
+    assert!(text.contains("2 pages"));
+}
+
+#[tokio::test]
+async fn conversation_history_cursor_reconstructs_owner_messages_and_refuses_invalid_authority() {
+    use crate::models::assistant_message::MessageAuthor;
+    use crate::services::assistant_acknowledgement_service as acks;
+
+    let db = connect_transaction_test_database("nyxa_history_cursor").await;
+    let user = Uuid::new_v4().to_string();
+    db.collection(USERS)
+        .insert_one(test_user(&user, UserType::Person))
+        .await
+        .unwrap();
+    let state = test_app_state(db.clone());
+    let row = begin_turn(
+        &db,
+        &user,
+        &request(None, "greeting"),
+        &state.encryption_keys,
+    )
+    .await
+    .unwrap();
+    let credential =
+        credentials::load_for_conversation(&db, &state.encryption_keys, &user, &row.id)
+            .await
+            .unwrap()
+            .unwrap();
+    let chat = acks::for_key(&db, &user, Some(&credential.api_key_id))
+        .await
+        .unwrap()
+        .unwrap();
+    let turn_id = row.active_turn.as_ref().unwrap().turn_id.clone();
+    let mut template = messages(&db, &user, &row.id, 1, None)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    // Seed completed historical turns while the credential remains bound to
+    // this tab's live turn; the recap excludes only that live turn's messages.
+    template.turn_id = Uuid::new_v4().to_string();
+    db.collection::<bson::Document>(MESSAGES)
+        .update_one(
+            doc! {"_id": &template.id},
+            doc! {"$set": {"turn_id": &template.turn_id}},
+        )
+        .await
+        .unwrap();
+    let expected = vec![
+        "greeting".to_owned(),
+        "message two contains the original requirements".to_owned(),
+        "later owner note".to_owned(),
+        "split ✨ text with quotes \\\" and slashes \\\\".repeat(800),
+    ];
+    for (index, text) in expected.iter().enumerate().skip(1) {
+        let mut message = template.clone();
+        message.id = Uuid::new_v4().to_string();
+        message.seq = index as i64 + 1;
+        message.turn_id = template.turn_id.clone();
+        message.author = Some(MessageAuthor::Owner);
+        message.origin = Some(TurnOrigin::User);
+        message.text = text.clone();
+        db.collection(MESSAGES).insert_one(message).await.unwrap();
+    }
+
+    let mut before = None;
+    let mut offset = 0;
+    let mut seen: Vec<(i64, String)> = Vec::new();
+    let mut complete = false;
+    let mut page_count = 0;
+    for _ in 0..200 {
+        let page = conversation_history_page(&db, &chat, before, offset, 20)
+            .await
+            .unwrap();
+        page_count += 1;
+        assert!(mcp_history_envelope_size(&page) < 9000);
+        for message in page["messages"].as_array().unwrap() {
+            let seq = message["seq"].as_i64().unwrap();
+            let fragment = message["text"].as_str().unwrap();
+            if seen.last().is_some_and(|(previous, _)| *previous == seq) {
+                let (_, text) = seen.last_mut().unwrap();
+                assert_eq!(message["offset"], text.chars().count());
+                text.push_str(fragment);
+            } else {
+                assert!(seen.last().is_none_or(|(previous, _)| *previous > seq));
+                assert_eq!(message["offset"], 0);
+                seen.push((seq, fragment.to_owned()));
+            }
+        }
+        if page["complete"].as_bool().unwrap() {
+            complete = true;
+            break;
+        }
+        let next = (
+            page["before_seq"].as_i64(),
+            page["offset"].as_u64().unwrap_or(0) as usize,
+        );
+        assert_ne!(next, (before, offset), "cursor must advance");
+        (before, offset) = next;
+    }
+    assert!(complete && page_count > 1);
+    assert_eq!(seen.len(), expected.len());
+    assert_eq!(
+        seen.into_iter()
+            .rev()
+            .map(|(_, text)| text)
+            .collect::<Vec<_>>(),
+        expected
+    );
+
+    let mut guest = chat.clone();
+    guest.guest = true;
+    assert!(matches!(
+        conversation_history_page(&db, &guest, None, 0, 20).await,
+        Err(AppError::AssistantTurnRequired)
+    ));
+    let mut stale = chat.clone();
+    stale.turn_stopped = true;
+    assert!(matches!(
+        conversation_history_page(&db, &stale, None, 0, 20).await,
+        Err(AppError::AssistantTurnRequired)
+    ));
+    let mut wrong_key = chat.clone();
+    wrong_key.api_key_id = Uuid::new_v4().to_string();
+    assert!(matches!(
+        conversation_history_page(&db, &wrong_key, None, 0, 20).await,
+        Err(AppError::AssistantTurnRequired)
+    ));
+    let mut other_chat = chat.clone();
+    other_chat.conversation_id = format!("nyxa-{}", Uuid::new_v4().simple());
+    assert!(matches!(
+        conversation_history_page(&db, &other_chat, None, 0, 20).await,
+        Err(AppError::NotFound(_))
+    ));
+    let other_thread = begin_turn(
+        &db,
+        &user,
+        &request(None, "Private rules in another conversation"),
+        &state.encryption_keys,
+    )
+    .await
+    .unwrap();
+    other_chat.conversation_id = other_thread.id;
+    assert!(matches!(
+        conversation_history_page(&db, &other_chat, None, 0, 20).await,
+        Err(AppError::AssistantTurnRequired)
+    ));
+
+    // A greeting-first thread with many later owner turns must still expose
+    // the second message, and a single envelope-sized message must be
+    // reconstructible through the explicit offset cursor.
+    for seq in 10..55 {
+        let mut message = template.clone();
+        message.id = Uuid::new_v4().to_string();
+        message.seq = seq;
+        message.turn_id = template.turn_id.clone();
+        message.author = Some(MessageAuthor::Owner);
+        message.origin = Some(TurnOrigin::User);
+        message.text = format!("later-{seq}");
+        db.collection(MESSAGES).insert_one(message).await.unwrap();
+    }
+    let tail = messages(&db, &user, &row.id, 20, None).await.unwrap();
+    let recap_text = recap(&db, &row, &tail, &turn_id).await.unwrap();
+    assert!(recap_text.contains("earlier owner messages"));
+    assert!(recap_text.contains("nyx__conversation_history"));
+    assert!(!recap_text.contains("message two contains the original requirements"));
+    let mut before = None;
+    let mut offset = 0;
+    let mut found_requirement = false;
+    for _ in 0..200 {
+        let page = conversation_history_page(&db, &chat, before, offset, 20)
+            .await
+            .unwrap();
+        assert!(mcp_history_envelope_size(&page) < 9000);
+        found_requirement |= page["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|message| message["text"] == "message two contains the original requirements");
+        if page["complete"].as_bool().unwrap() {
+            break;
+        }
+        before = page["before_seq"].as_i64();
+        offset = page["offset"].as_u64().unwrap_or(0) as usize;
+    }
+    assert!(found_requirement);
+
+    let long_text = format!(
+        "{}Key rule beyond the recap truncation point.",
+        "\"\\\n\t\u{0001}界".repeat(4_000)
+    );
+    let mut long = template;
+    long.id = Uuid::new_v4().to_string();
+    long.seq = 100;
+
+    long.author = Some(MessageAuthor::Owner);
+    long.origin = Some(TurnOrigin::User);
+    long.text = long_text.clone();
+    db.collection(MESSAGES).insert_one(long).await.unwrap();
+    let mut before = Some(101);
+    let mut offset = 0;
+    let mut reconstructed = String::new();
+    for _ in 0..200 {
+        let page = conversation_history_page(&db, &chat, before, offset, 20)
+            .await
+            .unwrap();
+        assert!(mcp_history_envelope_size(&page) < 9000);
+        for message in page["messages"].as_array().unwrap() {
+            if message["seq"] == 100 {
+                reconstructed.push_str(message["text"].as_str().unwrap());
+            }
+        }
+        if page["complete"].as_bool().unwrap() {
+            break;
+        }
+        before = page["before_seq"].as_i64();
+        offset = page["offset"].as_u64().unwrap_or(0) as usize;
+    }
+    assert_eq!(reconstructed, long_text);
+
+    let mut stale_id = chat.clone();
+    stale_id.turn_id = Some(Uuid::new_v4().to_string());
+    assert!(matches!(
+        conversation_history_page(&db, &stale_id, None, 0, 20).await,
+        Err(AppError::AssistantTurnRequired)
+    ));
+    db.collection::<bson::Document>(CONVERSATIONS)
+        .update_one(
+            doc! {"_id": &row.id},
+            doc! {"$set": {"active_turn.stop_requested": true}},
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        conversation_history_page(&db, &chat, None, 0, 20).await,
+        Err(AppError::AssistantTurnRequired)
+    ));
+    db.collection::<bson::Document>(CONVERSATIONS).update_one(
+        doc! {"_id": &row.id}, doc! {"$set": {"active_turn.stop_requested": false, "active_turn.lease_expires_at": bson::DateTime::from_chrono(Utc::now() - chrono::Duration::seconds(1))}},
+    ).await.unwrap();
+    assert!(matches!(
+        conversation_history_page(&db, &chat, None, 0, 20).await,
+        Err(AppError::AssistantTurnRequired)
+    ));
+    db.drop().await.unwrap();
 }
 
 #[test]
@@ -2854,6 +3604,47 @@ async fn tool_image_chat_resolves_x_public_dm_and_trigger_destinations() {
         assert_eq!(image_chat(&db, "owner", &primary).await.unwrap(), None);
     }
     db.drop().await.unwrap();
+}
+
+#[test]
+fn conversation_history_definition_exposes_split_cursor() {
+    let definition = conversation_history_definition();
+    assert_eq!(
+        definition.input_schema["properties"]["offset"]["type"],
+        "integer"
+    );
+    assert!(definition.description.contains("offset"));
+}
+
+async fn test_activity_started_with_digest(
+    db: &Database,
+    user: &str,
+    conversation: &str,
+    label: &str,
+    digest: Option<&str>,
+) -> AppResult<Option<String>> {
+    let turn = db
+        .collection::<AssistantConversation>(CONVERSATIONS)
+        .find_one(doc! {"_id":conversation, "user_id":user})
+        .await?
+        .and_then(|row| row.active_turn.map(|turn| turn.turn_id))
+        .unwrap_or_default();
+    activity_started_with_digest(db, user, conversation, &turn, label, digest).await
+}
+async fn test_activity_finished(
+    db: &Database,
+    user: &str,
+    conversation: &str,
+    activity: &str,
+    error: bool,
+) -> AppResult<()> {
+    let turn = db
+        .collection::<AssistantConversation>(CONVERSATIONS)
+        .find_one(doc! {"_id":conversation, "user_id":user})
+        .await?
+        .and_then(|row| row.active_turn.map(|turn| turn.turn_id))
+        .unwrap_or_default();
+    activity_finished_for_turn(db, user, conversation, &turn, activity, error, None).await
 }
 
 #[test]

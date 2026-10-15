@@ -34,16 +34,32 @@ context sheet shows them.
 
 After a reset (failed or stopped turn, recovery, instruction, model, audience
 or credential change), the next turn receives a bounded **Previous context
-(after reset)** recap of at most 16 KiB: first a reserved block — the
-checkpoint, naming its turn, outcome and last successful turn, for owner
-audiences; otherwise the oldest user message of the 20-message window — then
-the newest messages that fit, each with head and tail text, failed codes,
-bounded activity labels and statuses, and attachment labels. Guest recaps omit
-owner tool, upload and error metadata. This recap is context, not a new
-instruction. The conversation DTO exposes `context_reset_reason` (`turn_failed`,
-`stopped`, `session_lost`, `instructions_changed`, `model_changed`,
-`audience_changed`, `guest_turn`, `credential_replaced`, `user_reset`) so
-clients can explain what was preserved.
+(after reset)** recap: up to 4 KiB for the owner's durable checkpoint, followed
+by independently bounded owner requirements (newest 40 owner-provenance
+messages plus the earliest, oldest first, excluding tail duplicates), the newest
+20 stored messages, and this conversation's message-bound upload manifest.
+The three latter sections reserve approximately 5 KiB, 5 KiB and 2 KiB, with a
+framed recap below 12 KiB. Each requirement is at most 1,000 bytes. UTF-8 is
+never split. Recent messages preserve bounded head/tail text, failed codes,
+activity labels/statuses and attachment labels. Stored guest user messages keep
+their `user (guest)` label even in an owner recovery recap. Guest recaps omit the checkpoint,
+owner requirements, tool, upload and error metadata. Recap queries run lazily
+only for reset/recovery, at most once per turn.
+
+When owner requirements are omitted or truncated, the recap points to
+`nyx__conversation_history`. Truncation is recorded by the renderer, and messages
+that cannot fit in the tail remain eligible for the owner section or omission
+count. The tool reads complete owner-provenance messages from
+this conversation only, newest first. The exclusive `before_seq` bound and
+character `offset` continue a split message before older messages; follow the
+returned cursor until `complete`. Its final MCP envelope stays below 9,000
+characters; guests, stale turns and credentials for another conversation cannot
+read it. The attachment manifest includes retention-expired markers, and
+`nyx__attachment_list` discovers older uploads omitted from its bounded display.
+This recap is quoted prior context, not a new instruction. The conversation DTO
+exposes `context_reset_reason` (`turn_failed`, `stopped`, `session_lost`,
+`instructions_changed`, `model_changed`, `audience_changed`, `guest_turn`,
+`credential_replaced`, `user_reset`) so clients can explain what was preserved.
 
 An owner reset (`POST …/context/reset`, first-party human only) is fenced like
 a model change: it fails with `turn_active` (409) while a turn runs, clears the
@@ -284,6 +300,18 @@ Unknown future deciders are tolerated. After allowance the agent reports what it
 did and the result in plain words; after denial it reports what it skipped. Skill
 attachment reports name, version and target agent. Asking channel modes retain
 the “yes NNNN” owner protocol.
+
+Full access never requests permission to proceed, including when an authored
+skill declares reduced scope. The encrypted declaration remains bound to the
+proposal, and the automatic publication receipt records only the omission count
+and that separate consent was bypassed. Its proposal link shows decrypted
+omissions to the owner; omission text stays out of plaintext receipts, audit and
+events. NyxID does not create a human scope acceptance for this path. Auto and Ask every time retain explicit, revision-bound
+reduced-scope acceptance on the complete review card. Successful automatic
+publication returns the outcome for narration in the same turn; reviewed
+publication queues one durable completion event. Package failures retain their
+safe rules and queue one repair event to the original drafting conversation,
+even when Full access produced no review card.
 
 Only keys identified by their actual credential row get this authority; a platform
 label alone grants nothing. Their MCP listing/search includes all services visible
@@ -909,10 +937,9 @@ both cookie and bearer-JWT callers, including mixed-case collisions.
 The bounded constant prompt identifies the signed-in NyxID web assistant,
 directs it to inspect/use connected services, discover/connect via hosted links,
 help with bots/keys/nodes/approvals, never solicit raw credentials, and use the
-user's language. Recaps draw on the most recent 20 stored messages with at most
-16 KiB including recap delimiters, UTF-8 safe, explicitly labeled as prior
-history, and lead with a reserved checkpoint or goal block. Failed partial
-messages are labeled. The current user message is excluded from the recap.
+user's language. Reset recaps use the independently bounded checkpoint,
+requirements, recent-message and upload sections described above. Failed partial
+messages are labeled; the current user message is excluded.
 
 ## Session instructions and per-turn context
 
@@ -1006,6 +1033,23 @@ clear it with the binding. Old replicas ignore the additive field safely, but
 only upgraded replicas refresh prompts or deliver per-turn envelopes.
 
 ## Stream and recovery
+
+### Streaming redaction and turn status
+
+NyxAgent emits ordinary text as soon as it is safe to do so. The relay retains
+only the longest UTF-8 character suffix that is a proper prefix of a live
+credential or context marker; it does not use a fixed byte window. Retry and
+credential recovery emit a `turn.notice` with code `retrying`. Clients derive
+the visible phase from persisted approvals, activities, continuations, and the
+live stream, and clear it when the turn settles. A failed live stream
+adds an interruption notice while polling reports the turn active. Only the
+status dot animates (with motion-safe); a running tool shows elapsed time.
+Action summaries follow the turn status, retain recovered failures with warning
+copy, and show the total count separately from the retained latest 40 entries.
+Activity labels come from compiled native definitions or an authorized published
+operation resolved immediately before dispatch; stale-turn writes are no-ops.
+At a continuation boundary, the held tail is flushed with the same two-newline
+separator used in persisted text, preventing a contiguous cross-response secret.
 
 First-byte deadline is 30 seconds including request setup. Idle timeout is
 120 seconds (upstream keepalive is 15 seconds). Turn execution is capped at

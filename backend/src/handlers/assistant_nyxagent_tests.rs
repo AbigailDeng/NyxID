@@ -57,6 +57,8 @@ fn stream_timeout_is_the_earlier_of_transport_idle_and_no_progress() {
 fn failed_message_response_serializes_error_detail_as_rfc3339() {
     let occurred_at = Utc::now();
     let response = MessageResponse::from(AssistantMessage {
+        author: None,
+        activity_total: 0,
         continuation_of: None,
         retry_of: None,
         specialist_id: None,
@@ -949,9 +951,15 @@ async fn context_route_lists_running_actions_as_pending() {
     )
     .await
     .unwrap();
-    engine::activity_started(&db, OWNER, &row.id, "mcp.long_call")
-        .await
-        .unwrap();
+    engine::activity_started_for_turn(
+        &db,
+        OWNER,
+        &row.id,
+        &row.active_turn.as_ref().unwrap().turn_id,
+        "mcp.long_call",
+    )
+    .await
+    .unwrap();
     let value = serde_json::to_value(
         context(
             State(state.clone()),
@@ -1772,6 +1780,7 @@ async fn acknowledgements_are_owner_scoped_sanitized_decided_once_and_audited() 
         test_auth_user(&other),
         Path((f.row.id.clone(), ack.clone())),
         Json(AcknowledgementDecision {
+            accept_reduced_scope: false,
             decision: Decision::Allow,
         }),
     )
@@ -1782,6 +1791,7 @@ async fn acknowledgements_are_owner_scoped_sanitized_decided_once_and_audited() 
         test_auth_user(&f.owner),
         Path((f.row.id.clone(), ack.clone())),
         Json(AcknowledgementDecision {
+            accept_reduced_scope: false,
             decision: Decision::Allow,
         }),
     )
@@ -1795,6 +1805,7 @@ async fn acknowledgements_are_owner_scoped_sanitized_decided_once_and_audited() 
             test_auth_user(&f.owner),
             Path((f.row.id.clone(), ack)),
             Json(AcknowledgementDecision {
+                accept_reduced_scope: false,
                 decision: Decision::Deny
             }),
         )
@@ -3722,6 +3733,41 @@ async fn model_selection_uses_the_live_list_resets_context_and_is_audited() {
     server.abort();
 }
 
+#[test]
+fn activity_response_failure_contract_omits_absent_http_status() {
+    use crate::models::assistant_conversation::{ToolFailure, TurnActivity};
+    for (kind, status) in [
+        ("service_status", Some(404)),
+        ("tool_error", None),
+        ("refused", None),
+        ("internal", None),
+    ] {
+        let response: ActivityResponse = TurnActivity {
+            digest: None,
+            machine: None,
+            id: "activity".into(),
+            label: "tool".into(),
+            status: "error".into(),
+            failure: Some(ToolFailure {
+                kind: kind.into(),
+                status,
+            }),
+            started_at: Utc::now(),
+            ended_at: None,
+        }
+        .into();
+        let value = serde_json::to_value(response).unwrap();
+        assert_eq!(value["failure"]["kind"], kind);
+        if let Some(status) = status {
+            assert_eq!(value["failure"]["status"], status);
+        } else {
+            assert!(value["failure"].get("status").is_none());
+        }
+        assert!(value["machine"].is_null());
+        assert!(value["ended_at"].is_null());
+    }
+}
+
 #[tokio::test]
 async fn turns_store_and_return_decision_continuations_and_reject_foreign_or_pending_cards() {
     let (state, _, server) = setup_stream(
@@ -3826,6 +3872,7 @@ async fn denied_owner_action_queues_plain_narration_without_an_execution_continu
         Path((f.row.id.clone(), card.id)),
         Json(AcknowledgementDecision {
             decision: Decision::Deny,
+            accept_reduced_scope: false,
         }),
     )
     .await

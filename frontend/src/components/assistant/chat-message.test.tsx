@@ -780,6 +780,81 @@ describe("canonical chat presentation", () => {
   });
 });
 
+describe("turn status and action ledger", () => {
+  it.each(["approval", "retrying", "continuing", "working", "active"] as const)("keeps %s status visible after reply text", (phase) => {
+    const labels = { approval: "Waiting for approval", retrying: "Retrying…", continuing: "Continuing task…", working: "Working…", active: "Working — the reply appears when it is ready" };
+    const { container, rerender } = render(<ChatMessageBubble message={{ ...BASE, status: "streaming", turnStatus: { phase, label: labels[phase] } }} />);
+    const row = container.querySelector("[data-turn-status]")!;
+    expect(row).toHaveTextContent(labels[phase]);
+    expect(row.className).not.toContain("animate");
+    expect(row.querySelector("span")?.className ?? "").not.toContain("animate");
+    for (const status of ["stopped", "error", "complete"]) {
+      rerender(<ChatMessageBubble message={{ ...BASE, status }} />);
+      expect(container.querySelector("[data-turn-status]")).toBeNull();
+    }
+  });
+
+  it("shows elapsed tool time and the interruption notice", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-13T00:00:12Z"));
+    const { rerender } = render(<ChatMessageBubble message={{ ...BASE, status: "streaming", turnStatus: { phase: "tool", label: "Running github__list", toolStartedAt: "2026-10-13T00:00:00Z", interrupted: true } }} />);
+    expect(screen.getByText("· 12s")).toBeVisible();
+    expect(screen.getByText("Connection interrupted; checking every few seconds")).toBeVisible();
+    const phase = screen.getByRole("status");
+    expect(phase).toHaveTextContent("Connection interrupted; checking every few seconds");
+    const announcement = phase.textContent;
+    act(() => vi.advanceTimersByTime(48_000));
+    expect(screen.getByText("· 1:00")).toBeVisible();
+    expect(phase.textContent).toBe(announcement);
+    expect(phase).not.toHaveTextContent("1:00");
+    rerender(<ChatMessageBubble message={{ ...BASE, status: "streaming", turnStatus: { phase: "tool", label: "Running github__list", toolStartedAt: "2026-10-13T00:00:00Z", interrupted: false } }} />);
+    expect(phase).not.toHaveTextContent("Connection interrupted");
+    expect(screen.getByText("· 1:00")).toBeVisible();
+    vi.useRealTimers();
+  });
+
+  it.each(["streaming", "complete", "error", "stopped"])("renders %s with an earlier failed action truthfully", (status) => {
+    render(<ChatMessageBubble message={{ ...BASE, status, activityTotal: 41, turnStatus: { phase: "working", label: "Working…" }, toolCalls: [{ id: "f", name: "github__read", status: "error", startedAt: 1, failure: { kind: "service_status", status: 404 } }] }} />);
+    const button = screen.getByRole("button", { name: /action/ });
+    expect(button).toHaveTextContent("41 actions");
+    expect(button).toHaveTextContent("latest 1 of 41 shown");
+    if (status === "streaming") expect(screen.queryByLabelText("Turn failed")).toBeNull();
+    if (status === "complete") {
+      expect(button).toHaveTextContent("Completed");
+      expect(button).toHaveTextContent("1 failed");
+      expect(screen.getByText(/1 failed/).className).toContain("text-warning");
+    }
+    fireEvent.click(button);
+    expect(screen.getByLabelText("Failed")).toBeVisible();
+    expect(screen.getByText(/The service responded with HTTP 404/)).toHaveTextContent("The assistant can continue after a failed step.");
+  });
+  it.each(["complete", "error", "stopped"])("shows unknown details for legacy or turn-terminated steps in a %s turn", (status) => {
+    render(<ChatMessageBubble message={{ ...BASE, status, toolCalls: [{ id: "legacy", name: "tool", status: "error", startedAt: 1 }] }} />);
+    fireEvent.click(screen.getByRole("button", { name: /action/ }));
+    expect(screen.getByLabelText("Failed")).toBeVisible();
+    expect(screen.getByText(/This step did not complete/)).toHaveTextContent("No additional error details are available. The assistant can continue after a failed step.");
+    expect(screen.queryByText(/The tool reported an error/)).toBeNull();
+  });
+
+  it("uses tool-error copy only for an explicit tool error", () => {
+    render(<ChatMessageBubble message={{ ...BASE, status: "complete", toolCalls: [{ id: "error", name: "tool", status: "error", startedAt: 1, failure: { kind: "tool_error" } }] }} />);
+    fireEvent.click(screen.getByRole("button", { name: /action/ }));
+    expect(screen.getByText(/The tool reported an error/)).toBeVisible();
+  });
+
+});
+
+
+it.each(["", "Partial reply"])("shows a persistent stopped label without activities: %s", (content) => {
+  const message = { ...BASE, content, status: "stopped" };
+  const { container, rerender } = render(<ChatMessageBubble message={message} />);
+  expect(screen.getByRole("status", { name: "Turn stopped" })).toHaveTextContent("Stopped");
+  expect(container.querySelector("[data-turn-status]")).toBeNull();
+  rerender(<ChatMessageList session={{ clientId: "chat", conversationId: "chat", expectedTurnCount: 1, title: "Chat", status: "completed_text", messages: [message] }} bottomInset={0} />);
+  expect(screen.getByRole("status", { name: "Turn stopped" })).toBeVisible();
+  expect(container.querySelector("[data-empty-turn-error]")).toBeNull();
+});
+
 it("focuses the comment field and closes it with Escape, showing save failures", async () => {
   render(<ChatMessageBubble message={BASE} conversationId="conversation-1" />);
   fireEvent.click(screen.getByRole("button", { name: "Add feedback comment" }));
@@ -794,6 +869,60 @@ it("focuses the comment field and closes it with Escape, showing save failures",
   fireEvent.click(screen.getByRole("button", { name: "Add feedback comment" }));
   fireEvent.click(screen.getByRole("button", { name: "Helpful" }));
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+it("separates the described tool label from elapsed time without duplicate Thinking", () => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date("2026-10-13T00:00:12Z"));
+    const { container } = render(<ChatMessageBubble message={{
+      ...BASE,
+      content: "",
+      status: "streaming",
+      turnStatus: { phase: "tool", label: "Running github__read_issue", toolStartedAt: "2026-10-13T00:00:00Z" },
+      toolCalls: [{ id: "read", name: "github__read_issue", status: "running", startedAt: 1 }],
+    }} />);
+    const row = container.querySelector("[data-turn-status]")!;
+    expect(row).toHaveTextContent("Reading issue on GitHub… · 12s");
+    expect(row).not.toHaveTextContent("Thinking");
+    expect(container.querySelectorAll("[data-running-tool]")).toHaveLength(1);
+    const live = row.querySelector('[aria-live="polite"]')!;
+    const label = live.textContent;
+    act(() => vi.advanceTimersByTime(48000));
+    expect(live.textContent).toBe(label);
+    expect(row).toHaveTextContent("Reading issue on GitHub… · 1:00");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("shows one working label with elapsed time only after three seconds", () => {
+  vi.useFakeTimers();
+  try {
+    const { container } = render(<ChatMessageBubble message={{
+      ...BASE, status: "streaming", turnStatus: { phase: "working", label: "Working…" },
+    }} />);
+    const row = container.querySelector("[data-turn-status]")!;
+    expect(row).toHaveTextContent(/^Working…$/);
+    act(() => vi.advanceTimersByTime(2000));
+    expect(row).toHaveTextContent(/^Working…$/);
+    act(() => vi.advanceTimersByTime(1000));
+    expect(row).toHaveTextContent(/^Working… · 3s$/);
+    expect(row).not.toHaveTextContent("Thinking");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("does not invent an HTTP status when service failure metadata lacks it", () => {
+  render(<ChatMessageBubble message={{ ...BASE, status: "complete", toolCalls: [{
+    id: "failed", name: "tool", status: "error", startedAt: 1, failure: { kind: "service_status" },
+  }] }} />);
+  fireEvent.click(screen.getByRole("button", { name: /action/ }));
+  expect(screen.getByText(/The service returned an error/)).toHaveTextContent(
+    "No HTTP status is available. The assistant can continue after a failed step.",
+  );
+  expect(screen.queryByText(/HTTP undefined/)).toBeNull();
 });
 
 it("renders a decision continuation as a system status without the owner's instruction bubble", () => {

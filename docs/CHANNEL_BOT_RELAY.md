@@ -994,6 +994,18 @@ Manual forms require a valid form and an explicit submit. Managed entry points u
 
 The standalone completion screen keeps the user on the page until **Open channel bot** is selected. Callback URLs and returned instructions display independently of one-time secrets. A generated Verify Token is shown only when the create response includes one. Provider authorization windows remain separate steps; "one click" means opening the provider or submitting a completely prefilled credential form, not skipping consent or webhook configuration.
 
+### Returning to an assistant chat
+
+NyxBot setup links may carry one owner-scoped `return_to` identifier (`nyxa-…`
+or `nyxg-…`). The setup page preserves it through request URL updates and
+offers Back to chat on completion, cancellation, expiry and error. In-chat
+Telegram setup keeps the request in component state and resumes the current
+request on remount, retains its actor-scoped request ID, and polls that ID through
+completion while preserving the chat URL and composer. Rendered setup anchors
+preserve the same strictly validated raw target for new-tab navigation; modal
+setup ignores it. Duplicates, encoded targets and surrounding whitespace are
+refused. No arbitrary URL is accepted or assigned, and the assistant page performs its normal ownership check.
+
 ### Add or extend a form
 
 1. Implement and register the backend adapter and its create/validation behavior. Declare its enabled platform ID, display name, registration fields, documentation URL, and clear setup instructions. Keep user-facing field names separate from encrypted storage names.

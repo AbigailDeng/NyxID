@@ -33,6 +33,8 @@ mod fixtures {
     /// A completed assistant reply; override fields with struct update syntax.
     pub fn message(id: String, conversation_id: String, user_id: String) -> AssistantMessage {
         AssistantMessage {
+            author: None,
+            activity_total: 0,
             continuation_of: None,
             retry_of: None,
             error_detail: None,
@@ -60,6 +62,7 @@ mod fixtures {
 
     pub fn activity(label: &str, status: &str) -> TurnActivity {
         TurnActivity {
+            failure: None,
             machine: None,
             id: uuid::Uuid::new_v4().to_string(),
             label: label.into(),

@@ -9,6 +9,7 @@ import { useFeature } from "@/hooks/use-feature-flag";
 import { FEATURE_FLAG } from "@/lib/feature-flags";
 import { publicationFailureText } from "@/lib/assistant/skill-publication-copy";
 import { learningDraftEditable } from "@/schemas/agent-skills";
+import { AuthoredSkillScopePreview } from "./authored-skill-scope-preview";
 import { LearningDraftEditor } from "./learning-draft-editor";
 
 function requestFailure(cause: unknown): string {
@@ -192,7 +193,7 @@ export function AgentLearningReview({
             ) : null}
             {proposal.failure_code ? (
               <p role="alert" className="text-11 text-destructive">
-                {publicationFailureText(proposal.failure_code, proposal.status)}
+                {publicationFailureText(proposal.failure_code, proposal.status, proposal.source)}
               </p>
             ) : null}
             {errors[proposal.id] ? (
@@ -208,6 +209,9 @@ export function AgentLearningReview({
               </p>
             ) : null}
 
+            {isOpen && proposal.source === "authored" && proposal.auto_allowed ? (
+              <AuthoredSkillScopePreview agentId={agentId} proposalId={proposal.id} />
+            ) : null}
             {isOpen && draft ? (
               <LearningDraftEditor
                 key={`${proposal.id}:${proposal.revision}`}

@@ -2,6 +2,7 @@ use axum::{
     Json,
     extract::{Path, Query, State},
 };
+use mongodb::bson::doc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -438,11 +439,12 @@ fn withheld() -> AppError {
     )
 }
 
-pub(crate) async fn decide_authored(
+pub(crate) async fn decide_authored_with_scope(
     state: &AppState,
     auth: &AuthUser,
     mut card: crate::models::assistant_acknowledgement::AssistantAcknowledgement,
     allow: bool,
+    accept_reduced_scope: bool,
 ) -> AppResult<crate::models::assistant_acknowledgement::AssistantAcknowledgement> {
     super::login_client_context::require_first_party_human(auth)?;
     let actor = auth.user_id.to_string();
@@ -519,6 +521,7 @@ pub(crate) async fn decide_authored(
     };
     let attempt = review::publication_attempt(state, &actor, &reference).await?;
     let mut binding_failure_code = None;
+    let mut binding_failure_rules = Vec::new();
     let decision: AppResult<()> = async {
         let binding = review::approval_binding_typed(
             state,
@@ -532,8 +535,18 @@ pub(crate) async fn decide_authored(
         .await
         .map_err(|failure| {
             binding_failure_code = failure.code;
+            binding_failure_rules = failure.rules;
             failure.error
         })?;
+        Box::pin(review::accept_scope(
+            state,
+            &actor,
+            &reference.agent_id,
+            &reference.proposal_id,
+            &binding,
+            accept_reduced_scope,
+        ))
+        .await?;
         Box::pin(review::approve(
             state,
             &chat,
@@ -560,17 +573,35 @@ pub(crate) async fn decide_authored(
         } else {
             review::PublicationFailureCode::NyxidRefused
         };
-        let _ =
-            review::record_pre_claim_failure(state, &actor, &reference, &card, attempt, code).await;
+        let _ = Box::pin(review::record_pre_claim_failure(
+            state,
+            &actor,
+            &reference,
+            &card,
+            attempt,
+            code,
+            &binding_failure_rules,
+        ))
+        .await;
+        // Terminal notifications commit with the transition; this immediate wake
+        // is best effort and the durable queue remains the crash backstop.
+        Box::pin(super::assistant_team::wake(
+            state,
+            &actor,
+            &card.conversation_id,
+        ))
+        .await;
         return Err(error);
     }
-    card.status = "used".into();
+    // Terminal notifications commit with the transition; this immediate wake
+    // is best effort and the durable queue remains the crash backstop.
     Box::pin(super::assistant_team::wake(
         state,
         &actor,
         &card.conversation_id,
     ))
     .await;
+    card.status = "used".into();
     Ok(card)
 }
 

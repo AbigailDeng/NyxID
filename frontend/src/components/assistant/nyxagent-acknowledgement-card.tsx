@@ -34,7 +34,7 @@ export function NyxAgentAcknowledgementCard({
   readonly acknowledgement: NyxAgentAcknowledgement;
   readonly accessMode?: NyxAgentAccessMode;
   readonly deciding: boolean;
-  readonly onDecision: (choice: "allow" | "deny") => Promise<unknown>;
+  readonly onDecision: (choice: "allow" | "deny", acceptReducedScope?: boolean) => Promise<unknown>;
 }) {
   const [error, setError] = useState<string>();
   const confirmationsBypassed = accessMode === "autopilot" && acknowledgement.decider === "user";
