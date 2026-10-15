@@ -320,6 +320,9 @@ test("cold detail links return to their own workspace destination", () => {
       "Assistant",
     ],
     ["agents/agent%20one", "AgentDetail", "Agents"],
+    ["groups/group-1", "GroupChat", "Agents"],
+    ["groups/edit", "GroupEditor", "Agents"],
+    ["groups/edit/group-1", "GroupEditor", "Agents"],
     ["automations/automation-1", "AutomationDetail", "Automations"],
     ["automations/edit", "AutomationEditor", "Automations"],
     ["automations/edit/automation-1", "AutomationEditor", "Automations"],
@@ -351,6 +354,46 @@ test("cold detail links return to their own workspace destination", () => {
     assert.equal(focusedRoute(hydrated).name, parent);
     assert.equal(hydrated.routes.length, workspaceRouteNames.length);
   }
+});
+
+test("group details return to the Groups tab and settings preserve the calling transcript", () => {
+  const linked = linkedState("groups/group-1");
+  const parent = linked.routes.find(
+    (route) => route.name === "Workspace",
+  )?.state;
+  assert.ok(parent);
+  assert.deepEqual(focusedRoute(parent).params, { tab: "groups" });
+
+  const root = rootRouter.getRehydratedState(linked, rootOptions);
+  const caller = focusedRoute(root);
+  const editing = rootRouter.getStateForAction(
+    root,
+    StackActions.push("GroupEditor", { groupId: "group-1" }),
+    rootOptions,
+  );
+  assert.ok(editing);
+  const closed = rootRouter.getStateForAction(
+    editing,
+    CommonActions.goBack(),
+    rootOptions,
+  );
+  assert.ok(closed);
+  assert.equal(focusedRoute(closed), caller);
+  assert.deepEqual(focusedRoute(closed).params, { groupId: "group-1" });
+});
+
+test("the Groups hub tab survives other drawer destinations", () => {
+  let state = workspaceRouter.getInitialState(workspaceOptions);
+  state = switchWorkspace(state, "Agents", { tab: "groups" });
+  const key = focusedRoute(state).key;
+  state = switchWorkspace(state, "Assistant");
+  state = switchWorkspace(state, "Agents");
+  assert.equal(focusedRoute(state).key, key);
+  assert.deepEqual(focusedRoute(state).params, { tab: "groups" });
+  const linked = linkedState("agents?tab=groups");
+  const workspace = focusedRoute(linked).state;
+  assert.ok(workspace);
+  assert.deepEqual(focusedRoute(workspace).params, { tab: "groups" });
 });
 
 test("the Web automation alias resolves to the same native workspace sibling", () => {

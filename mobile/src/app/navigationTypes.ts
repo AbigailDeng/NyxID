@@ -25,7 +25,7 @@ export type WorkspaceParamList = {
   Automations: { agentId?: string; setup?: string } | undefined;
   Services: undefined;
   Plugins: { tab?: "connectors" | "skills"; agentId?: string } | undefined;
-  Agents: undefined;
+  Agents: { tab?: "agents" | "groups" } | undefined;
   Activity: { challengeId?: string } | undefined;
   AccountSettings: undefined;
 };
@@ -35,6 +35,8 @@ export type RootStackParamList = {
   Workspace: NavigatorScreenParams<WorkspaceParamList> | undefined;
   AssistantContext: AssistantParams | undefined;
   AgentDetail: { agentId: string };
+  GroupChat: { groupId: string };
+  GroupEditor: { groupId?: string } | undefined;
   ServiceSetup: { connectionId?: string; catalogSlug?: string };
   AgentSkills: { agentId: string };
   AutomationDetail: { id: string };

@@ -40,6 +40,7 @@ function cancelled() {
 }
 export function useAssistantUploads({
   conversationId,
+  groupId,
   agentId,
   model,
   generation,
@@ -47,6 +48,7 @@ export function useAssistantUploads({
   online,
 }: {
   conversationId?: string;
+  groupId?: string;
   agentId?: string;
   model: string;
   generation: number;
@@ -72,6 +74,7 @@ export function useAssistantUploads({
     generation,
     agentId ?? null,
     conversationId ?? null,
+    groupId ?? null,
   ]);
   const context = useRef<
     { key: string; session: AssistantUploadSession } | undefined
@@ -111,8 +114,10 @@ export function useAssistantUploads({
             handle.close();
           }
         },
-        createDraft: (signal) =>
-          assistantUploadsApi.createDraft(agentId, signal),
+        createDraft: (signal) => {
+          if (groupId) throw new Error("Open a saved group to attach files.");
+          return assistantUploadsApi.createDraft(agentId, signal);
+        },
         prepareDraft: async (id, signal) => {
           // A PATCH failure retains the durable id and already accepted files.
           while (confirmedModel !== modelRef.current) {
@@ -138,7 +143,7 @@ export function useAssistantUploads({
         },
         upload: (id, file, bytes, signal, onProgress) =>
           assistantUploadsApi.upload(
-            { kind: "conversations", id },
+            { kind: groupId ? "groups" : "conversations", id },
             file,
             bytes,
             signal,
@@ -147,12 +152,12 @@ export function useAssistantUploads({
         remove: (id, attachmentId) =>
           epoch === getAuthEpoch()
             ? assistantUploadsApi.remove(
-                { kind: "conversations", id },
+                { kind: groupId ? "groups" : "conversations", id },
                 attachmentId,
               )
             : Promise.resolve(),
       },
-      conversationId,
+      groupId ?? conversationId,
     );
     return ctx;
   }

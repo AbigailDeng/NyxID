@@ -41,7 +41,9 @@ export function withWorkspaceFallback(
   const parent = state.routes.find((route) => route.name === "Workspace");
   if (!parent || parent.state || detail?.name === "Workspace") return state;
   const screen =
-    detail?.name === "AgentDetail"
+    detail?.name === "AgentDetail" ||
+    detail?.name === "GroupChat" ||
+    detail?.name === "GroupEditor"
       ? "Agents"
       : detail?.name === "AutomationDetail" ||
           detail?.name === "AutomationEditor" ||
@@ -57,7 +59,20 @@ export function withWorkspaceFallback(
     ...state,
     routes: state.routes.map((route) =>
       route === parent
-        ? { ...route, state: { routes: [{ name: screen }] } }
+        ? {
+            ...route,
+            state: {
+              routes: [
+                {
+                  name: screen,
+                  ...(detail?.name === "GroupChat" ||
+                  detail?.name === "GroupEditor"
+                    ? { params: { tab: "groups" } }
+                    : {}),
+                },
+              ],
+            },
+          }
         : route,
     ),
   };

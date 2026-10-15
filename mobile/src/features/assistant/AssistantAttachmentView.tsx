@@ -52,15 +52,24 @@ function deleteCache(cache: CachedAttachment | undefined) {
 export function AssistantAttachmentView({
   attachment,
   conversationId,
+  groupId,
 }: {
   attachment: AssistantAttachment;
   conversationId?: string;
+  groupId?: string;
 }) {
   const { colors } = useTheme();
   const { isAuthenticated } = useAuthSession();
   const focused = useIsFocused();
   const epoch = getAuthEpoch();
-  const scope = `${epoch}:${conversationId}:${attachment.id}`;
+  // Keep groups and private conversations separate even for identical IDs.
+  const target =
+    groupId && !conversationId
+      ? { kind: "groups" as const, id: groupId }
+      : conversationId && !groupId
+        ? { kind: "conversations" as const, id: conversationId }
+        : undefined;
+  const scope = `${epoch}:${target?.kind}:${target?.id}:${attachment.id}`;
   const current = useRef({ scope, focused, isAuthenticated });
   current.current = { scope, focused, isAuthenticated };
   const mounted = useRef(false);
@@ -143,7 +152,7 @@ export function AssistantAttachmentView({
   async function open() {
     if (
       busyRef.current ||
-      !conversationId ||
+      !target ||
       unavailable ||
       !focused ||
       !isAuthenticated ||
@@ -175,10 +184,7 @@ export function AssistantAttachmentView({
     try {
       assertReadableAttachment(attachment);
       const bytes = await requestAuthenticatedBytes(
-        assistantAttachmentPath(
-          { kind: "conversations", id: conversationId },
-          attachment.id,
-        ),
+        assistantAttachmentPath(target, attachment.id),
         controller.signal,
       );
       if (!alive()) return;
@@ -243,10 +249,10 @@ export function AssistantAttachmentView({
         accessibilityRole="button"
         accessibilityLabel={`${image ? "Preview" : "Open"} attachment ${label}`}
         accessibilityState={{
-          disabled: busy || unavailable || !conversationId,
+          disabled: busy || unavailable || !target,
           busy,
         }}
-        disabled={busy || unavailable || !conversationId}
+        disabled={busy || unavailable || !target}
         onPress={() => void open()}
         style={({ pressed }) => [
           styles.file,

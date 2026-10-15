@@ -15,6 +15,9 @@ import { ActivityDetailScreen } from "../features/activity/ActivityDetailScreen"
 import { AssistantScreen } from "../features/assistant/AssistantScreen";
 import { ServicesScreen } from "../features/services/ServicesScreen";
 import { AgentsScreen } from "../features/agents/AgentsScreen";
+import { AgentsGroupsScreen } from "../features/agents/AgentsGroupsScreen";
+import { GroupChatScreen } from "../features/groups/GroupChatScreen";
+import { GroupEditorScreen } from "../features/groups/GroupEditorScreen";
 import {
   AutomationsScreen,
   AutomationDetailScreen,
@@ -55,9 +58,13 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tabs = createBottomTabNavigator<WorkspaceParamList>();
 const hideTabBar = () => null;
 
-function AgentsRoute({ navigation }: WorkspaceScreenProps<"Agents">) {
+function AgentsRoute({ navigation, route }: WorkspaceScreenProps<"Agents">) {
   return (
-    <AgentsScreen
+    <AgentsGroupsScreen
+      tab={route.params?.tab === "groups" ? "groups" : "agents"}
+      onTabChange={(tab) => navigation.setParams({ tab })}
+      onOpenGroup={(groupId) => navigation.push("GroupChat", { groupId })}
+      onCreateGroup={() => navigation.push("GroupEditor")}
       onOpenChat={(params) => navigation.push("AssistantContext", params)}
       onOpenSkills={(agentId) => navigation.push("AgentSkills", { agentId })}
       onOpenAutomations={(agentId) =>
@@ -66,6 +73,50 @@ function AgentsRoute({ navigation }: WorkspaceScreenProps<"Agents">) {
           params: { agentId, setup: undefined },
           merge: true,
         })
+      }
+    />
+  );
+}
+
+function GroupChatRoute({
+  navigation,
+  route,
+}: NativeStackScreenProps<RootStackParamList, "GroupChat">) {
+  return (
+    <GroupChatScreen
+      key={route.params.groupId}
+      groupId={route.params.groupId}
+      onBack={() => navigation.goBack()}
+      onSettings={() =>
+        navigation.push("GroupEditor", { groupId: route.params.groupId })
+      }
+      onOpenConversation={(params) =>
+        navigation.push("AssistantContext", params)
+      }
+      onOpenAgent={(agentId) => navigation.push("AgentDetail", { agentId })}
+    />
+  );
+}
+
+function GroupEditorRoute({
+  navigation,
+  route,
+}: NativeStackScreenProps<RootStackParamList, "GroupEditor">) {
+  return (
+    <GroupEditorScreen
+      key={route.params?.groupId ?? "new"}
+      groupId={route.params?.groupId}
+      onBack={() => navigation.goBack()}
+      onSaved={(groupId) => {
+        if (route.params?.groupId) navigation.goBack();
+        else navigation.replace("GroupChat", { groupId });
+      }}
+      onRemoved={() =>
+        navigation.popTo(
+          "Workspace",
+          { screen: "Agents", params: { tab: "groups" } },
+          { merge: true },
+        )
       }
     />
   );
@@ -169,7 +220,7 @@ function WorkspaceNavigator() {
       <Tabs.Screen
         name="Agents"
         component={AgentsRoute}
-        options={{ title: "Agents" }}
+        options={{ title: "Agents & Groups" }}
       />
       <Tabs.Screen
         name="Plugins"
@@ -254,6 +305,32 @@ export function AppNavigator({
                     onBack: navigation.goBack,
                   }),
                   title: "Agent",
+                })}
+              />
+              <Stack.Screen
+                name="GroupChat"
+                component={GroupChatRoute}
+                options={({ navigation }) => ({
+                  ...workspaceHeaderOptions({
+                    role: "back",
+                    onOpenMenu,
+                    onBack: navigation.goBack,
+                  }),
+                  title: "Group",
+                })}
+              />
+              <Stack.Screen
+                name="GroupEditor"
+                component={GroupEditorRoute}
+                options={({ navigation, route }) => ({
+                  ...workspaceHeaderOptions({
+                    role: "back",
+                    onOpenMenu,
+                    onBack: navigation.goBack,
+                  }),
+                  title: route.params?.groupId
+                    ? "Group settings"
+                    : "Create group",
                 })}
               />
               <Stack.Screen

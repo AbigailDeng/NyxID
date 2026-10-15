@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   ActivityIndicator,
   AppState,
@@ -10,7 +16,13 @@ import {
 } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, ChevronRight, Users } from "lucide-react-native";
+import {
+  Bot,
+  ChevronRight,
+  RefreshCw,
+  Search,
+  Users,
+} from "lucide-react-native";
 import { ZodError } from "zod";
 import {
   ActionButton,
@@ -57,12 +69,14 @@ export function AgentsScreen({
   onOpenSkills,
   onOpenAutomations,
   onClose,
+  listHeader,
 }: {
   agentId?: string;
   onOpenChat?: OpenChat;
   onOpenSkills?: (agentId: string) => void;
   onOpenAutomations?: (agentId: string) => void;
   onClose?: () => void;
+  listHeader?: ReactNode;
 } = {}) {
   const { colors } = useTheme();
   const queryClient = useQueryClient();
@@ -74,6 +88,7 @@ export function AgentsScreen({
   const [creating, setCreating] = useState(false);
   const [search, setSearch] = useState("");
   const [includeDestroyed, setIncludeDestroyed] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
   const [busy, setBusy] = useState(false);
   const [closeRequested, setCloseRequested] = useState(false);
   const [error, setError] = useState<string>();
@@ -549,46 +564,60 @@ export function AgentsScreen({
     ).length ?? 0;
   const atLimit = list.data && live >= list.data.limits.max_live_subagents;
   return (
-    <WorkspacePage
-      title="Agents"
-      subtitle="Specialists with their own purpose, memory and service access"
-    >
+    <WorkspacePage title="Your agents" subtitle="Personal & shared agents">
+      {listHeader}
       {notice && <Notice message={notice} tone="success" />}
       {error && <Notice message={error} tone="error" />}
-      <ActionButton
-        label="New agent"
-        disabled={Boolean(atLimit) || list.isPending || list.isError}
-        onPress={() => {
-          setCreating(true);
-          setError(undefined);
-          setNotice(undefined);
-        }}
-      />
-      {list.data && (
-        <Label mono muted>
-          {live} / {list.data.limits.max_live_subagents} personal specialists
-        </Label>
-      )}
       {atLimit && (
         <Notice message="Your current agent limit is reached. Destroy an unused specialist or update your workspace limit in Settings." />
       )}
-      <Field
-        label="Search agents"
-        value={search}
-        onChangeText={setSearch}
-        placeholder="Search by name or purpose"
-      />
       <View style={styles.row}>
-        <View style={styles.flex}>
-          <Label muted>Include destroyed agents</Label>
-        </View>
-        <Switch
-          accessibilityLabel="Include destroyed agents"
-          value={includeDestroyed}
-          onValueChange={setIncludeDestroyed}
-          trackColor={{ true: colors.primary }}
-        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Search and filter agents"
+          accessibilityState={{ expanded: showFilters }}
+          onPress={() => setShowFilters((value) => !value)}
+          style={[styles.listTool, styles.flex]}
+        >
+          <Search size={17} color={colors.textSecondary} />
+          <Label muted>
+            {search || includeDestroyed
+              ? "Search & filters active"
+              : "Search & filter"}
+          </Label>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Refresh agents"
+          accessibilityState={{ disabled: list.isFetching }}
+          disabled={list.isFetching}
+          onPress={() => void reload()}
+          style={styles.listTool}
+        >
+          <RefreshCw size={17} color={colors.textSecondary} />
+        </Pressable>
       </View>
+      {showFilters && (
+        <>
+          <Field
+            label="Search agents"
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search by name or purpose"
+          />
+          <View style={styles.row}>
+            <View style={styles.flex}>
+              <Label muted>Include destroyed agents</Label>
+            </View>
+            <Switch
+              accessibilityLabel="Include destroyed agents"
+              value={includeDestroyed}
+              onValueChange={setIncludeDestroyed}
+              trackColor={{ true: colors.primary }}
+            />
+          </View>
+        </>
+      )}
       {list.isPending && (
         <ActivityIndicator
           color={colors.primary}
@@ -631,22 +660,21 @@ export function AgentsScreen({
                 <Text style={[styles.title, { color: colors.textPrimary }]}>
                   {agent.display_name ?? agent.name}
                 </Text>
-                <Label mono muted>
-                  @{agent.name} · {agent.status}
-                </Label>
-                <Label muted>
-                  {agent.owner_kind === "org"
-                    ? (agent.owner_name ?? "Organization")
-                    : "Personal"}
+                <Label muted numberOfLines={2}>
+                  {agent.description || "Your personal agent"}
                 </Label>
               </View>
               <ChevronRight size={18} color={colors.textMuted} />
             </View>
-            <Label muted>
-              {agent.description || "Your everyday assistant"}
-            </Label>
-            <Label muted>
-              {agent.services.length} services · {agent.memory_count} memories
+            <Label muted style={{ fontSize: 11 }}>
+              {agent.status === "running"
+                ? "● Working"
+                : agent.status === "destroyed"
+                  ? "Destroyed"
+                  : "● Ready"}
+              {agent.owner_kind === "org"
+                ? ` · ${agent.owner_name ?? "Organization"}`
+                : " · Personal"}
               {agent.pending_acknowledgements
                 ? ` · ${agent.pending_acknowledgements} pending`
                 : ""}
@@ -661,11 +689,19 @@ export function AgentsScreen({
         </Card>
       )}
       <ActionButton
-        label="Refresh agents"
-        variant="secondary"
-        disabled={list.isFetching}
-        onPress={() => void reload()}
+        label="Create an agent"
+        disabled={Boolean(atLimit) || list.isPending || list.isError}
+        onPress={() => {
+          setCreating(true);
+          setError(undefined);
+          setNotice(undefined);
+        }}
       />
+      {list.data && (
+        <Label muted style={{ fontSize: 11 }}>
+          {live} / {list.data.limits.max_live_subagents} personal specialists
+        </Label>
+      )}
     </WorkspacePage>
   );
 }
@@ -1142,6 +1178,14 @@ function MemoryNote({
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   row: { flexDirection: "row", alignItems: "center", gap: 12 },
+  listTool: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    minHeight: 44,
+    minWidth: 44,
+    justifyContent: "center",
+  },
   title: { fontSize: 18, fontFamily: fonts.displaySemi },
   avatar: {
     width: 48,

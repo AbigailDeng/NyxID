@@ -26,7 +26,12 @@ export const navigationLinkingConfig: NonNullable<
           alias: ["assistant/automations"],
           parse: { agentId: String, setup: String },
         },
-        Agents: "agents",
+        Agents: {
+          path: "agents",
+          parse: {
+            tab: (value: string) => (value === "groups" ? "groups" : "agents"),
+          },
+        },
         Plugins: {
           path: "plugins",
           parse: { tab: String, agentId: String },
@@ -41,6 +46,8 @@ export const navigationLinkingConfig: NonNullable<
       parse: assistantParams,
     },
     AgentDetail: { path: "agents/:agentId", parse: { agentId: String } },
+    GroupChat: { path: "groups/:groupId", parse: { groupId: String } },
+    GroupEditor: { path: "groups/edit/:groupId?", parse: { groupId: String } },
     AutomationDetail: { path: "automations/:id", parse: { id: String } },
     AutomationEditor: {
       path: "automations/edit/:id?",

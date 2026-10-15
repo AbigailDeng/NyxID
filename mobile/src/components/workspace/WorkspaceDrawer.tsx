@@ -33,7 +33,7 @@ export type WorkspaceRoute =
   | "AccountSettings";
 const destinations = [
   { route: "Assistant", label: "Chats", Icon: MessageSquare },
-  { route: "Agents", label: "Agents", Icon: Bot },
+  { route: "Agents", label: "Agents & Groups", Icon: Bot },
   { route: "Plugins", label: "Plugins", Icon: Plug },
   { route: "Automations", label: "Automations", Icon: CalendarClock },
   { route: "Activity", label: "Approvals", Icon: ShieldCheck },
