@@ -90,6 +90,8 @@ function setup({
   const queries = new Map<string, QueryOptions>();
   const state = new Map<string, any>();
   let focused = true;
+  let epoch = 1;
+  let requestedAgent = agentId;
   let manager: Element | undefined;
   const changes: boolean[] = [];
   const record =
@@ -205,6 +207,9 @@ function setup({
         name,
       ]),
     ),
+    "../../components/workspace/WorkspaceSelectionField": {
+      WorkspaceSelectionSheet: "WorkspaceSelectionSheet",
+    },
     "../../lib/api/agentsApi": {
       agentsApi: {
         list: record("agents", { agents: [first, second] }),
@@ -222,7 +227,7 @@ function setup({
         write: record("write"),
       },
     },
-    "../../lib/auth/authEpoch": { getAuthEpoch: () => 1 },
+    "../../lib/auth/authEpoch": { getAuthEpoch: () => epoch },
     "../../theme/designTokens": { fonts: {} },
     "../../theme/ThemeContext": {
       useTheme: () => ({ colors: { primaryTone: {} } }),
@@ -240,7 +245,10 @@ function setup({
   };
   const detailChange = (open: boolean) => changes.push(open);
   harness.mount(() => {
-    const wrapper = PluginSkills({ agentId, onDetailChange: detailChange });
+    const wrapper = PluginSkills({
+      agentId: requestedAgent,
+      onDetailChange: detailChange,
+    });
     manager = elements(wrapper).find(
       (item) =>
         typeof item.type === "function" &&
@@ -263,6 +271,11 @@ function setup({
     state,
     changes,
     manager: () => manager!,
+    sheet: () => find((item) => item.type === "WorkspaceSelectionSheet"),
+    hasSheet: () =>
+      elements(harness.flush()).some(
+        (item) => item.type === "WorkspaceSelectionSheet",
+      ),
     library: () => find((item) => item.type === "SkillLibrary"),
     modal: () => find((item) => item.type === "Modal"),
     control: (label: string) =>
@@ -272,6 +285,14 @@ function setup({
       ),
     focused: (value: boolean) => {
       focused = value;
+      harness.render();
+    },
+    epoch: (value: number) => {
+      epoch = value;
+      harness.render();
+    },
+    requestedAgent: (value: string | undefined) => {
+      requestedAgent = value;
       harness.render();
     },
     unmount: () => harness.unmount(),
@@ -445,14 +466,30 @@ test("manager reports query failure and unknown data separately from an empty li
   }
 });
 
-test("selecting a different agent emits a new keyed manager and requested-agent scope is explicit", () => {
+test("skills agent sheet applies a new keyed manager and Cancel preserves the current context", () => {
   const env = setup({ wrapperOnly: true });
   try {
     assert.equal(env.manager().key, first.id);
     assert.equal(env.manager().props.agent.id, first.id);
     env.control("Agent for skills: Nyx Bot").props.onPress();
     env.harness.flush();
-    env.control("Manage skills for DNS helper").props.onPress();
+    const sheet = env.sheet().props;
+    assert.deepEqual(Array.from(sheet.value), [first.id]);
+    assert.equal(sheet.allowEmpty, false);
+    assert.deepEqual(
+      Array.from(sheet.options, (option: { value: string }) => option.value),
+      [first.id, second.id],
+    );
+    assert.equal(env.manager().props.agent.id, first.id);
+    sheet.onClose();
+    env.harness.flush();
+    assert.equal(env.manager().props.agent.id, first.id);
+    assert.equal(env.hasSheet(), false);
+    env.control("Agent for skills: Nyx Bot").props.onPress();
+    env.harness.flush();
+    const applying = env.sheet().props;
+    applying.onChange([second.id]);
+    applying.onClose();
     env.harness.flush();
     assert.equal(env.manager().key, second.id);
     assert.equal(env.manager().props.agent.id, second.id);
@@ -469,6 +506,59 @@ test("selecting a different agent emits a new keyed manager and requested-agent 
     assert.equal(explicit.queries.get(second.id)?.enabled, true);
   } finally {
     explicit.unmount();
+  }
+});
+
+test("skills choices exclude unavailable agents and discard drafts when route, owner, account, or focus changes", () => {
+  const env = setup({ wrapperOnly: true });
+  const open = () => {
+    env
+      .control(`Agent for skills: ${env.manager().props.agent.display_name}`)
+      .props.onPress();
+    env.harness.flush();
+    assert.equal(env.hasSheet(), true);
+  };
+  try {
+    env.state.get("agents").data.agents = [
+      first,
+      {
+        ...second,
+        owner_kind: "org",
+        owner_id: "org-a",
+        owner_name: "DNS team",
+      },
+      { ...first, id: "destroyed", status: "destroyed" },
+      { ...first, id: "readonly", can_maintain: false },
+    ];
+    env.harness.render();
+    open();
+    assert.deepEqual(
+      Array.from(
+        env.sheet().props.options,
+        (option: { value: string }) => option.value,
+      ),
+      [first.id, second.id],
+    );
+    assert.equal(env.sheet().props.options[1].description, "DNS team");
+    env.requestedAgent(second.id);
+    assert.equal(env.hasSheet(), false);
+    open();
+    const oldScope = env.sheet().props.scopeKey;
+    env.state.get("agents").data.agents[1] = {
+      ...env.state.get("agents").data.agents[1],
+      owner_id: "org-b",
+    };
+    env.harness.render();
+    assert.equal(env.hasSheet(), false);
+    open();
+    assert.notEqual(env.sheet().props.scopeKey, oldScope);
+    env.epoch(2);
+    assert.equal(env.hasSheet(), false);
+    open();
+    env.focused(false);
+    assert.equal(env.hasSheet(), false);
+  } finally {
+    env.unmount();
   }
 });
 

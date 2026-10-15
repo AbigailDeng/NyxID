@@ -22,6 +22,7 @@ import {
   X,
 } from "lucide-react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { WorkspaceSelectionSheet } from "../../components/workspace/WorkspaceSelectionField";
 import {
   ActionButton,
   Card,
@@ -79,6 +80,7 @@ export function PluginSkills({
 }) {
   const { colors } = useTheme();
   const focused = useIsFocused();
+  const epoch = getAuthEpoch();
   const [chosen, setChosen] = useState(agentId ?? "");
   const [picking, setPicking] = useState(false);
   const agents = useQuery({
@@ -95,13 +97,23 @@ export function PluginSkills({
   });
   useEffect(() => {
     setChosen(agentId ?? "");
-  }, [agentId]);
+  }, [agentId, epoch]);
   const manageable = (agents.data?.agents ?? []).filter(
     (agent) => agent.status !== "destroyed" && agent.can_maintain !== false,
   );
   const agent = chosen
     ? manageable.find((item) => item.id === chosen)
     : (manageable.find((item) => item.kind === "nyxbot") ?? manageable[0]);
+  const selectionScope = JSON.stringify([
+    epoch,
+    agentId,
+    agent?.id,
+    agent?.owner_kind,
+    agent?.owner_id,
+  ]);
+  useEffect(() => {
+    setPicking(false);
+  }, [selectionScope, focused]);
   return (
     <View style={styles.stack}>
       <View style={styles.stackSmall}>
@@ -139,38 +151,31 @@ export function PluginSkills({
           </View>
           <ChevronDown color={colors.textSecondary} size={18} />
         </Pressable>
-        {picking &&
-          manageable.map((item) => (
-            <Pressable
-              key={item.id}
-              accessibilityRole="button"
-              accessibilityLabel={`Manage skills for ${titleOf(item)}`}
-              accessibilityState={{ selected: agent?.id === item.id }}
-              onPress={() => {
-                setChosen(item.id);
-                setPicking(false);
-              }}
-              style={[
-                styles.pickerOption,
-                {
-                  backgroundColor:
-                    item.id === agent?.id ? colors.navActive : colors.card,
-                },
-              ]}
-            >
-              <View style={styles.flex}>
-                <Label>{titleOf(item)}</Label>
-                {item.owner_kind === "org" && (
-                  <Label muted style={styles.caption}>
-                    {item.owner_name ?? "Organization"}
-                  </Label>
-                )}
-              </View>
-              {item.id === agent?.id && (
-                <Check color={colors.primary} size={18} />
-              )}
-            </Pressable>
-          ))}
+        {picking && (
+          <WorkspaceSelectionSheet
+            label="Agent for skills"
+            title="Choose an agent"
+            options={manageable.map((item) => ({
+              value: item.id,
+              label: titleOf(item),
+              description:
+                item.owner_kind === "org"
+                  ? (item.owner_name ?? "Organization")
+                  : "Personal",
+            }))}
+            value={agent ? [agent.id] : []}
+            allowEmpty={false}
+            scopeKey={selectionScope}
+            onChange={(values) => {
+              if (
+                values.length === 1 &&
+                manageable.some((item) => item.id === values[0])
+              )
+                setChosen(values[0]);
+            }}
+            onClose={() => setPicking(false)}
+          />
+        )}
       </View>
       {agents.isPending && (
         <ActivityIndicator
@@ -1317,15 +1322,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   agentName: { fontFamily: fonts.bodySemi, fontSize: 14, lineHeight: 20 },
-  pickerOption: {
-    minHeight: 48,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
   cardTitle: { fontFamily: fonts.bodySemi, fontSize: 15, lineHeight: 22 },
   icon: {
     width: 44,

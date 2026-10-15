@@ -38,6 +38,7 @@ import { agentsApi } from "../../lib/api/agentsApi";
 import { servicesApi } from "../../lib/api/servicesApi";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import { fonts } from "../../theme/designTokens";
+import { WorkspaceSelectionSheet } from "../../components/workspace/WorkspaceSelectionField";
 import { AgentModelField } from "./AgentModelField";
 import {
   AgentPermissionsField,
@@ -626,8 +627,8 @@ export function AgentsScreen({
           accessibilityLabel="Filter agents"
           accessibilityHint={
             includeDestroyed
-              ? "Including destroyed agents. Show or hide filters."
-              : "Show or hide status filters."
+              ? "Including destroyed agents. Open filters."
+              : "Open status filters."
           }
           accessibilityState={{
             expanded: showFilters,
@@ -635,7 +636,7 @@ export function AgentsScreen({
           }}
           onPress={() => {
             Keyboard.dismiss();
-            setShowFilters((value) => !value);
+            setShowFilters(true);
           }}
           style={[
             styles.listTool,
@@ -663,19 +664,24 @@ export function AgentsScreen({
         </Pressable>
       </View>
       {showFilters && (
-        <Card>
-          <View style={styles.row}>
-            <View style={styles.flex}>
-              <Label muted>Include destroyed agents</Label>
-            </View>
-            <Switch
-              accessibilityLabel="Include destroyed agents"
-              value={includeDestroyed}
-              onValueChange={setIncludeDestroyed}
-              trackColor={{ true: colors.primary }}
-            />
-          </View>
-        </Card>
+        <WorkspaceSelectionSheet
+          label="Agent filters"
+          title="Filter agents"
+          options={[
+            {
+              value: "destroyed",
+              label: "Include destroyed agents",
+              description: "Show destroyed agents alongside active agents.",
+            },
+          ]}
+          value={includeDestroyed ? ["destroyed"] : []}
+          multiple
+          confirmLabel="Apply filters"
+          onChange={(selected) =>
+            setIncludeDestroyed(selected.includes("destroyed"))
+          }
+          onClose={() => setShowFilters(false)}
+        />
       )}
       {list.isPending && (
         <ActivityIndicator

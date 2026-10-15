@@ -13,11 +13,11 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import {
-  Check,
   ChevronDown,
   ChevronRight,
   SlidersHorizontal,
 } from "lucide-react-native";
+import { WorkspaceSelectionSheet } from "../../components/workspace/WorkspaceSelectionField";
 import {
   ActionButton,
   Card,
@@ -53,7 +53,12 @@ export function PluginConnectionHistory({ serviceId }: { serviceId: string }) {
   const [foreground, setForeground] = useState(
     AppState.currentState === "active",
   );
-  const [actions, setActions] = useState<string[]>([]);
+  const selectionScope = JSON.stringify([epoch, serviceId]);
+  const [selection, setSelection] = useState({
+    scope: selectionScope,
+    actions: [] as string[],
+  });
+  const actions = selection.scope === selectionScope ? selection.actions : [];
   const [filterOpen, setFilterOpen] = useState(false);
   const active = focused && foreground;
   const query = useInfiniteQuery({
@@ -85,6 +90,12 @@ export function PluginConnectionHistory({ serviceId }: { serviceId: string }) {
     );
     return () => subscription.remove();
   }, []);
+  useEffect(() => {
+    setFilterOpen(false);
+  }, [selectionScope, active]);
+  useEffect(() => {
+    setSelection({ scope: selectionScope, actions: [] });
+  }, [selectionScope]);
   useEffect(() => {
     if (!active)
       void client.cancelQueries({ queryKey: [...ROOT, epoch, serviceId] });
@@ -132,22 +143,28 @@ export function PluginConnectionHistory({ serviceId }: { serviceId: string }) {
         <ChevronDown size={18} color={colors.textSecondary} />
       </Pressable>
       {filterOpen && (
-        <Card>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => setActions([])}
-            style={styles.option}
-          >
-            <Label style={styles.flex}>All actions</Label>
-            {!actions.length && <Check size={18} color={colors.primary} />}
-          </Pressable>
+        <WorkspaceSelectionSheet
+          label="History actions"
+          title="Filter history actions"
+          description="Choose actions to include. Clear the selection to show all actions."
+          options={options.isError ? [] : (options.data ?? [])}
+          value={actions}
+          multiple
+          allowEmpty
+          scopeKey={selectionScope}
+          readOnly={options.isPending || options.isError || !active}
+          onChange={(values) =>
+            setSelection({ scope: selectionScope, actions: [...values].sort() })
+          }
+          onClose={() => setFilterOpen(false)}
+        >
           {options.isPending && (
             <ActivityIndicator
               color={colors.primary}
               accessibilityLabel="Loading history filters"
             />
           )}
-          {options.isError ? (
+          {options.isError && (
             <>
               <Notice message="History filters could not be loaded." />
               <ActionButton
@@ -157,34 +174,8 @@ export function PluginConnectionHistory({ serviceId }: { serviceId: string }) {
                 onPress={() => void options.refetch()}
               />
             </>
-          ) : (
-            options.data?.map((option) => (
-              <Pressable
-                key={option.value}
-                accessibilityRole="checkbox"
-                accessibilityLabel={option.label}
-                accessibilityState={{
-                  checked: actions.includes(option.value),
-                  disabled: option.disabled,
-                }}
-                disabled={option.disabled}
-                onPress={() =>
-                  setActions((current) =>
-                    current.includes(option.value)
-                      ? current.filter((value) => value !== option.value)
-                      : [...current, option.value].sort(),
-                  )
-                }
-                style={[styles.option, { opacity: option.disabled ? 0.45 : 1 }]}
-              >
-                <Label style={styles.flex}>{option.label}</Label>
-                {actions.includes(option.value) && (
-                  <Check size={18} color={colors.primary} />
-                )}
-              </Pressable>
-            ))
           )}
-        </Card>
+        </WorkspaceSelectionSheet>
       )}
       {query.isPending && (
         <ActivityIndicator
@@ -323,11 +314,5 @@ const styles = StyleSheet.create({
   caption: { fontSize: 11 },
   row: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 44 },
   control: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 14 },
-  option: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    minHeight: 44,
-  },
   event: { gap: 8, borderTopWidth: 1, paddingTop: 12, marginTop: 4 },
 });

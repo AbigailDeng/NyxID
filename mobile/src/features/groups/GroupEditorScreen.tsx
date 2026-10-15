@@ -1,13 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  StyleSheet,
-  View,
-} from "react-native";
+import { ActivityIndicator, Alert } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Circle, Users } from "lucide-react-native";
 import {
   ActionButton,
   Card,
@@ -16,6 +9,7 @@ import {
   Notice,
   WorkspacePage,
 } from "../../components/workspace/WorkspaceUI";
+import { WorkspaceSelectionField } from "../../components/workspace/WorkspaceSelectionField";
 import { groupsApi } from "../../lib/api/groupsApi";
 import { agentsApi } from "../../lib/api/agentsApi";
 import { getAuthEpoch } from "../../lib/auth/authEpoch";
@@ -132,8 +126,9 @@ function GroupEditor({
         peopleTouched ||
         lead !== (org ? baseline.lead_agent_id : undefined) ||
         gone);
-  const disabled =
-    busy || !canManage || !live.active || agents.isError || detail.isError;
+  const selectionDisabled =
+    busy || !live.active || agents.isError || detail.isError;
+  const disabled = selectionDisabled || !canManage;
   useEffect(() => {
     scope.current.mounted = true;
     return () => {
@@ -358,41 +353,46 @@ function GroupEditor({
         <>
           {!groupId && (
             <Card>
-              <Label>Ownership</Label>
-              <Choice
-                label="Personal"
-                selected={!org}
-                disabled={busy}
-                onPress={() => {
-                  setOrg(undefined);
+              <WorkspaceSelectionField
+                label="Ownership"
+                title="Choose group owner"
+                description="Choose where this group belongs. Changing ownership resets its selected agents and participants."
+                options={[
+                  { value: "personal", label: "Personal" },
+                  ...enabledOrgs.map((row) => ({
+                    value: row.id,
+                    label: row.display_name ?? row.slug,
+                    description: row.slug,
+                    disabled: row.id !== org && (!orgEnabled || !identity.data),
+                  })),
+                ]}
+                value={[org ?? "personal"]}
+                disabled={busy || !live.active}
+                scopeKey={`${live.epoch}:new-group-owner`}
+                confirmLabel="Use this owner"
+                onChange={([owner]) => {
+                  const nextOrg = owner === "personal" ? undefined : owner;
+                  if (nextOrg === org) return;
+                  setOrg(nextOrg);
                   setMembers(
-                    allAgents
-                      .filter(
-                        (agent) =>
-                          agent.kind === "nyxbot" &&
-                          agent.owner_kind !== "org" &&
-                          agent.status !== "destroyed",
-                      )
-                      .slice(0, 1)
-                      .map((agent) => agent.id),
+                    nextOrg
+                      ? []
+                      : allAgents
+                          .filter(
+                            (agent) =>
+                              agent.kind === "nyxbot" &&
+                              agent.owner_kind !== "org" &&
+                              agent.status !== "destroyed",
+                          )
+                          .slice(0, 1)
+                          .map((agent) => agent.id),
                   );
-                  setPeople([]);
+                  setPeople(nextOrg && identity.data ? [identity.data.id] : []);
+                  setLead(undefined);
+                  setMemberTouched(false);
+                  setPeopleTouched(false);
                 }}
               />
-              {enabledOrgs.map((row) => (
-                <Choice
-                  key={row.id}
-                  label={row.display_name ?? row.slug}
-                  selected={org === row.id}
-                  disabled={busy || !orgEnabled || !identity.data}
-                  onPress={() => {
-                    setOrg(row.id);
-                    setMembers([]);
-                    setPeople(identity.data ? [identity.data.id] : []);
-                    setLead(undefined);
-                  }}
-                />
-              ))}
               {(orgs.isError || features.isError) && (
                 <Label muted>
                   Organization choices could not be loaded. Personal groups
@@ -417,34 +417,32 @@ function GroupEditor({
             editable={!disabled}
           />
           <Card>
-            <Label>
-              Members · {members.length} of {GROUP_MAX_MEMBERS}
-            </Label>
-            {eligible.map((agent) => (
-              <Choice
-                key={agent.id}
-                label={agent.display_name ?? agent.name}
-                detail={
+            <WorkspaceSelectionField
+              label="Members"
+              title="Choose group agents"
+              description={`Choose up to ${GROUP_MAX_MEMBERS} agents. Apply updates this draft; save the group to keep your changes.`}
+              options={eligible.map((agent) => ({
+                value: agent.id,
+                label: agent.display_name ?? agent.name,
+                description:
                   agent.kind === "nyxbot"
                     ? "Your personal agent"
-                    : agent.description || "Specialist"
-                }
-                selected={members.includes(agent.id)}
-                disabled={
-                  disabled ||
-                  (!members.includes(agent.id) &&
-                    members.length >= GROUP_MAX_MEMBERS)
-                }
-                onPress={() => {
-                  setMemberTouched(true);
-                  setMembers((old) =>
-                    old.includes(agent.id)
-                      ? old.filter((id) => id !== agent.id)
-                      : [...old, agent.id],
-                  );
-                }}
-              />
-            ))}
+                    : agent.description || "Specialist",
+                searchText: agent.name,
+              }))}
+              value={members}
+              multiple
+              maxSelected={GROUP_MAX_MEMBERS}
+              disabled={selectionDisabled}
+              readOnly={!canManage}
+              scopeKey={`${live.epoch}:${groupId ?? "new"}:${org ?? "personal"}:agents`}
+              placeholder="Choose agents"
+              confirmLabel="Use these agents"
+              onChange={(ids) => {
+                setMemberTouched(true);
+                setMembers(ids);
+              }}
+            />
             {baseline?.members
               .filter((member) => member.destroyed || !aliveIds.has(member.id))
               .map((member) => (
@@ -458,13 +456,56 @@ function GroupEditor({
           </Card>
           {!!org && (
             <Card>
-              <Label>
-                Participants · {people.length} of {GROUP_MAX_PARTICIPANTS}
-              </Label>
-              <Label muted>
-                Only selected Admins and Members can participate. The creator is
-                included when creating a group.
-              </Label>
+              <WorkspaceSelectionField
+                label="Participants"
+                title="Choose group participants"
+                description={`Choose up to ${GROUP_MAX_PARTICIPANTS} organization Admins and Members. The creator is included when creating a group.`}
+                options={[
+                  ...availablePeople.map((person) => ({
+                    value: person.user_id,
+                    label: person.display_name ?? person.email ?? "Member",
+                    description: person.email
+                      ? `${person.email} · ${person.role}`
+                      : person.role,
+                    disabled: !groupId && person.user_id === identity.data?.id,
+                  })),
+                  ...people
+                    .filter(
+                      (id) =>
+                        !availablePeople.some(
+                          (person) => person.user_id === id,
+                        ),
+                    )
+                    .map((id) => ({
+                      value: id,
+                      label:
+                        baseline?.participants?.find(
+                          (person) => person.id === id,
+                        )?.display_name ?? "Selected participant",
+                      description:
+                        !groupId && id === identity.data?.id
+                          ? "Creator · included when creating a group"
+                          : "No longer listed as an eligible organization member. Remove this participant before saving.",
+                      disabled: !groupId && id === identity.data?.id,
+                    })),
+                ]}
+                value={people}
+                multiple
+                maxSelected={GROUP_MAX_PARTICIPANTS}
+                disabled={
+                  selectionDisabled ||
+                  participants.isPending ||
+                  participants.isError
+                }
+                readOnly={!canManage}
+                scopeKey={`${live.epoch}:${groupId ?? "new"}:${org}:participants`}
+                placeholder="Choose participants"
+                confirmLabel="Use these participants"
+                onChange={(ids) => {
+                  setPeopleTouched(true);
+                  setPeople(ids);
+                }}
+              />
               {participants.isPending && (
                 <ActivityIndicator color={colors.primary} />
               )}
@@ -474,42 +515,27 @@ function GroupEditor({
                   tone="error"
                 />
               )}
-              {availablePeople.map((person) => (
-                <Choice
-                  key={person.user_id}
-                  label={person.display_name ?? "Member"}
-                  selected={people.includes(person.user_id)}
-                  disabled={
-                    disabled ||
-                    (!groupId && person.user_id === identity.data?.id) ||
-                    (!people.includes(person.user_id) &&
-                      people.length >= GROUP_MAX_PARTICIPANTS)
-                  }
-                  onPress={() => {
-                    setPeopleTouched(true);
-                    setPeople((old) =>
-                      old.includes(person.user_id)
-                        ? old.filter((id) => id !== person.user_id)
-                        : [...old, person.user_id],
-                    );
-                  }}
-                />
-              ))}
               {!!groupId && (
-                <>
-                  <Label>Lead agent</Label>
-                  {eligible
+                <WorkspaceSelectionField
+                  label="Lead agent"
+                  title="Choose the lead agent"
+                  description="Messages use the lead agent when no recipient or previous recipient is selected. Choose from this group's selected agents."
+                  options={eligible
                     .filter((agent) => members.includes(agent.id))
-                    .map((agent) => (
-                      <Choice
-                        key={agent.id}
-                        label={agent.display_name ?? agent.name}
-                        selected={lead === agent.id}
-                        disabled={disabled}
-                        onPress={() => setLead(agent.id)}
-                      />
-                    ))}
-                </>
+                    .map((agent) => ({
+                      value: agent.id,
+                      label: agent.display_name ?? agent.name,
+                      description: agent.description || undefined,
+                      searchText: agent.name,
+                    }))}
+                  value={lead && members.includes(lead) ? [lead] : []}
+                  disabled={selectionDisabled || !members.length}
+                  readOnly={!canManage}
+                  scopeKey={`${live.epoch}:${groupId}:${org}:lead:${members.join(",")}`}
+                  placeholder="Choose a lead agent"
+                  confirmLabel="Use this lead agent"
+                  onChange={([id]) => setLead(id)}
+                />
               )}
             </Card>
           )}
@@ -554,63 +580,3 @@ function GroupEditor({
     </WorkspacePage>
   );
 }
-
-function Choice({
-  label,
-  detail,
-  selected,
-  disabled,
-  onPress,
-}: {
-  label: string;
-  detail?: string;
-  selected: boolean;
-  disabled: boolean;
-  onPress: () => void;
-}) {
-  const { colors } = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="checkbox"
-      accessibilityLabel={label}
-      accessibilityState={{ checked: selected, disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      style={[styles.choice, { opacity: disabled ? 0.45 : 1 }]}
-    >
-      <View style={[styles.avatar, { backgroundColor: colors.cardSoft }]}>
-        <Users size={18} color={colors.primaryOnTint} />
-      </View>
-      <View style={styles.fill}>
-        <Label>{label}</Label>
-        {detail && (
-          <Label muted numberOfLines={2}>
-            {detail}
-          </Label>
-        )}
-      </View>
-      {selected ? (
-        <Check size={20} color={colors.primaryOnTint} />
-      ) : (
-        <Circle size={20} color={colors.textMuted} />
-      )}
-    </Pressable>
-  );
-}
-const styles = StyleSheet.create({
-  choice: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    minHeight: 48,
-    paddingVertical: 4,
-  },
-  avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  fill: { flex: 1, minWidth: 0 },
-});

@@ -54,7 +54,7 @@ function renderPermissionForm(root: Element): Element {
   return { ...root, props: { ...root.props, children: renderChild(children) } };
 }
 
-function setup(creating = false) {
+function setup(creating = false, listing = false) {
   const calls: ApiCall[] = [];
   let latest = plain(agent);
   const client = {
@@ -147,13 +147,16 @@ function setup(creating = false) {
     "./AgentPermissionsField": {
       AgentPermissionsField: "AgentPermissionsField",
     },
+    "../../components/workspace/WorkspaceSelectionField": {
+      WorkspaceSelectionSheet: "WorkspaceSelectionSheet",
+    },
   });
   const { AgentsScreen } = harness.load(
     fileURLToPath(new URL("./AgentsScreen.tsx", import.meta.url)),
   ) as { AgentsScreen: (props: { agentId?: string }) => Element };
   harness.mount(() =>
     renderPermissionForm(
-      AgentsScreen({ agentId: creating ? undefined : agent.id }),
+      AgentsScreen({ agentId: creating || listing ? undefined : agent.id }),
     ),
   );
   const all = () => elements(harness.value());
@@ -262,4 +265,28 @@ test("creation permission confirmation updates only the local draft until Create
       account_read: true,
     },
   ]);
+});
+
+test("agent filters open in a sheet and apply only after confirmation", () => {
+  const state = setup(false, true);
+  const filter = () =>
+    state.one((row) => row.props.accessibilityLabel === "Filter agents");
+  const sheet = () =>
+    state.one((row) => row.type === "WorkspaceSelectionSheet");
+  filter().props.onPress();
+  state.harness.flush();
+  assert.deepEqual(plain(sheet().props.value), []);
+  sheet().props.onClose();
+  state.harness.flush();
+  assert.equal(filter().props.accessibilityState.selected, false);
+  filter().props.onPress();
+  state.harness.flush();
+  sheet().props.onChange(["destroyed"]);
+  sheet().props.onClose();
+  state.harness.flush();
+  assert.equal(filter().props.accessibilityState.selected, true);
+  filter().props.onPress();
+  state.harness.flush();
+  assert.deepEqual(plain(sheet().props.value), ["destroyed"]);
+  assert.deepEqual(state.calls, []);
 });
