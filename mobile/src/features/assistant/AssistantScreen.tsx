@@ -1158,13 +1158,15 @@ export function AssistantScreen({
             }}
             onPress={() => {
               assistant.openConversation(item.id);
-              navigation.setParams({
-                conversationId: item.id,
-                acknowledgementId: undefined,
-                agentId: item.agent?.id ?? assistant.agentId,
-                openLatest: false,
-              });
-              updateDraft("");
+              if (item.id !== assistant.conversationId) {
+                navigation.setParams({
+                  conversationId: item.id,
+                  acknowledgementId: undefined,
+                  agentId: item.agent?.id ?? assistant.agentId,
+                  openLatest: false,
+                });
+                updateDraft("");
+              }
               setHistoryOpen(false);
             }}
           >
