@@ -165,6 +165,14 @@ export function useAssistantUploads({
     context.current = { key, session: createSession() };
   const session = context.current.session;
   current.current = session;
+  const pendingPicker = useRef<
+    | {
+        session: AssistantUploadSession;
+        epoch: number;
+        files: PickedAssistantFile[];
+      }
+    | undefined
+  >(undefined);
   const pickerLock = useRef(false);
   const lifecycle = useRef(0);
   useEffect(() => {
@@ -175,8 +183,13 @@ export function useAssistantUploads({
       // Development effect replay keeps the same live session. Invalidate
       // ownership immediately, and dispose after the replay microtask.
       queueMicrotask(() => {
-        if (lifecycle.current === operation || current.current !== session)
+        if (lifecycle.current === operation || current.current !== session) {
           session.dispose();
+          if (pendingPicker.current?.session === session) {
+            pendingPicker.current.files.forEach(disposeFile);
+            pendingPicker.current = undefined;
+          }
+        }
       });
     };
   }, [session]);
@@ -192,9 +205,31 @@ export function useAssistantUploads({
     setError(undefined);
     if (!enabled || !focused || !foreground || !online) session.interrupt();
   }, [session, enabled, focused, foreground, online]);
+  useEffect(() => {
+    const pending = pendingPicker.current;
+    if (!pending) return;
+    if (
+      pending.session !== session ||
+      current.current !== session ||
+      pending.epoch !== getAuthEpoch() ||
+      !enabled ||
+      !focused ||
+      !online
+    ) {
+      pendingPicker.current = undefined;
+      pending.files.forEach(disposeFile);
+    } else if (foreground && AppState.currentState === "active") {
+      // Android can deliver the picker result before its resume callback.
+      // Wait for the active render/effects before starting any upload, so an
+      // earlier background effect cannot interrupt the newly accepted files.
+      pendingPicker.current = undefined;
+      session.add(pending.files);
+    }
+  });
   async function pick() {
     if (
       pickerLock.current ||
+      pendingPicker.current ||
       !enabled ||
       !focused ||
       !foreground ||
@@ -224,12 +259,13 @@ export function useAssistantUploads({
         epoch !== getAuthEpoch() ||
         !live.current.enabled ||
         !live.current.focused ||
-        !live.current.foreground ||
-        AppState.currentState !== "active" ||
         !live.current.online
       )
         files.forEach(disposeFile);
-      else session.add(files);
+      else {
+        pendingPicker.current = { session, epoch, files };
+        setVersion((value) => value + 1);
+      }
     } catch (cause) {
       if (current.current === session && epoch === getAuthEpoch())
         setError(

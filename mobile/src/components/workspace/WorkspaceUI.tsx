@@ -21,6 +21,7 @@ import {
 } from "react-native-safe-area-context";
 import { useTheme } from "../../theme/ThemeContext";
 import { fonts, radius, TOUCH_TARGET } from "../../theme/designTokens";
+import { AndroidKeyboardAvoidingView } from "./AndroidKeyboardAvoidingView";
 
 export function WorkspacePage({
   title,
@@ -61,28 +62,33 @@ export function WorkspacePage({
       {children}
     </>
   );
+  const body = scroll ? (
+    <ScrollView
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
+      contentContainerStyle={styles.content}
+    >
+      {content}
+    </ScrollView>
+  ) : (
+    <View style={[styles.content, styles.fill]}>{content}</View>
+  );
   return (
     <SafeAreaView
       edges={["bottom", "left", "right"]}
       style={[styles.fill, { backgroundColor: colors.bg }]}
     >
-      <KeyboardAvoidingView
-        style={styles.fill}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={insets.top + 56}
-      >
-        {scroll ? (
-          <ScrollView
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-            contentContainerStyle={styles.content}
-          >
-            {content}
-          </ScrollView>
-        ) : (
-          <View style={[styles.content, styles.fill]}>{content}</View>
-        )}
-      </KeyboardAvoidingView>
+      {Platform.OS === "android" ? (
+        <AndroidKeyboardAvoidingView>{body}</AndroidKeyboardAvoidingView>
+      ) : (
+        <KeyboardAvoidingView
+          style={styles.fill}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          keyboardVerticalOffset={insets.top + 56}
+        >
+          {body}
+        </KeyboardAvoidingView>
+      )}
     </SafeAreaView>
   );
 }

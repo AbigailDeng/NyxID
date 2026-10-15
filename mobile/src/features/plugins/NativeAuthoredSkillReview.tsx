@@ -24,6 +24,7 @@ import { getAuthEpoch } from "../../lib/auth/authEpoch";
 import { useTheme } from "../../theme/ThemeContext";
 import { fonts } from "../../theme/designTokens";
 import { SkillDraftEditor } from "./PluginSkills";
+import { skillModalBackAction } from "./skillModalNavigation";
 import {
   AUTHORED_SKILL_ACTIONS,
   authoredReviewMatches,
@@ -69,6 +70,7 @@ export function NativeAuthoredSkillReview({
     AppState.currentState === "active",
   );
   const lock = useRef(false);
+  const editorLock = useRef(false);
   const authEpoch = useRef(getAuthEpoch());
   useEffect(() => {
     if (initiallyOpen) setOpen(true);
@@ -146,6 +148,7 @@ export function NativeAuthoredSkillReview({
   async function act(action: AuthoredSkillAction) {
     if (
       lock.current ||
+      editorLock.current ||
       blocked ||
       editing ||
       !reference ||
@@ -205,10 +208,22 @@ export function NativeAuthoredSkillReview({
     }
   }
   function close() {
-    if (!lock.current && !editorBusy) {
+    if (!lock.current && !busy && !editorLock.current && !editorBusy) {
       setOpen(false);
       setEditing(false);
     }
+  }
+  function back() {
+    const action = skillModalBackAction(
+      editing,
+      lock.current || busy || editorLock.current || editorBusy,
+    );
+    if (action === "parent") setEditing(false);
+    if (action === "close") close();
+  }
+  function onEditorBusy(value: boolean) {
+    editorLock.current = value;
+    setEditorBusy(value);
   }
   if (!reference) return null;
   return (
@@ -232,7 +247,7 @@ export function NativeAuthoredSkillReview({
         visible={open}
         presentationStyle="pageSheet"
         animationType="slide"
-        onRequestClose={close}
+        onRequestClose={back}
       >
         <SafeAreaProvider>
           <SafeAreaView style={[styles.modal, { backgroundColor: colors.bg }]}>
@@ -244,7 +259,7 @@ export function NativeAuthoredSkillReview({
                 }
                 disabled={busy || editorBusy}
                 style={styles.iconButton}
-                onPress={() => (editing ? setEditing(false) : close())}
+                onPress={back}
               >
                 <ChevronLeft color={colors.textPrimary} size={22} />
               </Pressable>
@@ -380,7 +395,7 @@ export function NativeAuthoredSkillReview({
                                 !matched ||
                                 !editable
                               }
-                              onBusy={setEditorBusy}
+                              onBusy={onEditorBusy}
                               onSaved={async () => {
                                 setEditing(false);
                                 setNotice(

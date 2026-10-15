@@ -84,6 +84,7 @@ export function useAssistant(
   const indexSequence = useRef(0);
   const streamController = useRef<AbortController | undefined>(undefined);
   const sendLock = useRef(false);
+  const sendOperation = useRef<object | undefined>(undefined);
   const decisionLock = useRef(false);
   const lastDecision = useRef(0);
   const previousAgent = useRef(routeAgentId);
@@ -410,8 +411,10 @@ export function useAssistant(
         attachmentIds: uploads?.attachmentIds,
       });
       const localEpoch = epoch.current;
+      const operation = {};
       const controller = new AbortController();
       streamController.current = controller;
+      sendOperation.current = operation;
       sendLock.current = true;
       setSending(true);
       setError(undefined);
@@ -477,19 +480,28 @@ export function useAssistant(
       } finally {
         if (streamController.current === controller)
           streamController.current = undefined;
-        sendLock.current = false;
-        if (mounted.current && epoch.current === localEpoch) {
-          if (id && selected.current === id)
-            await refreshHistory(id).catch(() => undefined);
-          await refreshIndex().catch(() => undefined);
+        if (sendOperation.current === operation) sendLock.current = false;
+        try {
           if (mounted.current && epoch.current === localEpoch) {
-            setSending(false);
-            setLive(undefined);
-            setInputText(undefined);
-            setInputAttachments([]);
+            if (id && selected.current === id)
+              await refreshHistory(id).catch(() => undefined);
+            if (mounted.current && epoch.current === localEpoch)
+              await refreshIndex().catch(() => undefined);
           }
-        } else if (mounted.current) {
-          setSending(false);
+        } finally {
+          // Selection can change while final history/index refresh is pending.
+          // Release this send's UI even then, without clearing a newer send.
+          if (sendOperation.current === operation) {
+            sendOperation.current = undefined;
+            if (mounted.current) {
+              setSending(false);
+              if (epoch.current === localEpoch) {
+                setLive(undefined);
+                setInputText(undefined);
+                setInputAttachments([]);
+              }
+            }
+          }
         }
       }
       return !keepDraft;

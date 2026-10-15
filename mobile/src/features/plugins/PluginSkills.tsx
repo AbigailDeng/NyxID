@@ -37,6 +37,7 @@ import { fonts } from "../../theme/designTokens";
 import { useTheme } from "../../theme/ThemeContext";
 import type { AssistantAgent } from "../agents/agentContracts";
 import { submitSkillDraft } from "./skillDraftSubmission";
+import { skillModalBackAction } from "./skillModalNavigation";
 import {
   assertSkillRevision,
   buildSkillSelection,
@@ -238,6 +239,7 @@ function AgentSkillsManager({
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const lock = useRef(false);
+  const editorLock = useRef(false);
   const authEpoch = useRef(getAuthEpoch());
   const currentKey = [...ROOT, agent.id] as const;
   const current = useQuery({
@@ -309,7 +311,22 @@ function AgentSkillsManager({
     setNotice(undefined);
   }
   function close() {
-    if (!lock.current && !busy) setDetail(undefined);
+    if (!lock.current && !editorLock.current && !busy) setDetail(undefined);
+  }
+  function back() {
+    const action = skillModalBackAction(
+      view !== "detail",
+      lock.current || editorLock.current || busy,
+    );
+    if (action === "close") close();
+    if (action === "parent") {
+      setView("detail");
+      setConfirmDetach(false);
+    }
+  }
+  function editorBusy(value: boolean) {
+    editorLock.current = value;
+    setBusy(value);
   }
   async function refresh() {
     await Promise.all([
@@ -319,7 +336,7 @@ function AgentSkillsManager({
     ]);
   }
   async function run(action: () => Promise<void>) {
-    if (lock.current) return;
+    if (lock.current || editorLock.current) return;
     lock.current = true;
     setBusy(true);
     setError(undefined);
@@ -485,7 +502,7 @@ function AgentSkillsManager({
         visible={Boolean(detail)}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={close}
+        onRequestClose={back}
       >
         <SafeAreaProvider>
           <SafeAreaView style={[styles.modal, { backgroundColor: colors.bg }]}>
@@ -497,13 +514,7 @@ function AgentSkillsManager({
                   view === "detail" ? "Back to plugins" : "Back to skill"
                 }
                 disabled={busy}
-                onPress={() => {
-                  if (view === "detail") close();
-                  else {
-                    setView("detail");
-                    setConfirmDetach(false);
-                  }
-                }}
+                onPress={back}
               >
                 <ChevronLeft size={22} color={colors.textPrimary} />
               </Pressable>
@@ -972,7 +983,7 @@ function AgentSkillsManager({
                         agent.can_maintain === false ||
                         agent.status === "destroyed"
                       }
-                      onBusy={setBusy}
+                      onBusy={editorBusy}
                       onSaved={() =>
                         client.invalidateQueries({
                           queryKey: [...ROOT, "proposals", agent.id],

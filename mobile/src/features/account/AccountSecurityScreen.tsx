@@ -3,6 +3,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, AppState, Linking, Share, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
+import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import {
   ActionButton,
   Card,
@@ -21,8 +22,10 @@ import {
 } from "../../lib/api/accountSchema";
 import { isApiError } from "../../lib/api/ApiError";
 import { resolveErrorMessage } from "../../lib/api/errorMessages";
+import { getAuthEpoch } from "../../lib/auth/authEpoch";
 import { useTheme } from "../../theme/ThemeContext";
 import { useAuthSession } from "../auth/AuthSessionContext";
+import { createMfaRecoveryLifecycle } from "./mfaRecoveryLifecycle";
 
 type PrivateAction = "setup" | "confirm" | "disable" | "copy" | "share";
 type Feedback = { message: string; tone: "error" | "info" | "success" };
@@ -63,7 +66,16 @@ export function AccountSecurityScreen() {
   const [enrollment, setEnrollment] = useState<MfaEnrollment | null>(null);
   const [enrollmentPending, setEnrollmentPending] = useState(false);
   const [totpCode, setTotpCode] = useState("");
-  const [recoveryCodes, setRecoveryCodes] = useState<readonly string[]>([]);
+  const [recoveryLifecycle] = useState(() =>
+    createMfaRecoveryLifecycle(getAuthEpoch),
+  );
+  const [, setRecoveryVersion] = useState(0);
+  const syncRecovery = useCallback(
+    () => setRecoveryVersion((version) => version + 1),
+    [],
+  );
+  const recovery = recoveryLifecycle.snapshot();
+  const recoveryCodes = recovery.codes;
   const [revealCodes, setRevealCodes] = useState(false);
   const [disableOpen, setDisableOpen] = useState(false);
   const [password, setPassword] = useState("");
@@ -72,6 +84,9 @@ export function AccountSecurityScreen() {
   );
   const privateBusy = useRef(false);
   const privateEpoch = useRef(0);
+  const authEpoch = useRef(getAuthEpoch());
+  const currentAuthEpoch = getAuthEpoch();
+  const ownsPrivateState = authEpoch.current === currentAuthEpoch;
   const isFocused = useRef(false);
   const isVisible = useRef(AppState.currentState === "active");
   const [appActive, setAppActive] = useState(
@@ -85,11 +100,10 @@ export function AccountSecurityScreen() {
     setAvatarUrl(profile.data.avatar_url ?? "");
   }, [profile.data]);
 
-  const clearSensitiveValues = useCallback(() => {
+  const clearSensitiveInputs = useCallback(() => {
     privateEpoch.current += 1;
     setEnrollment(null);
     setTotpCode("");
-    setRecoveryCodes([]);
     setRevealCodes(false);
     setDisableOpen(false);
     setPassword("");
@@ -97,33 +111,61 @@ export function AccountSecurityScreen() {
   }, []);
 
   const clearPrivateState = useCallback(() => {
-    clearSensitiveValues();
+    clearSensitiveInputs();
+    recoveryLifecycle.clear();
+    syncRecovery();
     setEnrollmentPending(false);
-  }, [clearSensitiveValues]);
+  }, [clearSensitiveInputs, recoveryLifecycle, syncRecovery]);
+
+  useEffect(() => {
+    if (authEpoch.current !== currentAuthEpoch) clearPrivateState();
+  }, [clearPrivateState, currentAuthEpoch]);
+
+  useWorkspaceBack({
+    active: false,
+    defaultRole: "back",
+    onBack: () => {},
+    disabled:
+      ownsPrivateState &&
+      (privateAction === "confirm" ||
+        recovery.confirming ||
+        recovery.count > 0),
+  });
 
   useFocusEffect(
     useCallback(() => {
       isFocused.current = true;
       isVisible.current = AppState.currentState === "active";
+      recoveryLifecycle.setFocused(true);
+      recoveryLifecycle.setActive(isVisible.current);
+      syncRecovery();
       setAppActive(isVisible.current);
       void profile.refetch();
       void sessions.refetch();
       return () => {
         isFocused.current = false;
+        recoveryLifecycle.setFocused(false);
         clearPrivateState();
       };
-    }, [clearPrivateState, profile.refetch, sessions.refetch]),
+    }, [
+      clearPrivateState,
+      profile.refetch,
+      recoveryLifecycle,
+      sessions.refetch,
+      syncRecovery,
+    ]),
   );
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       isVisible.current = state === "active";
+      recoveryLifecycle.setActive(isVisible.current);
+      syncRecovery();
       setAppActive(isVisible.current);
-      // Switching to an authenticator clears key material but preserves the
-      // non-secret verification step. The backend owns the pending factor.
-      // A native Share sheet may make iOS temporarily inactive. Mask values
-      // then, and discard them only if the app actually leaves foreground.
-      if (state === "background") clearSensitiveValues();
+      // A share chooser can background Android without saving anything.
+      // Mask one-time output until foreground; discard it only on leaving
+      // this screen or explicit acknowledgment. Clear reusable inputs now.
+      if (state === "background") clearSensitiveInputs();
       else if (state === "inactive") setRevealCodes(false);
       else if (isFocused.current) {
         void profile.refetch();
@@ -131,10 +173,19 @@ export function AccountSecurityScreen() {
       }
     });
     return () => subscription.remove();
-  }, [clearSensitiveValues, profile.refetch, sessions.refetch]);
+  }, [
+    clearSensitiveInputs,
+    profile.refetch,
+    recoveryLifecycle,
+    sessions.refetch,
+    syncRecovery,
+  ]);
 
   const currentEpoch = (epoch: number) =>
-    epoch === privateEpoch.current && isFocused.current && isVisible.current;
+    epoch === privateEpoch.current &&
+    authEpoch.current === getAuthEpoch() &&
+    isFocused.current &&
+    isVisible.current;
   const refreshProfile = () =>
     queryClient.invalidateQueries({ queryKey: ["account", "profile"] });
 
@@ -212,7 +263,13 @@ export function AccountSecurityScreen() {
     action: PrivateAction,
     operation: (epoch: number) => Promise<void>,
   ) {
-    if (privateBusy.current || !isFocused.current || !isVisible.current) return;
+    if (
+      privateBusy.current ||
+      !isFocused.current ||
+      !isVisible.current ||
+      authEpoch.current !== getAuthEpoch()
+    )
+      return;
     privateBusy.current = true;
     const epoch = privateEpoch.current;
     setPrivateAction(action);
@@ -248,18 +305,37 @@ export function AccountSecurityScreen() {
       });
       return;
     }
-    void runPrivate("confirm", async (epoch) => {
-      const confirmation = await accountApi.confirmMfa(result.data);
-      void refreshProfile();
-      if (currentEpoch(epoch)) {
-        setEnrollment(null);
-        setEnrollmentPending(false);
-        setTotpCode("");
-        setRecoveryCodes(confirmation.recovery_codes);
-        setFeedback({
-          message: "Two-factor authentication enabled",
-          tone: "success",
-        });
+    void runPrivate("confirm", async () => {
+      const ticket = recoveryLifecycle.beginConfirmation();
+      if (!ticket) return;
+      syncRecovery();
+      try {
+        const confirmation = await accountApi.confirmMfa(result.data);
+        if (
+          recoveryLifecycle.completeConfirmation(
+            ticket,
+            confirmation.recovery_codes,
+          )
+        ) {
+          void refreshProfile();
+          setEnrollment(null);
+          setEnrollmentPending(false);
+          setTotpCode("");
+          setRevealCodes(false);
+          setFeedback(
+            isVisible.current
+              ? {
+                  message: "Two-factor authentication enabled",
+                  tone: "success",
+                }
+              : null,
+          );
+        }
+      } catch (error) {
+        if (recoveryLifecycle.finishConfirmation(ticket) && isVisible.current)
+          setFeedback({ message: accountError(error), tone: "error" });
+      } finally {
+        syncRecovery();
       }
     });
   }
@@ -277,8 +353,8 @@ export function AccountSecurityScreen() {
           onPress: () => {
             void runPrivate("disable", async (epoch) => {
               await accountApi.disableMfa(password);
-              void refreshProfile();
               if (currentEpoch(epoch)) {
+                void refreshProfile();
                 clearPrivateState();
                 setFeedback({
                   message: "Two-factor authentication turned off",
@@ -308,7 +384,7 @@ export function AccountSecurityScreen() {
       if (currentEpoch(epoch) && result.action === Share.sharedAction)
         setFeedback({
           message:
-            "Export completed. Confirm your private copy before closing.",
+            "Confirm you saved a private copy before closing. You can export again.",
           tone: "info",
         });
     });
@@ -319,8 +395,7 @@ export function AccountSecurityScreen() {
     (displayName.trim() !== (profile.data.display_name ?? "") ||
       avatarUrl.trim() !== (profile.data.avatar_url ?? ""));
   const passwordAccount = !!profile.data && !profile.data.social_provider;
-  const mfaEnabled =
-    profile.data?.mfa_enabled === true || recoveryCodes.length > 0;
+  const mfaEnabled = profile.data?.mfa_enabled === true || recovery.count > 0;
   const privateDisabled = privateAction !== null || !isConnected;
 
   return (
@@ -397,7 +472,7 @@ export function AccountSecurityScreen() {
         <Label accessibilityRole="header">Two-factor authentication</Label>
         {profile.isPending ? (
           <Label muted>Loading security settings…</Label>
-        ) : !profile.data ? (
+        ) : !profile.data || !ownsPrivateState ? (
           <Label muted>Load your profile to manage security.</Label>
         ) : (
           <>
@@ -406,13 +481,21 @@ export function AccountSecurityScreen() {
                 ? "Authenticator protection is on."
                 : "Add a six-digit authenticator code to password sign-in."}
             </Label>
-            {recoveryCodes.length > 0 ? (
+            {recovery.count > 0 && !appActive ? (
+              <Label muted>
+                Recovery codes are hidden while the app is inactive.
+              </Label>
+            ) : recovery.count > 0 ? (
               <>
                 <Label>Save your recovery codes</Label>
                 <Label muted>
                   These codes are shown once. Keep a private copy. Continue
                   signing in with your authenticator; recovery-code sign-in is
                   currently unavailable.
+                </Label>
+                <Label muted>
+                  Save a private copy, then choose “I've saved the codes” to
+                  leave this screen.
                 </Label>
                 <View
                   accessibilityLabel={
