@@ -73,6 +73,15 @@ export function hookHarness<T>(mocks: Record<string, unknown>) {
         slots[i] = { callback, dependencies };
       return (slots[i] as { callback: V }).callback;
     },
+    useMemo: <V>(factory: () => V, dependencies: unknown[]) => {
+      const i = cursor++;
+      const previous = slots[i] as
+        | { value: V; dependencies: unknown[] }
+        | undefined;
+      if (!previous || !same(previous.dependencies, dependencies))
+        slots[i] = { value: factory(), dependencies };
+      return (slots[i] as { value: V }).value;
+    },
   };
   function flush() {
     let count = 0;
@@ -118,6 +127,8 @@ export function hookHarness<T>(mocks: Record<string, unknown>) {
           AbortController,
           URL,
           queueMicrotask,
+          setTimeout,
+          clearTimeout,
           // Polling is not advanced by these lifecycle/terminal-refresh tests.
           setInterval: () => 1,
           clearInterval: () => {},

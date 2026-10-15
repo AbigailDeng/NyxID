@@ -21,7 +21,6 @@ const fixture: BackendApprovalRequestItem = {
   created_at: "2026-10-13T00:00:00Z",
   expires_at: "2026-10-13T00:02:00Z",
 };
-
 test("actual two-minute expiration is preserved and disables a stale pending decision", () => {
   const detail = mapBackendRequestToChallenge(fixture);
   assert.equal(detail.expires_at, fixture.expires_at);
@@ -76,5 +75,55 @@ test("only authoritative org policy flag exposes org context", () => {
       org_id: "org",
     }).org_id,
     "org",
+  );
+});
+test("history preserves the decision timestamp independently of request creation", () => {
+  const decidedAt = "2026-10-13T00:01:00Z";
+  const detail = mapBackendRequestToChallenge({
+    ...fixture,
+    status: "approved",
+    decided_at: decidedAt,
+    decision_channel: "web",
+  });
+  assert.equal(detail.status, "APPROVED");
+  assert.equal(detail.created_at, fixture.created_at);
+  assert.equal(detail.decided_at, decidedAt);
+  assert.equal(detail.decision_channel, "web");
+});
+test("decision channels match Web semantics including push as Mobile", () => {
+  for (const [channel, expected] of [
+    ["web", "web"],
+    ["telegram", "telegram"],
+    ["mobile", "mobile"],
+    ["push", "mobile"],
+  ] as const) {
+    assert.equal(
+      mapBackendRequestToChallenge({
+        ...fixture,
+        status: "rejected",
+        decision_channel: channel,
+      }).decision_channel,
+      expected,
+    );
+  }
+});
+test("legacy or unknown decision metadata remains unknown instead of inventing a decision source", () => {
+  const legacy = mapBackendRequestToChallenge(fixture);
+  assert.equal(legacy.decided_at, null);
+  assert.equal(legacy.decision_channel, null);
+  const unknown = mapBackendRequestToChallenge({
+    ...fixture,
+    status: "expired",
+    decided_at: null,
+    decision_channel: "future-channel",
+  });
+  assert.equal(unknown.decided_at, null);
+  assert.equal(unknown.decision_channel, null);
+});
+test("requester falls back to the real requester type when an agent label is absent", () => {
+  assert.equal(
+    mapBackendRequestToChallenge({ ...fixture, requester_label: null })
+      .request_context.requester,
+    fixture.requester_type,
   );
 });

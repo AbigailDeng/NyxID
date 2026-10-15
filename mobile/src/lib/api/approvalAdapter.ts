@@ -1,4 +1,9 @@
-import type { ApprovalMode, ChallengeDetail, ChallengeStatus } from "./types";
+import type {
+  ApprovalDecisionChannel,
+  ApprovalMode,
+  ChallengeDetail,
+  ChallengeStatus,
+} from "./types";
 
 export type BackendApprovalRequestItem = {
   id: string;
@@ -19,6 +24,8 @@ export type BackendApprovalRequestItem = {
   status: string;
   created_at: string;
   expires_at?: string;
+  decided_at?: string | null;
+  decision_channel?: string | null;
   from_org_policy?: boolean;
   org_id?: string | null;
   org_name?: string | null;
@@ -29,6 +36,17 @@ export function mapChallengeStatus(status: string): ChallengeStatus {
   if (status === "rejected") return "DENIED";
   if (status === "expired") return "EXPIRED";
   return "PENDING";
+}
+
+/** Match the Web workspace: the push decision path is the mobile app. */
+function mapDecisionChannel(
+  channel: string | null | undefined,
+): ApprovalDecisionChannel | null {
+  if (channel === "push") return "mobile";
+  if (channel === "web" || channel === "telegram" || channel === "mobile") {
+    return channel;
+  }
+  return null;
 }
 
 /** Display the server's operation evidence; HTTP verbs alone do not describe
@@ -69,9 +87,14 @@ export function mapBackendRequestToChallenge(
     created_at: item.created_at,
     expires_at: item.expires_at ?? "",
     summary,
+    decided_at: item.decided_at ?? null,
+    decision_channel: mapDecisionChannel(item.decision_channel),
     request_context: {
       client: item.requester_type || "Unknown",
-      requester: item.requester_label?.trim() || "Unspecified",
+      requester:
+        item.requester_label?.trim() ||
+        item.requester_type?.trim() ||
+        "Unspecified",
     },
     service_slug: item.service_slug,
     tool_name: item.tool_name,

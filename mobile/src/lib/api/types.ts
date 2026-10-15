@@ -1,5 +1,6 @@
 export type ChallengeStatus = "PENDING" | "APPROVED" | "DENIED" | "EXPIRED";
 export type ApprovalMode = "per_request" | "grant";
+export type ApprovalDecisionChannel = "web" | "telegram" | "mobile";
 
 export type ChallengeItem = {
   id: string;
@@ -22,6 +23,9 @@ export type ChallengeItem = {
 
 export type ChallengeDetail = ChallengeItem & {
   summary: string;
+  /** Actual decision metadata, absent on older servers and pending requests. */
+  decided_at?: string | null;
+  decision_channel?: ApprovalDecisionChannel | null;
   request_context: {
     client: string;
     requester: string;
