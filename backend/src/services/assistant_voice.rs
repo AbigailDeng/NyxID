@@ -239,6 +239,8 @@ pub(crate) async fn enqueue_in_session(
             .insert_one(AssistantMessage {
                 continuation_of: None,
                 retry_of: None,
+                retry_claimed_by: None,
+                activity_count: None,
                 specialist_id: None,
                 steering: None,
                 author: Some(crate::models::assistant_message::MessageAuthor::Owner),
@@ -351,6 +353,8 @@ pub(crate) async fn publish_result(
                     .insert_one(AssistantMessage {
         continuation_of: None,
         retry_of: None,
+                        retry_claimed_by: None,
+                        activity_count: None,
                         specialist_id: None,
                         steering: None,
                         author: None,
@@ -756,6 +760,8 @@ async fn settle_lost_in_session(
         .insert_one(AssistantMessage {
             continuation_of: None,
             retry_of: None,
+            retry_claimed_by: None,
+            activity_count: None,
             specialist_id: None,
             steering: None,
             author: None,

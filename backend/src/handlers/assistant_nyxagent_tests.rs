@@ -61,6 +61,8 @@ fn failed_message_response_serializes_error_detail_as_rfc3339() {
         activity_total: 0,
         continuation_of: None,
         retry_of: None,
+        retry_claimed_by: None,
+        activity_count: None,
         specialist_id: None,
         steering: None,
         voice: None,
@@ -710,8 +712,11 @@ async fn retried_turn_names_completed_actions_and_reattaches_bound_uploads() {
         .collection::<AssistantMessage>(crate::models::assistant_message::COLLECTION_NAME)
         .update_one(
             doc! {"_id": &failed.id},
-            doc! {"$push": {"activities": {"id": "a1", "label": "mail__send", "digest": "d1",
-            "status": "completed", "started_at": mongodb::bson::DateTime::now()}}},
+            doc! {
+                "$push": {"activities": {"id": "a1", "label": "mail__send", "digest": "d1",
+                    "status": "completed", "started_at": mongodb::bson::DateTime::now()}},
+                "$set": {"activity_count": 1},
+            },
         )
         .await
         .unwrap();

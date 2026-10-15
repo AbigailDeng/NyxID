@@ -102,17 +102,23 @@ export function NyxAgentAssistantEntry({
   message,
   conversationId,
   retry,
+  checkRecovery,
 }: {
   readonly message: import("@/lib/assistant/chat-types").ChatMessage;
   readonly conversationId: string | undefined;
   readonly retry: (messageId: string) => Promise<void>;
+  readonly checkRecovery: (messageId: string) => Promise<unknown>;
 }) {
   return (
     <ChatMessageEntry
       message={message}
       conversationId={conversationId}
       feedbackEnabled
-      onRetry={message.status === "error" ? () => retry(message.id) : undefined}
+      onRetry={message.status === "error" && message.recovery?.status === "available"
+        ? () => retry(message.id) : undefined}
+      onCheckRecovery={message.status === "error" &&
+        (!message.recovery || ["turn_active", "status_unavailable"].includes(message.recovery.reason))
+        ? () => checkRecovery(message.id) : undefined}
     />
   );
 }
@@ -121,16 +127,14 @@ export function NyxAgentAssistantEntry({
 export function ChannelUserEntry({
   message,
   platform,
-  retry,
 }: {
   readonly message: import("@/lib/assistant/chat-types").ChatMessage;
   readonly platform: string;
-  readonly retry: (messageId: string) => Promise<void>;
 }) {
   return (
     <div className="flex flex-col items-end gap-1">
       <ChannelBadge platform={platform} />
-      <ChatMessageBubble message={message} onRetry={message.status === "error" ? () => retry(message.id) : undefined} />
+      <ChatMessageBubble message={message} />
     </div>
   );
 }
@@ -595,6 +599,10 @@ function NyxAgentThreadPage() {
     if (!selectedId) throw new Error("Select the conversation to retry.");
     await chat.retry(selectedId, messageId);
   }, [chat, selectedId]);
+  const checkFailedMessage = useCallback(async (messageId: string) => {
+    if (!selectedId) return;
+    await chat.checkRecovery(selectedId, messageId);
+  }, [chat, selectedId]);
   useLayoutEffect(() => {
     const element = composerRef.current;
     if (!element || typeof ResizeObserver === "undefined") return;
@@ -795,7 +803,7 @@ function NyxAgentThreadPage() {
                 }
                 const via = message.role === "user" ? (message.via ?? channelPlatform) : null;
                 if (via) {
-                  return <ChannelUserEntry message={message} platform={via} retry={retryFailedMessage} />;
+                  return <ChannelUserEntry message={message} platform={via} />;
                 }
                 if (message.role === "assistant") {
                   return (
@@ -803,6 +811,7 @@ function NyxAgentThreadPage() {
                       message={message}
                       conversationId={chat.session.conversationId}
                       retry={retryFailedMessage}
+                      checkRecovery={checkFailedMessage}
                     />
                   );
                 }

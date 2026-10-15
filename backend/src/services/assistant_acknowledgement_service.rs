@@ -1005,6 +1005,8 @@ pub async fn audit_access_request_denied(
             activity_total: 0,
             continuation_of: None,
             retry_of: None,
+            retry_claimed_by: None,
+            activity_count: None,
             specialist_id: Some(chat.agent_id.clone()),
             steering: None,
             error_detail: None,

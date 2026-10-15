@@ -490,6 +490,8 @@ async fn completed_hidden_voice_results_publish_after_call_close() {
         .insert_one(crate::models::assistant_message::AssistantMessage {
             continuation_of: None,
             retry_of: None,
+            retry_claimed_by: None,
+            activity_count: None,
             specialist_id: None,
             steering: None,
             author: None,
@@ -583,6 +585,8 @@ async fn published_result_notes_select_newest_results_after_previous_turn() {
             .insert_one(crate::models::assistant_message::AssistantMessage {
                 continuation_of: None,
                 retry_of: None,
+                retry_claimed_by: None,
+                activity_count: None,
                 specialist_id: None,
                 steering: None,
                 author: None,

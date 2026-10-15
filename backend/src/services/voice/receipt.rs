@@ -113,6 +113,8 @@ pub async fn append(db: &Database, tx: &mut ClientSession, call: &VoiceSession) 
         .insert_one(AssistantMessage {
             continuation_of: None,
             retry_of: None,
+            retry_claimed_by: None,
+            activity_count: None,
             specialist_id: None,
             steering: None,
             author: None,
@@ -272,6 +274,8 @@ mod tests {
             AssistantMessage {
                 continuation_of: None,
                 retry_of: None,
+                retry_claimed_by: None,
+                activity_count: None,
                 specialist_id: None,
                 steering: None,
                 author: None,
