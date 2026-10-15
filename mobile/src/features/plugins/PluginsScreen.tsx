@@ -182,7 +182,9 @@ export function PluginsScreen({
 
   return (
     <WorkspacePage title="Plugins" showHeading={false}>
-      <PluginSearch value={query} onChange={setQuery} />
+      {tab === "connectors" && (
+        <PluginSearch value={query} onChange={setQuery} />
+      )}
       <View
         accessibilityRole="tablist"
         style={[
@@ -222,7 +224,6 @@ export function PluginsScreen({
       </View>
       {tab === "skills" ? (
         <PluginSkills
-          query={query}
           agentId={agentId}
           onOpenChat={(params) => navigation.push("AssistantContext", params)}
         />
@@ -342,12 +343,9 @@ export function PluginsScreen({
 export function AgentSkillsScreen({ agentId }: { agentId: string }) {
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const [query, setQuery] = useState("");
   return (
     <WorkspacePage title="Agent skills" showHeading={false}>
-      <PluginSearch value={query} onChange={setQuery} />
       <PluginSkills
-        query={query}
         agentId={agentId}
         onOpenChat={(params) => navigation.push("AssistantContext", params)}
       />

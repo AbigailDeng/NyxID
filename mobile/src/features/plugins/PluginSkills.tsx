@@ -15,10 +15,10 @@ import NetInfo from "@react-native-community/netinfo";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookOpen,
+  Bot,
   Check,
   ChevronDown,
   ChevronLeft,
-  ChevronRight,
   X,
 } from "lucide-react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
@@ -38,6 +38,7 @@ import { useTheme } from "../../theme/ThemeContext";
 import type { AssistantAgent } from "../agents/agentContracts";
 import { submitSkillDraft } from "./skillDraftSubmission";
 import { skillModalBackAction } from "./skillModalNavigation";
+import { SkillLibrary, type SkillLibraryTab } from "./SkillLibrary";
 import {
   assertSkillRevision,
   buildSkillSelection,
@@ -68,12 +69,10 @@ type OpenChat = (context: {
 
 /** The catalog and every pin belong to the explicitly selected agent. */
 export function PluginSkills({
-  query,
   agentId,
   onOpenChat,
   onDetailChange,
 }: {
-  query: string;
   agentId?: string;
   onOpenChat?: OpenChat;
   onDetailChange?: (open: boolean) => void;
@@ -106,9 +105,6 @@ export function PluginSkills({
   return (
     <View style={styles.stack}>
       <View style={styles.stackSmall}>
-        <Label muted style={styles.caption}>
-          Agent for skills
-        </Label>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Agent for skills: ${agent ? titleOf(agent) : "Choose an agent"}`}
@@ -118,14 +114,29 @@ export function PluginSkills({
           }}
           disabled={!manageable.length}
           onPress={() => setPicking((value) => !value)}
-          style={[
-            styles.picker,
-            { backgroundColor: colors.card, borderColor: colors.border },
-          ]}
+          style={[styles.agentContext, { backgroundColor: colors.cardSoft }]}
         >
-          <Label style={styles.flex}>
-            {agent ? titleOf(agent) : "Choose an agent"}
-          </Label>
+          <View
+            style={[
+              styles.agentIcon,
+              { backgroundColor: colors.primaryTone.bg },
+            ]}
+          >
+            <Bot size={18} color={colors.primaryOnTint} />
+          </View>
+          <View style={styles.flex}>
+            <Label muted style={styles.caption}>
+              Skills for
+            </Label>
+            <Label numberOfLines={2} style={styles.agentName}>
+              {agent ? titleOf(agent) : "Choose an agent"}
+            </Label>
+            {agent?.owner_kind === "org" && (
+              <Label muted style={styles.caption}>
+                {agent.owner_name ?? "Organization"}
+              </Label>
+            )}
+          </View>
           <ChevronDown color={colors.textSecondary} size={18} />
         </Pressable>
         {picking &&
@@ -193,7 +204,6 @@ export function PluginSkills({
         <AgentSkillsManager
           key={agent.id}
           agent={agent}
-          query={query}
           features={features.data ?? []}
           onOpenChat={onOpenChat}
           onDetailChange={onDetailChange}
@@ -205,13 +215,11 @@ export function PluginSkills({
 
 function AgentSkillsManager({
   agent,
-  query,
   features,
   onOpenChat,
   onDetailChange,
 }: {
   agent: AssistantAgent;
-  query: string;
   features: string[];
   onOpenChat?: OpenChat;
   onDetailChange?: (open: boolean) => void;
@@ -219,8 +227,10 @@ function AgentSkillsManager({
   const { colors } = useTheme();
   const client = useQueryClient();
   const focused = useIsFocused();
-  const [searchQuery, setSearchQuery] = useState(query.trim());
-  const [browsing, setBrowsing] = useState(false);
+  const [libraryTab, setLibraryTab] = useState<SkillLibraryTab>("added");
+  const [addedQuery, setAddedQuery] = useState("");
+  const [catalogInput, setCatalogInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
   const [detail, setDetail] = useState<{
     id: string;
@@ -250,15 +260,16 @@ function AgentSkillsManager({
   });
   useEffect(() => {
     const timer = setTimeout(() => {
-      setSearchQuery(query.trim().slice(0, 200));
+      setSearchQuery(catalogInput.trim().slice(0, 200));
       setPage(1);
     }, 300);
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [catalogInput]);
+  const waitingForQuery = catalogInput.trim().slice(0, 200) !== searchQuery;
   const catalog = useQuery({
     queryKey: [...ROOT, "catalog", searchQuery, page],
     queryFn: ({ signal }) => api.search(searchQuery, page, signal),
-    enabled: focused && (Boolean(searchQuery) || browsing),
+    enabled: focused && libraryTab === "discover" && !waitingForQuery,
     retry: false,
   });
   const versions = useQuery({
@@ -403,101 +414,45 @@ function AgentSkillsManager({
     <View style={styles.stack}>
       {!detail && notice && <Notice tone="success" message={notice} />}
       {!detail && error && <Notice tone="error" message={error} />}
-      <SectionHeading right={`${pins.length}/16`}>
-        Attached skills
-      </SectionHeading>
-      {current.isPending && (
-        <ActivityIndicator
-          accessibilityLabel="Loading attached skills"
-          color={colors.primary}
-        />
-      )}
-      {current.isError && (
-        <>
-          <Notice tone="error" message={failure(current.error)} />
-          <ActionButton
-            variant="secondary"
-            label="Reload skills"
-            onPress={() => void current.refetch()}
-          />
-        </>
-      )}
-      {current.data && !pins.length && (
-        <Card>
-          <Label muted>No skills attached to {titleOf(agent)} yet.</Label>
-          <Label muted style={styles.caption}>
-            Search the Ornn catalog to teach this agent a workflow. Skills do
-            not grant service access.
-          </Label>
-        </Card>
-      )}
-      {pins.map((item) => (
-        <SkillRow
-          key={item.skill_id}
-          name={item.name}
-          description={current.data?.metadata[item.skill_id]?.description}
-          meta={`Exact version ${item.version} · ${item.disabled ? "Disabled" : "Enabled"}`}
-          attached
-          onPress={() =>
-            openSkill(
-              item.skill_id,
-              item.name,
-              current.data?.metadata[item.skill_id]?.description,
-            )
-          }
-        />
-      ))}
-      <SectionHeading>Ornn catalog</SectionHeading>
-      {!searchQuery && !browsing && (
-        <ActionButton
-          label="Browse verified versions"
-          variant="secondary"
-          onPress={() => setBrowsing(true)}
-        />
-      )}
-      {(searchQuery || browsing) && catalog.isFetching && (
-        <ActivityIndicator
-          accessibilityLabel="Searching Ornn catalog"
-          color={colors.primary}
-        />
-      )}
-      {catalog.isError && (
-        <>
-          <Notice tone="error" message={failure(catalog.error)} />
-          <ActionButton
-            label="Retry skill catalog"
-            variant="secondary"
-            onPress={() => void catalog.refetch()}
-          />
-        </>
-      )}
-      {catalog.data?.items.length === 0 && (
-        <Label muted>
-          No visible skills found{searchQuery ? ` for “${searchQuery}”` : ""}.
-        </Label>
-      )}
-      {catalog.data?.items.map((item) => (
-        <SkillRow
-          key={item.id}
-          name={item.name}
-          description={item.description}
-          meta={
-            pins.some((attached) => attached.skill_id === item.id)
-              ? "Attached to this agent"
-              : "Ornn catalog"
-          }
-          attached={pins.some((attached) => attached.skill_id === item.id)}
-          onPress={() => openSkill(item.id, item.name, item.description)}
-        />
-      ))}
-      {catalog.data && catalog.data.total_pages > 1 && (
-        <Pagination
-          page={page}
-          total={catalog.data.total_pages}
-          disabled={catalog.isFetching}
-          onChange={setPage}
-        />
-      )}
+      <SkillLibrary
+        agentName={titleOf(agent)}
+        tab={libraryTab}
+        onTabChange={setLibraryTab}
+        query={libraryTab === "added" ? addedQuery : catalogInput}
+        onQueryChange={libraryTab === "added" ? setAddedQuery : setCatalogInput}
+        added={{
+          items: pins.map((item) => ({
+            id: item.skill_id,
+            name: item.name,
+            description:
+              current.data?.metadata[item.skill_id]?.description ?? "",
+            version: item.version,
+            disabled: item.disabled,
+          })),
+          known: Boolean(current.data),
+          loading: current.isPending,
+          error: current.isError ? failure(current.error) : undefined,
+          onRetry: () => {
+            void current.refetch();
+          },
+        }}
+        catalog={{
+          items: waitingForQuery ? [] : (catalog.data?.items ?? []),
+          known: !waitingForQuery && Boolean(catalog.data),
+          loading: waitingForQuery || catalog.isPending || catalog.isFetching,
+          error:
+            !waitingForQuery && catalog.isError
+              ? failure(catalog.error)
+              : undefined,
+          onRetry: () => {
+            void catalog.refetch();
+          },
+        }}
+        page={page}
+        totalPages={catalog.data?.total_pages ?? 1}
+        onPageChange={setPage}
+        onOpenSkill={openSkill}
+      />
       <Modal
         visible={Boolean(detail)}
         animationType="slide"
@@ -1304,57 +1259,6 @@ function SectionHeading({
     </View>
   );
 }
-function SkillRow({
-  name,
-  description,
-  meta,
-  attached,
-  onPress,
-}: {
-  name: string;
-  description?: string;
-  meta: string;
-  attached?: boolean;
-  onPress: () => void;
-}) {
-  const { colors } = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${name}, ${meta}`}
-      onPress={onPress}
-      style={[
-        styles.skillCard,
-        { backgroundColor: colors.card, borderColor: colors.border },
-      ]}
-    >
-      <View style={styles.row}>
-        <View style={[styles.icon, { backgroundColor: colors.primaryTone.bg }]}>
-          <BookOpen color={colors.primaryOnTint} size={21} />
-        </View>
-        <View style={styles.flex}>
-          <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>
-            {name}
-          </Text>
-          <Label muted style={styles.caption}>
-            {meta}
-          </Label>
-        </View>
-        <ChevronRight color={colors.textMuted} size={18} />
-      </View>
-      {description ? (
-        <Label muted style={styles.caption} numberOfLines={3}>
-          {description}
-        </Label>
-      ) : null}
-      {attached && (
-        <Label style={[styles.badge, { color: colors.success }]}>
-          ● Attached
-        </Label>
-      )}
-    </Pressable>
-  );
-}
 function Pagination({
   page,
   total,
@@ -1397,15 +1301,22 @@ const styles = StyleSheet.create({
   caption: { fontSize: 11, lineHeight: 17 },
   section: { fontFamily: fonts.bodySemi, fontSize: 11, letterSpacing: 0.8 },
   row: { flexDirection: "row", alignItems: "center", gap: 12 },
-  picker: {
-    minHeight: 48,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 14,
+  agentContext: {
+    minHeight: 64,
+    borderRadius: 12,
+    padding: 12,
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 10,
   },
+  agentIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  agentName: { fontFamily: fonts.bodySemi, fontSize: 14, lineHeight: 20 },
   pickerOption: {
     minHeight: 48,
     paddingHorizontal: 14,
@@ -1415,7 +1326,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 12,
   },
-  skillCard: { padding: 16, gap: 12, borderWidth: 1, borderRadius: 12 },
   cardTitle: { fontFamily: fonts.bodySemi, fontSize: 15, lineHeight: 22 },
   icon: {
     width: 44,
@@ -1424,7 +1334,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  badge: { fontFamily: fonts.bodySemi, fontSize: 10, lineHeight: 16 },
   modal: { flex: 1 },
   modalHeader: {
     minHeight: 56,
