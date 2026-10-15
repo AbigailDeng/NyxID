@@ -9,6 +9,7 @@ import {
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import {
   Bot,
+  CalendarClock,
   ChevronRight,
   KeyRound,
   MessageSquare,
@@ -24,6 +25,7 @@ import { fonts } from "../../theme/designTokens";
 
 export type WorkspaceRoute =
   | "Assistant"
+  | "Automations"
   | "Activity"
   | "Services"
   | "Plugins"
@@ -33,6 +35,7 @@ const destinations = [
   { route: "Assistant", label: "Chats", Icon: MessageSquare },
   { route: "Agents", label: "Agents", Icon: Bot },
   { route: "Plugins", label: "Plugins", Icon: Plug },
+  { route: "Automations", label: "Automations", Icon: CalendarClock },
   { route: "Activity", label: "Approvals", Icon: ShieldCheck },
 ] as const;
 

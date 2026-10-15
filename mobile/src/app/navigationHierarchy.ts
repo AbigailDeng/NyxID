@@ -8,8 +8,11 @@ export const workspaceRouterOptions = {
 } as const;
 
 /** Drawer selection keeps the destination's existing chat/filter parameters. */
-export function workspaceNavigateAction(name: keyof WorkspaceParamList) {
-  return CommonActions.navigate({ name, merge: true });
+export function workspaceNavigateAction<Name extends keyof WorkspaceParamList>(
+  name: Name,
+  params?: WorkspaceParamList[Name],
+) {
+  return CommonActions.navigate({ name, params, merge: true });
 }
 
 /** Keep notification taps pending until the signed-in navigator is mounted. */
@@ -40,11 +43,16 @@ export function withWorkspaceFallback(
   const screen =
     detail?.name === "AgentDetail"
       ? "Agents"
-      : detail?.name === "AccountSecurity" ||
-          detail?.name === "TermsOfService" ||
-          detail?.name === "PrivacyPolicy"
-        ? "AccountSettings"
-        : "Assistant";
+      : detail?.name === "AutomationDetail" ||
+          detail?.name === "AutomationEditor" ||
+          detail?.name === "AutomationRuns" ||
+          detail?.name === "AutomationPreferences"
+        ? "Automations"
+        : detail?.name === "AccountSecurity" ||
+            detail?.name === "TermsOfService" ||
+            detail?.name === "PrivacyPolicy"
+          ? "AccountSettings"
+          : "Assistant";
   return {
     ...state,
     routes: state.routes.map((route) =>

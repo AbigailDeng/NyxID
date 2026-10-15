@@ -91,6 +91,7 @@ function switchWorkspace(
 test("workspace destinations are siblings, without an added root stack entry", () => {
   for (const [path, name] of [
     ["chat", "Assistant"],
+    ["automations", "Automations"],
     ["agents", "Agents"],
     ["plugins", "Plugins"],
     ["services", "Services"],
@@ -141,8 +142,13 @@ test("a chat link without an ID opens the workspace conversation", () => {
   });
 });
 
-test("plugins and approval links keep encoded query values on their workspace page", () => {
+test("workspace links keep encoded query values on their destination page", () => {
   for (const [path, name, params] of [
+    [
+      "automations?agentId=agent%20one&setup=4b47953b-92cc-482f-8443-e0bcc30ade21",
+      "Automations",
+      { agentId: "agent one", setup: "4b47953b-92cc-482f-8443-e0bcc30ade21" },
+    ],
     [
       "plugins?tab=skills&agentId=agent%20one",
       "Plugins",
@@ -204,10 +210,12 @@ test("repeated workspace switches reuse routes and retain conversation and plugi
     tab: "skills",
     agentId: "agent-2",
   });
+  state = switchWorkspace(state, "Automations", { agentId: "agent-2" });
 
   for (const name of [
     "Services",
     "Agents",
+    "Automations",
     "Activity",
     "AccountSettings",
     "Assistant",
@@ -229,6 +237,10 @@ test("repeated workspace switches reuse routes and retain conversation and plugi
   assert.deepEqual(
     state.routes.find((route) => route.name === "Assistant")?.params,
     conversation,
+  );
+  assert.deepEqual(
+    state.routes.find((route) => route.name === "Automations")?.params,
+    { agentId: "agent-2" },
   );
   assert.deepEqual(
     state.routes.find((route) => route.name === "Plugins")?.params,
@@ -308,6 +320,11 @@ test("cold detail links return to their own workspace destination", () => {
       "Assistant",
     ],
     ["agents/agent%20one", "AgentDetail", "Agents"],
+    ["automations/automation-1", "AutomationDetail", "Automations"],
+    ["automations/edit", "AutomationEditor", "Automations"],
+    ["automations/edit/automation-1", "AutomationEditor", "Automations"],
+    ["automations/automation-1/runs", "AutomationRuns", "Automations"],
+    ["automations/preferences", "AutomationPreferences", "Automations"],
     ["account/security", "AccountSecurity", "AccountSettings"],
     ["terms", "TermsOfService", "AccountSettings"],
     ["privacy", "PrivacyPolicy", "AccountSettings"],
@@ -334,6 +351,64 @@ test("cold detail links return to their own workspace destination", () => {
     assert.equal(focusedRoute(hydrated).name, parent);
     assert.equal(hydrated.routes.length, workspaceRouteNames.length);
   }
+});
+
+test("the Web automation alias resolves to the same native workspace sibling", () => {
+  const state = linkedState("assistant/automations");
+  assert.deepEqual(focusedNames(state), ["Workspace", "Automations"]);
+  assert.equal(
+    getPathFromState(state, navigationLinkingConfig),
+    "/automations",
+  );
+});
+
+test("selecting an agent automation filter merges the sibling without retaining setup", () => {
+  let state = workspaceRouter.getInitialState(workspaceOptions);
+  state = switchWorkspace(state, "Automations", { setup: "previous-watch" });
+  const key = focusedRoute(state).key;
+  const selected = workspaceRouter.getStateForAction(
+    state,
+    workspaceNavigateAction("Automations", {
+      agentId: "researcher",
+      setup: undefined,
+    }),
+    workspaceOptions,
+  );
+  assert.ok(selected);
+  assert.equal(focusedRoute(selected).key, key);
+  assert.deepEqual(focusedRoute(selected).params, {
+    agentId: "researcher",
+    setup: undefined,
+  });
+});
+
+test("an editor opened from chat retains the exact conversation underneath", () => {
+  let root = rootRouter.getRehydratedState(
+    linkedState("chat/conversation-1?acknowledgementId=card-1"),
+    rootOptions,
+  );
+  const caller = focusedRoute(root);
+  const pushed = rootRouter.getStateForAction(
+    root,
+    StackActions.push("AutomationEditor", {
+      setup: "4b47953b-92cc-482f-8443-e0bcc30ade21",
+      agentId: "researcher",
+    }),
+    rootOptions,
+  );
+  assert.ok(pushed);
+  assert.equal(focusedRoute(pushed).name, "AutomationEditor");
+  const closed = rootRouter.getStateForAction(
+    pushed,
+    CommonActions.goBack(),
+    rootOptions,
+  );
+  assert.ok(closed);
+  assert.equal(focusedRoute(closed), caller);
+  assert.deepEqual(focusedRoute(closed).params, {
+    conversationId: "conversation-1",
+    acknowledgementId: "card-1",
+  });
 });
 
 test("a pending approval tap replaces a restored detail when no workspace caller exists", () => {

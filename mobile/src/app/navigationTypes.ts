@@ -22,6 +22,7 @@ export type AssistantParams = {
 
 export type WorkspaceParamList = {
   Assistant: AssistantParams | undefined;
+  Automations: { agentId?: string; setup?: string } | undefined;
   Services: undefined;
   Plugins: { tab?: "connectors" | "skills"; agentId?: string } | undefined;
   Agents: undefined;
@@ -36,6 +37,12 @@ export type RootStackParamList = {
   AgentDetail: { agentId: string };
   ServiceSetup: { connectionId?: string; catalogSlug?: string };
   AgentSkills: { agentId: string };
+  AutomationDetail: { id: string };
+  AutomationEditor:
+    | { id?: string; agentId?: string; setup?: string }
+    | undefined;
+  AutomationRuns: { id: string };
+  AutomationPreferences: undefined;
   ActivityDetail: { challengeId: string };
   AccountSecurity: undefined;
   TermsOfService: undefined;

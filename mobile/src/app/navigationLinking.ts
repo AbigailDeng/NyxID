@@ -21,6 +21,11 @@ export const navigationLinkingConfig: NonNullable<
       initialRouteName: "Assistant",
       screens: {
         Assistant: { path: "chat", parse: assistantParams },
+        Automations: {
+          path: "automations",
+          alias: ["assistant/automations"],
+          parse: { agentId: String, setup: String },
+        },
         Agents: "agents",
         Plugins: {
           path: "plugins",
@@ -36,6 +41,13 @@ export const navigationLinkingConfig: NonNullable<
       parse: assistantParams,
     },
     AgentDetail: { path: "agents/:agentId", parse: { agentId: String } },
+    AutomationDetail: { path: "automations/:id", parse: { id: String } },
+    AutomationEditor: {
+      path: "automations/edit/:id?",
+      parse: { id: String, agentId: String, setup: String },
+    },
+    AutomationRuns: { path: "automations/:id/runs", parse: { id: String } },
+    AutomationPreferences: "automations/preferences",
     AccountSecurity: "account/security",
     DeviceLogin: { path: "login/device", parse: { user_code: String } },
     AgentKeyLogin: { path: "login/agent-key", parse: { user_code: String } },

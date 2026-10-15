@@ -55,11 +55,13 @@ export function AgentsScreen({
   agentId,
   onOpenChat,
   onOpenSkills,
+  onOpenAutomations,
   onClose,
 }: {
   agentId?: string;
   onOpenChat?: OpenChat;
   onOpenSkills?: (agentId: string) => void;
+  onOpenAutomations?: (agentId: string) => void;
   onClose?: () => void;
 } = {}) {
   const { colors } = useTheme();
@@ -303,6 +305,14 @@ export function AgentsScreen({
                   label="Agent skills"
                   variant="secondary"
                   onPress={() => onOpenSkills(agent.id)}
+                  disabled={busy}
+                />
+              )}
+              {alive && agent.owner_kind !== "org" && onOpenAutomations && (
+                <ActionButton
+                  label="Agent automations"
+                  variant="secondary"
+                  onPress={() => onOpenAutomations(agent.id)}
                   disabled={busy}
                 />
               )}

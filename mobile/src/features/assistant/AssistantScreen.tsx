@@ -59,6 +59,8 @@ import { AssistantPendingUploads } from "./AssistantPendingUploads";
 import { useAssistantUploads } from "./useAssistantUploads";
 import { describeToolActivity } from "./assistantActivityText";
 import { NativeAuthoredSkillReview } from "../plugins/NativeAuthoredSkillReview";
+import { parseAutomationLink } from "../automations/automationLinks";
+import { NYXID_FRONTEND_URL } from "../../lib/env";
 import { transcriptEndOffset } from "./assistantTranscriptScroll";
 import {
   assistantMarkdownOptions,
@@ -203,6 +205,45 @@ export function AssistantScreen({
     !uploads.picking &&
     (!!draft.trim() || uploads.files.length > 0) &&
     [...draft].length <= 32768;
+
+  function openSafeLink(url: string): boolean {
+    const href = safeAssistantLinkUrl(url);
+    if (!href) return false;
+    const automation = parseAutomationLink(href, NYXID_FRONTEND_URL);
+    if (automation?.kind === "invalid") {
+      Alert.alert("Could not open automation", automation.message);
+    } else if (automation?.kind === "automation") {
+      if (automation.params.setup) {
+        navigation.push("AutomationEditor", automation.params);
+      } else if (contextual) {
+        navigation.popTo(
+          "Workspace",
+          {
+            screen: "Automations",
+            params: {
+              agentId: undefined,
+              setup: undefined,
+              ...automation.params,
+            },
+          },
+          { merge: true },
+        );
+      } else {
+        navigation.navigate({
+          name: "Automations",
+          params: {
+            agentId: undefined,
+            setup: undefined,
+            ...automation.params,
+          },
+          merge: true,
+        });
+      }
+    } else {
+      void WebBrowser.openBrowserAsync(href).catch(() => undefined);
+    }
+    return false;
+  }
 
   useEffect(() => {
     if (
@@ -1441,11 +1482,6 @@ function Sheet({
   );
 }
 
-function openSafeLink(url: string): boolean {
-  const href = safeAssistantLinkUrl(url);
-  if (href) void WebBrowser.openBrowserAsync(href).catch(() => undefined);
-  return false;
-}
 function formatDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime())

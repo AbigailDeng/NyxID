@@ -16,6 +16,13 @@ import { AssistantScreen } from "../features/assistant/AssistantScreen";
 import { ServicesScreen } from "../features/services/ServicesScreen";
 import { AgentsScreen } from "../features/agents/AgentsScreen";
 import {
+  AutomationsScreen,
+  AutomationDetailScreen,
+  AutomationEditorScreen,
+  AutomationRunsScreen,
+  AutomationPreferencesScreen,
+} from "../features/automations/AutomationsScreen";
+import {
   PluginsScreen,
   AgentSkillsScreen,
 } from "../features/plugins/PluginsScreen";
@@ -53,6 +60,13 @@ function AgentsRoute({ navigation }: WorkspaceScreenProps<"Agents">) {
     <AgentsScreen
       onOpenChat={(params) => navigation.push("AssistantContext", params)}
       onOpenSkills={(agentId) => navigation.push("AgentSkills", { agentId })}
+      onOpenAutomations={(agentId) =>
+        navigation.navigate({
+          name: "Automations",
+          params: { agentId, setup: undefined },
+          merge: true,
+        })
+      }
     />
   );
 }
@@ -67,6 +81,13 @@ function AgentDetailRoute({
       onClose={() => navigation.goBack()}
       onOpenChat={(params) => navigation.push("AssistantContext", params)}
       onOpenSkills={(agentId) => navigation.push("AgentSkills", { agentId })}
+      onOpenAutomations={(agentId) =>
+        navigation.popTo(
+          "Workspace",
+          { screen: "Automations", params: { agentId, setup: undefined } },
+          { merge: true },
+        )
+      }
     />
   );
 }
@@ -139,6 +160,11 @@ function WorkspaceNavigator() {
         name="Assistant"
         component={AssistantScreen}
         options={{ title: "NyxID" }}
+      />
+      <Tabs.Screen
+        name="Automations"
+        component={AutomationsScreen}
+        options={{ title: "Automations" }}
       />
       <Tabs.Screen
         name="Agents"
@@ -254,6 +280,56 @@ export function AppNavigator({
                     onBack: navigation.goBack,
                   }),
                   title: "Agent skills",
+                })}
+              />
+              <Stack.Screen
+                name="AutomationDetail"
+                component={AutomationDetailScreen}
+                options={({ navigation }) => ({
+                  ...workspaceHeaderOptions({
+                    role: "back",
+                    onOpenMenu,
+                    onBack: navigation.goBack,
+                  }),
+                  title: "Automation",
+                })}
+              />
+              <Stack.Screen
+                name="AutomationEditor"
+                component={AutomationEditorScreen}
+                options={({ navigation, route }) => ({
+                  ...workspaceHeaderOptions({
+                    role: "back",
+                    onOpenMenu,
+                    onBack: navigation.goBack,
+                  }),
+                  title: route.params?.id
+                    ? "Edit automation"
+                    : "Create automation",
+                })}
+              />
+              <Stack.Screen
+                name="AutomationRuns"
+                component={AutomationRunsScreen}
+                options={({ navigation }) => ({
+                  ...workspaceHeaderOptions({
+                    role: "back",
+                    onOpenMenu,
+                    onBack: navigation.goBack,
+                  }),
+                  title: "Run history",
+                })}
+              />
+              <Stack.Screen
+                name="AutomationPreferences"
+                component={AutomationPreferencesScreen}
+                options={({ navigation }) => ({
+                  ...workspaceHeaderOptions({
+                    role: "back",
+                    onOpenMenu,
+                    onBack: navigation.goBack,
+                  }),
+                  title: "Automation preferences",
                 })}
               />
               <Stack.Screen
