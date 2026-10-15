@@ -11,7 +11,6 @@ import {
   Keyboard,
   Pressable,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -39,6 +38,11 @@ import { agentsApi } from "../../lib/api/agentsApi";
 import { servicesApi } from "../../lib/api/servicesApi";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import { fonts } from "../../theme/designTokens";
+import { AgentModelField } from "./AgentModelField";
+import {
+  AgentPermissionsField,
+  type AgentPermissions,
+} from "./AgentPermissionsField";
 import { useTheme } from "../../theme/ThemeContext";
 import type { ServiceConnection } from "../services/serviceContracts";
 import {
@@ -234,6 +238,8 @@ export function AgentsScreen({
         )}
         <CreateAgentForm
           connections={connections.data ?? []}
+          connectionsLoading={connections.isPending}
+          connectionsError={connections.isError}
           busy={busy}
           onCreate={(values) =>
             void run(async () => {
@@ -378,10 +384,12 @@ export function AgentsScreen({
                 key={`grants:${agent.id}:${editorVersion}:${grantsVersion}`}
                 agent={agent}
                 connections={connections.data ?? []}
+                connectionsLoading={connections.isPending}
                 connectionsError={connections.isError}
+                saveError={error}
                 busy={busy}
                 onSave={(baseline, services, accountRead, guests) =>
-                  void run(
+                  run(
                     async () => {
                       const latest = (await agentsApi.detail(agent.id)).agent;
                       if (
@@ -814,10 +822,14 @@ function ProfileFields({
 
 function CreateAgentForm({
   connections,
+  connectionsLoading,
+  connectionsError,
   busy,
   onCreate,
 }: {
   connections: ServiceConnection[];
+  connectionsLoading: boolean;
+  connectionsError: boolean;
   busy: boolean;
   onCreate: (values: AgentCreate) => void;
 }) {
@@ -829,7 +841,6 @@ function CreateAgentForm({
     services: [],
     account_read: false,
   });
-  const { colors } = useTheme();
   return (
     <>
       <Card>
@@ -843,32 +854,28 @@ function CreateAgentForm({
           tone, not its authority.
         </Label>
       </Card>
-      <Card>
-        <Label>Starting permissions</Label>
-        <ServicePicker
-          options={grantOptions(connections)}
-          selected={value.services}
-          disabled={busy}
-          onChange={(services) => setValue((old) => ({ ...old, services }))}
-        />
-        <View style={styles.row}>
-          <View style={styles.flex}>
-            <Label>Read account information</Label>
-            <Label muted>
-              Read account metadata through existing account tools.
-            </Label>
-          </View>
-          <Switch
-            accessibilityLabel="Read account information"
-            value={value.account_read}
-            disabled={busy}
-            onValueChange={(account_read) =>
-              setValue((old) => ({ ...old, account_read }))
-            }
-            trackColor={{ true: colors.primary }}
-          />
-        </View>
-      </Card>
+      <AgentPermissionsField
+        title="Starting permissions"
+        options={grantOptions(connections)}
+        value={{
+          services: value.services,
+          account_read: value.account_read,
+          guest_access: {},
+        }}
+        disabled={busy}
+        allowGuestAccess={false}
+        connectionsLoading={connectionsLoading}
+        connectionsError={connectionsError}
+        creating
+        onSave={async (permissions) => {
+          setValue((old) => ({
+            ...old,
+            services: permissions.services,
+            account_read: permissions.account_read,
+          }));
+          return true;
+        }}
+      />
       <ActionButton
         label="Create agent"
         loading={busy}
@@ -907,25 +914,18 @@ function AgentProfileForm({
         nyxbot={agent.kind === "nyxbot"}
         onChange={(patch) => setValue((old) => ({ ...old, ...patch }))}
       />
-      <Label>Model for new threads</Label>
       {modelsError && (
         <Notice
           message="Could not load the model list. Your current model is preserved."
           tone="error"
         />
       )}
-      <Label mono muted>
-        {value.model ?? "Workspace default"}
-      </Label>
-      {models.map((model) => (
-        <Choice
-          key={model.id}
-          label={`${model.label}${model.available ? "" : " · unavailable"}`}
-          selected={value.model === model.id}
-          disabled={disabled || !model.available}
-          onPress={() => setValue((old) => ({ ...old, model: model.id }))}
-        />
-      ))}
+      <AgentModelField
+        value={value.model}
+        models={models}
+        disabled={disabled}
+        onChange={(model) => setValue((old) => ({ ...old, model }))}
+      />
       <Label>Confirmation mode</Label>
       <Label muted>Controls when this agent asks before acting.</Label>
       {([null, "nyxmode", "ask_every_time", "autopilot"] as const).map(
@@ -965,144 +965,55 @@ function AgentProfileForm({
 function AgentGrantsForm({
   agent,
   connections,
+  connectionsLoading,
   connectionsError,
+  saveError,
   busy,
   onSave,
 }: {
   agent: AssistantAgent;
   connections: ServiceConnection[];
+  connectionsLoading: boolean;
   connectionsError: boolean;
+  saveError?: string;
   busy: boolean;
   onSave: (
     baseline: AssistantAgent,
     services: string[],
     accountRead: boolean,
-    guests: Record<string, "read" | "use" | "all">,
-  ) => void;
+    guests: AgentPermissions["guest_access"],
+  ) => Promise<boolean>;
 }) {
   const baseline = useRef(agent).current;
-  const [services, setServices] = useState(agent.services);
-  const [accountRead, setAccountRead] = useState(agent.account_read);
-  const [guests, setGuests] = useState(agent.guest_access);
-  const { colors } = useTheme();
-  const disabled =
-    busy || agent.can_maintain !== true || agent.status === "destroyed";
-  const dirty =
-    grantSignature({
-      services,
-      account_read: accountRead,
-      guest_access: guests,
-    }) !== grantSignature(baseline);
   return (
-    <Card>
-      <Label>Service permissions</Label>
-      <Label muted>
-        Saving replaces this specialist's service access. Existing access
-        remains selected until you remove it.
-      </Label>
-      {connectionsError && (
-        <Notice
-          message="Could not load available connections. Existing grants are preserved; refresh before adding services."
-          tone="error"
-        />
-      )}
-      <ServicePicker
-        options={grantOptions(connections, agent)}
-        selected={services}
-        disabled={disabled}
-        onChange={setServices}
-      />
-      <View style={styles.row}>
-        <View style={styles.flex}>
-          <Label>Read account information</Label>
-        </View>
-        <Switch
-          accessibilityLabel="Read account information"
-          value={accountRead}
-          disabled={disabled}
-          onValueChange={setAccountRead}
-          trackColor={{ true: colors.primary }}
-        />
-      </View>
-      {agent.owner_kind !== "org" &&
-        services.map((service) => (
-          <View key={service} style={styles.guest}>
-            <Label mono muted>
-              {service} · guest access
-            </Label>
-            <View style={styles.options}>
-              {(["read", "use", "all"] as const).map((level) => (
-                <Choice
-                  key={level}
-                  label={
-                    level === "read"
-                      ? "Read"
-                      : level === "use"
-                        ? "Use"
-                        : "All granted"
-                  }
-                  selected={(guests[service] ?? "use") === level}
-                  disabled={disabled}
-                  onPress={() =>
-                    setGuests((old) => ({ ...old, [service]: level }))
-                  }
-                />
-              ))}
-            </View>
-          </View>
-        ))}
-      <ActionButton
-        label="Save permissions"
-        loading={busy}
-        disabled={disabled || !dirty}
-        onPress={() => onSave(baseline, services, accountRead, guests)}
-      />
-    </Card>
-  );
-}
-
-function ServicePicker({
-  options,
-  selected,
-  disabled,
-  onChange,
-}: {
-  options: { value: string; label: string }[];
-  selected: string[];
-  disabled: boolean;
-  onChange: (selected: string[]) => void;
-}) {
-  const known = new Set(options.map((row) => row.value));
-  const rows = [
-    ...options,
-    ...selected
-      .filter((value) => !known.has(value))
-      .map((value) => ({ value, label: `${value} · existing grant` })),
-  ];
-  return (
-    <View style={styles.picker}>
-      {!rows.length && (
-        <Label muted>
-          No connected services yet. You can grant access later.
-        </Label>
-      )}
-      {rows.map((row) => (
-        <Choice
-          key={row.value}
-          label={row.label}
-          selected={selected.includes(row.value)}
-          disabled={disabled}
-          checkbox
-          onPress={() =>
-            onChange(
-              selected.includes(row.value)
-                ? selected.filter((value) => value !== row.value)
-                : [...selected, row.value],
-            )
-          }
-        />
-      ))}
-    </View>
+    <AgentPermissionsField
+      options={grantOptions(connections, agent).map((option) => ({
+        ...option,
+        detail:
+          agent.owner_kind === "org"
+            ? connections.find((connection) => connection.id === option.value)
+                ?.slug
+            : option.value,
+      }))}
+      value={baseline}
+      disabled={
+        busy || agent.can_maintain !== true || agent.status === "destroyed"
+      }
+      readOnly={agent.can_maintain !== true || agent.status === "destroyed"}
+      allowAccountRead={agent.owner_kind !== "org"}
+      allowGuestAccess={agent.owner_kind !== "org"}
+      connectionsLoading={connectionsLoading}
+      connectionsError={connectionsError}
+      saveError={saveError}
+      onSave={(permissions) =>
+        onSave(
+          baseline,
+          permissions.services,
+          permissions.account_read,
+          permissions.guest_access,
+        )
+      }
+    />
   );
 }
 
@@ -1301,8 +1212,5 @@ const styles = StyleSheet.create({
   },
   choiceLabel: { flex: 1, fontFamily: fonts.body, fontSize: 12 },
   check: { width: 16, height: 16, borderWidth: 1 },
-  picker: { gap: 8 },
-  guest: { gap: 8 },
-  options: { gap: 6 },
   memory: { gap: 8, paddingVertical: 10 },
 });
