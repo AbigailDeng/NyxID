@@ -8,10 +8,12 @@ import {
 import {
   ActivityIndicator,
   AppState,
+  Keyboard,
   Pressable,
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
@@ -21,7 +23,9 @@ import {
   ChevronRight,
   RefreshCw,
   Search,
+  SlidersHorizontal,
   Users,
+  X,
 } from "lucide-react-native";
 import { ZodError } from "zod";
 import {
@@ -559,20 +563,77 @@ export function AgentsScreen({
       {atLimit && (
         <Notice message="Your current agent limit is reached. Destroy an unused specialist or update your workspace limit in Settings." />
       )}
-      <View style={styles.row}>
+      <View style={styles.searchToolbar}>
+        <View
+          style={[
+            styles.searchBox,
+            { backgroundColor: colors.cardSoft, borderColor: colors.border },
+          ]}
+        >
+          <Search size={18} color={colors.textMuted} accessible={false} />
+          <TextInput
+            accessibilityLabel="Search agents"
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search agents…"
+            placeholderTextColor={colors.textMuted}
+            selectionColor={colors.primary}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            onSubmitEditing={Keyboard.dismiss}
+            style={[styles.searchInput, { color: colors.textPrimary }]}
+          />
+          {search.length > 0 && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Clear agent search"
+              onPress={() => setSearch("")}
+              style={styles.clearSearch}
+            >
+              <X size={17} color={colors.textMuted} />
+            </Pressable>
+          )}
+        </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Search and filter agents"
-          accessibilityState={{ expanded: showFilters }}
-          onPress={() => setShowFilters((value) => !value)}
-          style={[styles.listTool, styles.flex]}
+          accessibilityLabel="Filter agents"
+          accessibilityHint={
+            includeDestroyed
+              ? "Including destroyed agents. Show or hide filters."
+              : "Show or hide status filters."
+          }
+          accessibilityState={{
+            expanded: showFilters,
+            selected: includeDestroyed,
+          }}
+          onPress={() => {
+            Keyboard.dismiss();
+            setShowFilters((value) => !value);
+          }}
+          style={[
+            styles.listTool,
+            {
+              backgroundColor: includeDestroyed
+                ? colors.primaryTone.bg
+                : colors.cardSoft,
+              borderColor: includeDestroyed
+                ? colors.primaryTone.border
+                : colors.border,
+            },
+          ]}
         >
-          <Search size={17} color={colors.textSecondary} />
-          <Label muted>
-            {search || includeDestroyed
-              ? "Search & filters active"
-              : "Search & filter"}
-          </Label>
+          <SlidersHorizontal
+            size={18}
+            color={
+              includeDestroyed ? colors.primaryOnTint : colors.textSecondary
+            }
+          />
+          {includeDestroyed && (
+            <View
+              style={[styles.filterDot, { backgroundColor: colors.primary }]}
+            />
+          )}
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -580,19 +641,20 @@ export function AgentsScreen({
           accessibilityState={{ disabled: list.isFetching }}
           disabled={list.isFetching}
           onPress={() => void reload()}
-          style={styles.listTool}
+          style={[
+            styles.listTool,
+            {
+              backgroundColor: colors.cardSoft,
+              borderColor: colors.border,
+              opacity: list.isFetching ? 0.5 : 1,
+            },
+          ]}
         >
           <RefreshCw size={17} color={colors.textSecondary} />
         </Pressable>
       </View>
       {showFilters && (
-        <>
-          <Field
-            label="Search agents"
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search by name or purpose"
-          />
+        <Card>
           <View style={styles.row}>
             <View style={styles.flex}>
               <Label muted>Include destroyed agents</Label>
@@ -604,7 +666,7 @@ export function AgentsScreen({
               trackColor={{ true: colors.primary }}
             />
           </View>
-        </>
+        </Card>
       )}
       {list.isPending && (
         <ActivityIndicator
@@ -624,6 +686,7 @@ export function AgentsScreen({
           accessibilityRole="button"
           accessibilityLabel={`Manage ${agent.display_name ?? agent.name}`}
           onPress={() => {
+            Keyboard.dismiss();
             setSelectedId(agent.id);
             setError(undefined);
             setNotice(undefined);
@@ -680,6 +743,7 @@ export function AgentsScreen({
         label="Create an agent"
         disabled={Boolean(atLimit) || list.isPending || list.isError}
         onPress={() => {
+          Keyboard.dismiss();
           setCreating(true);
           setError(undefined);
           setNotice(undefined);
@@ -1166,13 +1230,49 @@ function MemoryNote({
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   row: { flexDirection: "row", alignItems: "center", gap: 12 },
-  listTool: {
+  searchToolbar: { flexDirection: "row", alignItems: "center", gap: 8 },
+  searchBox: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 44,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    paddingLeft: 12,
+    borderWidth: 1,
+    borderRadius: 12,
+  },
+  searchInput: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 44,
+    paddingVertical: 0,
+    paddingRight: 8,
+    fontFamily: fonts.body,
+    fontSize: 14,
+    textAlignVertical: "center",
+  },
+  clearSearch: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  listTool: {
+    alignItems: "center",
     minHeight: 44,
     minWidth: 44,
     justifyContent: "center",
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  filterDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    position: "absolute",
+    top: 6,
+    right: 6,
   },
   title: { fontSize: 18, fontFamily: fonts.displaySemi },
   avatar: {
