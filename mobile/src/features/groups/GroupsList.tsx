@@ -11,6 +11,8 @@ import {
 import { groupsApi } from "../../lib/api/groupsApi";
 import { useTheme } from "../../theme/ThemeContext";
 import { groupError, groupKeys, useGroupAvailability } from "./useGroupRuntime";
+import { livePollInterval } from "../../lib/api/assistantLiveTransport";
+import { useGroupsLive } from "./useGroupsLive";
 
 /** Content only: the Agents & Groups hub owns its heading and tabs. */
 export function GroupsList({
@@ -21,7 +23,8 @@ export function GroupsList({
   onCreate: () => void;
 }) {
   const { colors } = useTheme();
-  const { epoch, active, online } = useGroupAvailability();
+  const { epoch, active, online, available } = useGroupAvailability();
+  const live = useGroupsLive(epoch, active, available);
   const client = useQueryClient();
   const query = useQuery({
     queryKey: [...groupKeys(epoch), "list"],
@@ -29,10 +32,13 @@ export function GroupsList({
     enabled: active,
     retry: false,
     refetchInterval: (state) =>
-      active &&
-      state.state.data?.some((group) => group.working_agent_ids.length)
-        ? 3000
-        : false,
+      livePollInterval(
+        active &&
+          state.state.data?.some((group) => group.working_agent_ids.length)
+          ? 3000
+          : false,
+        live,
+      ),
   });
   useEffect(() => {
     const queryKey = [...groupKeys(epoch), "list"];

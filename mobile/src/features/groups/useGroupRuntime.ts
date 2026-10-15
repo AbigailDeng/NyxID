@@ -8,6 +8,9 @@ import { getAuthEpoch } from "../../lib/auth/authEpoch";
 import { useNetworkStatus } from "../../hooks/useNetworkStatus";
 import { mergeGroupPage, mergeGroupMessages } from "./groupState";
 import { restoreRefusedAssistantSend } from "../assistant/assistantTurnRequest";
+import { livePollInterval } from "../../lib/api/assistantLiveTransport";
+import { groupKeys } from "./groupLiveRefresh";
+import { useGroupsLive } from "./useGroupsLive";
 import {
   groupPostRequestSchema,
   type GroupMessagesPage,
@@ -15,8 +18,7 @@ import {
   type GroupPosted,
 } from "./groupContracts";
 
-export const groupKeys = (epoch: number) =>
-  ["workspace", "groups", epoch] as const;
+export { groupKeys } from "./groupLiveRefresh";
 export const groupError = (cause: unknown) =>
   cause instanceof Error
     ? cause.message
@@ -61,6 +63,7 @@ export function useGroupAvailability() {
 export function useGroupChat(groupId: string) {
   const availability = useGroupAvailability();
   const { epoch, active, available } = availability;
+  const live = useGroupsLive(epoch, active, available);
   const client = useQueryClient();
   const key = [...groupKeys(epoch), "messages", groupId] as const;
   const scope = `${epoch}:${groupId}`;
@@ -88,12 +91,15 @@ export function useGroupChat(groupId: string) {
     enabled: active,
     retry: false,
     refetchInterval: (state) =>
-      active
-        ? state.state.data?.group.working_agent_ids.length ||
-          Date.now() < fastUntil.current
-          ? 1500
-          : 15_000
-        : false,
+      livePollInterval(
+        active
+          ? state.state.data?.group.working_agent_ids.length ||
+            Date.now() < fastUntil.current
+            ? 1500
+            : 15_000
+          : false,
+        live,
+      ),
   });
   useEffect(() => {
     mounted.current = true;
