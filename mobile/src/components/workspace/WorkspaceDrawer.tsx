@@ -9,11 +9,11 @@ import {
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import {
   Bot,
+  ChevronRight,
   KeyRound,
   MessageSquare,
   Plug,
   ScanQrCode,
-  Settings,
   ShieldCheck,
   X,
 } from "lucide-react-native";
@@ -34,7 +34,6 @@ const destinations = [
   { route: "Agents", label: "Agents", Icon: Bot },
   { route: "Plugins", label: "Plugins", Icon: Plug },
   { route: "Activity", label: "Approvals", Icon: ShieldCheck },
-  { route: "AccountSettings", label: "Settings", Icon: Settings },
 ] as const;
 
 export function WorkspaceDrawer({
@@ -161,8 +160,21 @@ export function WorkspaceDrawer({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Open account settings"
+            accessibilityHint="Manage your account, security and app preferences"
+            accessibilityState={{
+              selected: currentRoute === "AccountSettings",
+            }}
             onPress={() => onNavigate("AccountSettings")}
-            style={[styles.account, { borderColor: colors.border }]}
+            style={({ pressed }) => [
+              styles.account,
+              {
+                borderColor: colors.border,
+                backgroundColor:
+                  pressed || currentRoute === "AccountSettings"
+                    ? colors.navActive
+                    : "transparent",
+              },
+            ]}
           >
             <View
               style={[styles.avatar, { backgroundColor: colors.primaryGlow }]}
@@ -185,6 +197,14 @@ export function WorkspaceDrawer({
                 {profile.data?.email || "Account & security"}
               </Text>
             </View>
+            <ChevronRight
+              size={18}
+              color={
+                currentRoute === "AccountSettings"
+                  ? colors.primary
+                  : colors.textSecondary
+              }
+            />
           </Pressable>
         </SafeAreaView>
       </SafeAreaProvider>
@@ -234,6 +254,8 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     marginHorizontal: 16,
     borderTopWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
     paddingVertical: 16,
     flexDirection: "row",
     alignItems: "center",
