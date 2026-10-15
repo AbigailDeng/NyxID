@@ -4,6 +4,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -30,12 +31,16 @@ export function WorkspacePage({
   children,
   scroll = true,
   showHeading = true,
+  refreshing = false,
+  onRefresh,
 }: PropsWithChildren<{
   title: string;
   titleNumberOfLines?: number;
   subtitle?: string;
   scroll?: boolean;
   showHeading?: boolean;
+  refreshing?: boolean;
+  onRefresh?: () => void;
 }>) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -46,6 +51,18 @@ export function WorkspacePage({
           <Text
             accessibilityRole="header"
             accessibilityLabel={title}
+            accessibilityActions={
+              onRefresh ? [{ name: "refresh", label: "Refresh" }] : undefined
+            }
+            onAccessibilityAction={
+              onRefresh
+                ? ({ nativeEvent }) => {
+                    if (nativeEvent.actionName === "refresh" && !refreshing) {
+                      onRefresh();
+                    }
+                  }
+                : undefined
+            }
             numberOfLines={titleNumberOfLines}
             ellipsizeMode="tail"
             style={[styles.title, { color: colors.textPrimary }]}
@@ -67,6 +84,19 @@ export function WorkspacePage({
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
       contentContainerStyle={styles.content}
+      alwaysBounceVertical={onRefresh ? true : undefined}
+      refreshControl={
+        onRefresh ? (
+          <RefreshControl
+            accessibilityLabel="Refresh"
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+            progressBackgroundColor={colors.card}
+          />
+        ) : undefined
+      }
     >
       {content}
     </ScrollView>

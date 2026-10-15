@@ -21,7 +21,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bot,
   ChevronRight,
-  RefreshCw,
   Search,
   SlidersHorizontal,
   Users,
@@ -93,6 +92,7 @@ export function AgentsScreen({
   const [search, setSearch] = useState("");
   const [includeDestroyed, setIncludeDestroyed] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [closeRequested, setCloseRequested] = useState(false);
   const [error, setError] = useState<string>();
@@ -102,6 +102,7 @@ export function AgentsScreen({
   const [profileVersion, setProfileVersion] = useState(0);
   const [grantsVersion, setGrantsVersion] = useState(0);
   const lock = useRef(false);
+  const refreshLock = useRef(false);
   const list = useQuery({
     queryKey: [...ROOT, "list"],
     queryFn: ({ signal }) => agentsApi.list(signal),
@@ -140,6 +141,18 @@ export function AgentsScreen({
   const reload = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ROOT });
   }, [queryClient]);
+  const refreshList = useCallback(async () => {
+    if (refreshLock.current) return;
+    refreshLock.current = true;
+    Keyboard.dismiss();
+    setPullRefreshing(true);
+    try {
+      await list.refetch({ cancelRefetch: false });
+    } finally {
+      refreshLock.current = false;
+      setPullRefreshing(false);
+    }
+  }, [list.refetch]);
 
   useEffect(() => {
     setSelectedId(agentId);
@@ -556,7 +569,12 @@ export function AgentsScreen({
     ).length ?? 0;
   const atLimit = list.data && live >= list.data.limits.max_live_subagents;
   return (
-    <WorkspacePage title="Your agents" subtitle="Personal & shared agents">
+    <WorkspacePage
+      title="Your agents"
+      subtitle="Personal & shared agents"
+      refreshing={pullRefreshing}
+      onRefresh={refreshList}
+    >
       {listHeader}
       {notice && <Notice message={notice} tone="success" />}
       {error && <Notice message={error} tone="error" />}
@@ -634,23 +652,6 @@ export function AgentsScreen({
               style={[styles.filterDot, { backgroundColor: colors.primary }]}
             />
           )}
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Refresh agents"
-          accessibilityState={{ disabled: list.isFetching }}
-          disabled={list.isFetching}
-          onPress={() => void reload()}
-          style={[
-            styles.listTool,
-            {
-              backgroundColor: colors.cardSoft,
-              borderColor: colors.border,
-              opacity: list.isFetching ? 0.5 : 1,
-            },
-          ]}
-        >
-          <RefreshCw size={17} color={colors.textSecondary} />
         </Pressable>
       </View>
       {showFilters && (
