@@ -45,6 +45,8 @@ import { fonts, radius } from "../../theme/designTokens";
 import { AssistantPendingUploads } from "../assistant/AssistantPendingUploads";
 import { AssistantAttachmentView } from "../assistant/AssistantAttachmentView";
 import { AssistantActivityDisclosure } from "../assistant/AssistantActivityDisclosure";
+import { AssistantCopyButton } from "../assistant/AssistantCopyButton";
+import { assistantSelectableMarkdown } from "../assistant/assistantSelectableMarkdown";
 import { useAssistantUploads } from "../assistant/useAssistantUploads";
 import {
   safeAssistantLinkUrl,
@@ -951,6 +953,7 @@ function GroupMessage({
     return false;
   };
   const rules: RenderRules = {
+    ...assistantSelectableMarkdown,
     image: (node) => (
       <Text
         key={node.key}
@@ -1055,6 +1058,7 @@ function GroupMessage({
       ))}
       {message.role === "agent" && !!message.text.trim() && (
         <View style={styles.feedbackActions}>
+          <AssistantCopyButton text={message.text} />
           {(["up", "down"] as const).map((vote) => (
             <Pressable
               key={vote}
@@ -1100,6 +1104,7 @@ function GroupMessage({
           </Icon>
         </View>
       )}
+      {user && <AssistantCopyButton text={message.text} />}
     </View>
   );
 }

@@ -54,6 +54,8 @@ import {
 } from "./assistantComposerPress";
 import { submitAssistantDraft } from "./assistantComposerDraft";
 import { AssistantActivityDisclosure } from "./AssistantActivityDisclosure";
+import { AssistantCopyButton } from "./AssistantCopyButton";
+import { assistantSelectableMarkdown } from "./assistantSelectableMarkdown";
 import { AssistantAttachmentView } from "./AssistantAttachmentView";
 import { AssistantPendingUploads } from "./AssistantPendingUploads";
 import { useAssistantUploads } from "./useAssistantUploads";
@@ -423,6 +425,7 @@ export function AssistantScreen({
     tr: { borderColor: colors.border },
   };
   const markdownRules: RenderRules = {
+    ...assistantSelectableMarkdown,
     link: (node, children) => (
       <Text
         key={node.key}
@@ -545,6 +548,7 @@ export function AssistantScreen({
         <Label muted mono style={styles.timestamp}>
           {formatDate(item.created_at)}
         </Label>
+        <AssistantCopyButton text={item.text} />
       </View>
     );
   }
@@ -989,6 +993,7 @@ export function AssistantScreen({
                 {assistant.live?.notice ? (
                   <Label muted>{assistant.live.notice}</Label>
                 ) : null}
+                <AssistantCopyButton text={liveText} partial />
               </View>
             ) : null}
             {assistant.history?.waiting.map((waiting, index) => (
