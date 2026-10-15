@@ -177,11 +177,6 @@ export function PluginsScreen({
         {!manageItem && (
           <Notice message="These connections are no longer in your list. Refresh Plugins to see the current catalog." />
         )}
-        <ActionButton
-          label="Back to plugins"
-          variant="secondary"
-          onPress={() => setManageId(undefined)}
-        />
       </WorkspacePage>
     );
 

@@ -116,11 +116,17 @@ function setup() {
 
 test("Android modal Back in authored Edit returns to the confirmation first", () => {
   const env = setup();
+  env.header("Close skill confirmation");
+  assert.throws(() => env.header("Back to chat"), /Element not found/);
   env.button("Edit before publishing").props.onPress();
   env.header("Back to skill confirmation");
   env.modal().props.onRequestClose();
   assert.equal(env.modal().props.visible, true);
-  env.header("Back to chat");
+  env.header("Close skill confirmation");
+  assert.throws(
+    () => env.header("Back to skill confirmation"),
+    /Element not found/,
+  );
   env.modal().props.onRequestClose();
   assert.equal(env.modal().props.visible, false);
   env.harness.unmount();
@@ -137,7 +143,11 @@ test("editor submission blocks modal Back synchronously, before the busy render"
   assert.equal(env.header("Back to skill confirmation").props.disabled, true);
   editor.props.onBusy(false);
   env.modal().props.onRequestClose();
-  env.header("Back to chat");
+  env.header("Close skill confirmation");
+  assert.throws(
+    () => env.header("Back to skill confirmation"),
+    /Element not found/,
+  );
   assert.equal(env.modal().props.visible, true);
   env.harness.unmount();
 });
@@ -150,7 +160,7 @@ test("an in-flight publication blocks Back and Close until its response refresh 
   modal.props.onRequestClose();
   close.props.onPress();
   assert.equal(env.modal().props.visible, true);
-  assert.equal(env.header("Back to chat").props.disabled, true);
+  assert.equal(env.header("Close skill confirmation").props.disabled, true);
   env.decision.resolve(undefined);
   await env.harness.settle();
   env.modal().props.onRequestClose();

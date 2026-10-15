@@ -259,12 +259,6 @@ export function ServicesScreen({
     return (
       <WorkspacePage title="Connection removed">
         <Notice message={notice ?? "Connection removed."} tone="success" />
-        <ActionButton
-          label="Back to plugins"
-          variant="secondary"
-          disabled={busy}
-          onPress={closeDetail}
-        />
       </WorkspacePage>
     );
 
@@ -274,9 +268,7 @@ export function ServicesScreen({
         entry={adding}
         busy={busy}
         error={error}
-        cancelLabel={onClose ? "Cancel connection setup" : "Cancel"}
         onRefresh={reload}
-        onCancel={closeDetail}
         onSubmit={(values) =>
           void run(async () => {
             const connection = await servicesApi.create(
@@ -726,11 +718,6 @@ export function ServicesScreen({
           onPress={() => void catalog.refetch()}
           disabled={catalog.isFetching}
         />
-        <ActionButton
-          label="Back to plugins"
-          variant="secondary"
-          onPress={closeDetail}
-        />
       </WorkspacePage>
     );
   }
@@ -975,17 +962,13 @@ function ConnectForm({
   entry,
   busy,
   error,
-  cancelLabel,
   onRefresh,
-  onCancel,
   onSubmit,
 }: {
   entry: CatalogEntry;
   busy: boolean;
   error?: string;
-  cancelLabel: string;
   onRefresh: () => Promise<void>;
-  onCancel: () => void;
   onSubmit: (values: {
     label: string;
     credential: string;
@@ -1175,12 +1158,6 @@ function ConnectForm({
           />
         )}
       </Card>
-      <ActionButton
-        label={cancelLabel}
-        variant="secondary"
-        onPress={onCancel}
-        disabled={busy || linkBusy}
-      />
       {entry.api_key_url && (
         <ActionButton
           label="Get a credential"

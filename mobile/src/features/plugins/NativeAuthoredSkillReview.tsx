@@ -252,17 +252,19 @@ export function NativeAuthoredSkillReview({
         <SafeAreaProvider>
           <SafeAreaView style={[styles.modal, { backgroundColor: colors.bg }]}>
             <View style={[styles.header, { borderColor: colors.border }]}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={
-                  editing ? "Back to skill confirmation" : "Back to chat"
-                }
-                disabled={busy || editorBusy}
-                style={styles.iconButton}
-                onPress={back}
-              >
-                <ChevronLeft color={colors.textPrimary} size={22} />
-              </Pressable>
+              {editing ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to skill confirmation"
+                  disabled={busy || editorBusy}
+                  style={styles.iconButton}
+                  onPress={back}
+                >
+                  <ChevronLeft color={colors.textPrimary} size={22} />
+                </Pressable>
+              ) : (
+                <View style={styles.iconButton} accessible={false} />
+              )}
               <Text
                 accessibilityRole="header"
                 numberOfLines={1}
@@ -494,6 +496,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bodySemi,
     fontSize: 17,
     lineHeight: 24,
+    textAlign: "center",
   },
   content: { padding: 20, paddingBottom: 40, gap: 16 },
   title: { fontFamily: fonts.bodySemi, fontSize: 16, lineHeight: 23 },

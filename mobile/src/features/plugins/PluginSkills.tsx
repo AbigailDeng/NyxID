@@ -507,17 +507,19 @@ function AgentSkillsManager({
         <SafeAreaProvider>
           <SafeAreaView style={[styles.modal, { backgroundColor: colors.bg }]}>
             <View style={[styles.modalHeader, { borderColor: colors.border }]}>
-              <Pressable
-                style={styles.iconButton}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  view === "detail" ? "Back to plugins" : "Back to skill"
-                }
-                disabled={busy}
-                onPress={back}
-              >
-                <ChevronLeft size={22} color={colors.textPrimary} />
-              </Pressable>
+              {view !== "detail" ? (
+                <Pressable
+                  style={styles.iconButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to skill"
+                  disabled={busy}
+                  onPress={back}
+                >
+                  <ChevronLeft size={22} color={colors.textPrimary} />
+                </Pressable>
+              ) : (
+                <View style={styles.iconButton} accessible={false} />
+              )}
               <Text
                 numberOfLines={1}
                 accessibilityRole="header"
@@ -1443,6 +1445,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
     lineHeight: 24,
     flex: 1,
+    textAlign: "center",
   },
   modalContent: { padding: 20, gap: 16, paddingBottom: 40 },
   detailIdentity: { flexDirection: "row", alignItems: "center", gap: 14 },

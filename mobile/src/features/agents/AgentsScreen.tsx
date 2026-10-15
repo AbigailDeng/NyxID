@@ -208,12 +208,6 @@ export function AgentsScreen({
   if (creating)
     return (
       <WorkspacePage title="New agent" subtitle="Create a personal specialist">
-        <ActionButton
-          label={onClose ? "Back" : "Back to agents"}
-          variant="secondary"
-          disabled={busy}
-          onPress={back}
-        />
         {error && <Notice message={error} tone="error" />}
         {connections.isError && (
           <Notice
@@ -249,12 +243,6 @@ export function AgentsScreen({
             : "Personal agent"
         }
       >
-        <ActionButton
-          label={onClose ? "Back" : "Back to agents"}
-          variant="secondary"
-          disabled={busy}
-          onPress={back}
-        />
         {notice && <Notice message={notice} tone="success" />}
         {error && <Notice message={error} tone="error" />}
         {detail.isPending && (
