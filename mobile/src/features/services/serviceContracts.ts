@@ -30,6 +30,7 @@ export const serviceConnectionSchema = z.object({
   catalog_service_slug: z.string().nullish(),
   catalog_service_name: z.string().nullish(),
   connection_status: z.enum(["active", "expired"]).nullish(),
+  expires_at: z.string().nullish(),
   last_authorized_at: z.string().nullish(),
   last_used_at: z.string().nullish(),
   granted_scopes: z.array(z.string()).nullish(),
@@ -51,6 +52,19 @@ export const catalogEntrySchema = z.object({
   service_type: z.string(),
   provider_config_id: z.string().nullish(),
   provider_type: z.string().nullish(),
+  supports_oauth_scopes: z.boolean().optional(),
+  device_code_format: z.string().nullish(),
+  revocation: z.object({ revokes_grant: z.boolean() }).nullish(),
+  scope_catalog: z
+    .array(
+      z.object({
+        scope: z.string(),
+        label: z.string(),
+        description: z.string().nullish(),
+        required: z.boolean().optional(),
+      }),
+    )
+    .nullish(),
   credential_mode: z.string().nullish(),
   has_platform_oauth_credentials: z.boolean().optional(),
   requires_credential: z.boolean(),

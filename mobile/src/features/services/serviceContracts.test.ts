@@ -213,6 +213,57 @@ test("catalog and key list accept omitted optional metadata from skip-serializin
   );
 });
 
+test("connection and catalog schemas retain optional health and permission capabilities", () => {
+  const parsedConnection = serviceConnectionSchema.parse({
+    ...connection,
+    expires_at: "2026-10-16T00:00:00Z",
+    revocation: { revokes_grant: true },
+  });
+  assert.equal(parsedConnection.expires_at, "2026-10-16T00:00:00Z");
+  assert.deepEqual(parsedConnection.revocation, { revokes_grant: true });
+  const parsedEntry = catalogEntrySchema.parse({
+    ...entry,
+    supports_oauth_scopes: false,
+    device_code_format: "openai",
+    revocation: { revokes_grant: true },
+    scope_catalog: [
+      {
+        scope: "repo",
+        label: "Repositories",
+        description: "Access repositories",
+        required: true,
+      },
+      { scope: "read:user", label: "User profile" },
+    ],
+  });
+  assert.equal(parsedEntry.supports_oauth_scopes, false);
+  assert.equal(parsedEntry.device_code_format, "openai");
+  assert.deepEqual(parsedEntry.revocation, { revokes_grant: true });
+  assert.deepEqual(parsedEntry.scope_catalog, [
+    {
+      scope: "repo",
+      label: "Repositories",
+      description: "Access repositories",
+      required: true,
+    },
+    { scope: "read:user", label: "User profile" },
+  ]);
+  assert.equal(serviceConnectionSchema.parse(connection).expires_at, undefined);
+  assert.equal(
+    catalogEntrySchema.parse(entry).supports_oauth_scopes,
+    undefined,
+  );
+  assert.equal(
+    serviceConnectionSchema.parse({ ...connection, expires_at: null })
+      .expires_at,
+    null,
+  );
+  assert.equal(
+    catalogEntrySchema.parse({ ...entry, revocation: null }).revocation,
+    null,
+  );
+});
+
 test("token exchange credentials use only declared fields and validate gateway URLs", () => {
   const exchange = {
     ...entry,

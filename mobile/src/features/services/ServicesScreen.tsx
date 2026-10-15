@@ -14,6 +14,7 @@ import {
 import { useIsFocused, useNavigation } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as WebBrowser from "expo-web-browser";
+import * as Clipboard from "expo-clipboard";
 import {
   ChevronRight,
   ChevronDown,
@@ -46,6 +47,12 @@ import {
   type CatalogEntry,
   type ServiceConnection,
 } from "./serviceContracts";
+import {
+  canManageProviderPermissions,
+  describeConnection,
+  isOAuthConnection,
+  reconnectScopeOverride,
+} from "./connectionPresentation";
 import { PluginConnectionHistory } from "../plugins/PluginConnectionHistory";
 
 const ROOT = ["workspace", "services"] as const;
@@ -87,6 +94,7 @@ export function ServicesScreen({
     "overview" | "advanced" | "history"
   >("overview");
   const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const [credentialEditorOpen, setCredentialEditorOpen] = useState(false);
   const actionLock = useRef(false);
   const launchedCatalog = useRef(false);
   const connections = useQuery({
@@ -123,6 +131,7 @@ export function ServicesScreen({
   useEffect(() => {
     setManagementTab("overview");
     setPermissionsOpen(false);
+    setCredentialEditorOpen(false);
   }, [selectedId]);
   const detailCatalog = useQuery({
     queryKey: [...ROOT, "catalog-entry", detailSlug],
@@ -197,7 +206,11 @@ export function ServicesScreen({
     }
   }
 
-  async function authorize(connection: ServiceConnection, entry: CatalogEntry) {
+  async function authorize(
+    connection: ServiceConnection,
+    entry: CatalogEntry,
+    repairing = false,
+  ) {
     if (!entry.provider_config_id)
       throw new Error("This service has no OAuth provider configured.");
     const org =
@@ -208,6 +221,7 @@ export function ServicesScreen({
       entry.provider_config_id,
       connection.id,
       org,
+      repairing ? reconnectScopeOverride(connection, entry) : undefined,
     );
     await WebBrowser.openBrowserAsync(
       validateBrowserUrl(response.authorization_url),
@@ -295,6 +309,26 @@ export function ServicesScreen({
       (detailCatalog.data ??
         catalogForConnection(connection, catalog.data ?? []));
     const editable = connection && canEditConnection(connection);
+    const health = connection && describeConnection(connection);
+    const oauth = connection && isOAuthConnection(connection, entry);
+    const restricted =
+      connection?.credential_source?.type === "org" &&
+      !connection.credential_source.allowed;
+    const providerName =
+      entry?.name ?? connection?.catalog_service_name ?? "the provider";
+    const scopes = [...new Set(connection?.granted_scopes ?? [])];
+    const showPermissions = Boolean(oauth || scopes.length);
+    const canEditPermissions =
+      connection && canManageProviderPermissions(connection, entry);
+    const canRecover =
+      editable &&
+      health?.recovery &&
+      oauth &&
+      connection.credential_binding !== "platform";
+    const revokesGrant =
+      connection?.revocation?.revokes_grant ??
+      entry?.revocation?.revokes_grant ??
+      false;
     const replaceable =
       editable &&
       Boolean(connection.api_key_id) &&
@@ -306,8 +340,111 @@ export function ServicesScreen({
       (!entry ||
         (supportsCredentialForm(entry) &&
           !entry.token_exchange_credential_fields?.length));
+    const openWeb = (target: "overview" | "advanced") =>
+      run(async () => {
+        const url = new URL(
+          `/keys/${encodeURIComponent(selectedId)}`,
+          validateBrowserUrl(NYXID_FRONTEND_URL),
+        );
+        url.searchParams.set("tab", target);
+        await WebBrowser.openBrowserAsync(url.href);
+        await reload();
+      });
     return (
       <WorkspacePage title="Manage connection" showHeading={false}>
+        {connection && health && (
+          <Card style={styles.serviceCard}>
+            <View style={styles.row}>
+              <View style={[styles.icon, { backgroundColor: colors.ghostBg }]}>
+                <PlugZap size={18} color={colors.primary} />
+              </View>
+              <View style={styles.flex}>
+                <Text style={[styles.title, { color: colors.textPrimary }]}>
+                  {connection.label}
+                </Text>
+                <Label muted style={styles.cardMetadata}>
+                  {connectionOwner(connection)} ·{" "}
+                  {connection.credential_binding === "platform"
+                    ? "Platform key"
+                    : connection.credential_type === "none"
+                      ? "No authentication"
+                      : connection.credential_type === "oauth2"
+                        ? "OAuth"
+                        : connection.credential_type.replaceAll("_", " ")}
+                </Label>
+              </View>
+            </View>
+            {(entry?.description ?? connection.description) ? (
+              <Label muted style={styles.cardDescription}>
+                {entry?.description ?? connection.description}
+              </Label>
+            ) : null}
+            <Text
+              style={[
+                styles.connectionStatus,
+                {
+                  color:
+                    health.tone === "success"
+                      ? colors.success
+                      : health.tone === "error"
+                        ? colors.danger
+                        : health.tone === "warning"
+                          ? colors.warning
+                          : colors.textSecondary,
+                },
+              ]}
+            >
+              ●{" "}
+              {!connection.is_active
+                ? "Paused"
+                : health.tone === "success"
+                  ? "Connected"
+                  : health.label}
+            </Text>
+            <Label muted style={styles.cardDescription}>
+              {!connection.is_active && health.tone !== "success"
+                ? `${health.label}. ${health.description}`
+                : health.description}
+            </Label>
+            {connection.error_message && (
+              <Notice message={connection.error_message} tone="error" />
+            )}
+            {canRecover && (
+              <>
+                <Label muted style={styles.cardDescription}>
+                  Continue in your browser, then return here to check the
+                  result.
+                </Label>
+                <ActionButton
+                  label={
+                    health.recovery === "continue"
+                      ? "Continue authentication"
+                      : "Reconnect"
+                  }
+                  disabled={busy}
+                  onPress={() =>
+                    entry &&
+                    supportsManagedOAuth(entry) &&
+                    !connection.credential_missing
+                      ? void run(() => authorize(connection, entry, true))
+                      : void openWeb("overview")
+                  }
+                />
+              </>
+            )}
+            {editable &&
+              health.recovery &&
+              !oauth &&
+              connection.credential_binding !== "platform" && (
+                <ActionButton
+                  label="Repair connection in Web"
+                  variant="secondary"
+                  disabled={busy}
+                  onPress={() => void openWeb("overview")}
+                />
+              )}
+          </Card>
+        )}
         <View
           style={[
             styles.tabs,
@@ -329,6 +466,9 @@ export function ServicesScreen({
               onPress={() => {
                 setManagementTab(value);
                 setReplacement("");
+                setCredentialEditorOpen(false);
+                setConfirmRemove(false);
+                setTokenOnlyRemoval(false);
               }}
               style={[
                 styles.tab,
@@ -369,224 +509,302 @@ export function ServicesScreen({
             <ActionButton label="Retry" onPress={() => void detail.refetch()} />
           </>
         )}
-        {managementTab === "history" ? (
-          <PluginConnectionHistory serviceId={selectedId} />
-        ) : null}
-        {connection && managementTab === "advanced" ? (
-          <Card>
-            <Label style={styles.sectionTitle}>Advanced settings</Label>
-            <Label muted>
-              Configure routing, connection permissions and service options in
-              Web.
-            </Label>
-            {connection.proxy_url ? (
-              <Label selectable mono muted style={styles.cardMetadata}>
-                {connection.proxy_url}
-              </Label>
-            ) : null}
-            <ActionButton
-              label="Open advanced settings in Web"
-              variant="secondary"
-              disabled={busy}
-              onPress={() =>
-                void run(async () => {
-                  const url = new URL(
-                    `/keys/${encodeURIComponent(connection.id)}`,
-                    validateBrowserUrl(NYXID_FRONTEND_URL),
-                  );
-                  url.searchParams.set("tab", "advanced");
-                  await WebBrowser.openBrowserAsync(url.href);
-                  await reload();
-                })
-              }
+        {connection && detailCatalog.isError && managementTab !== "history" && (
+          <>
+            <Notice
+              message="Service setup details could not be loaded. Reload them to check available authorization and credential actions."
+              tone="error"
             />
-          </Card>
-        ) : null}
+            <ActionButton
+              label="Reload service details"
+              variant="secondary"
+              onPress={() => void detailCatalog.refetch()}
+            />
+          </>
+        )}
+        {managementTab === "history" && (
+          <PluginConnectionHistory serviceId={selectedId} />
+        )}
         {connection && managementTab === "overview" && (
           <>
-            {detailCatalog.isError && (
-              <>
-                <Notice
-                  message="Service setup details could not be loaded. Reload them to check available authorization and credential actions."
-                  tone="error"
-                />
-                <ActionButton
-                  label="Reload service details"
-                  variant="secondary"
-                  onPress={() => void detailCatalog.refetch()}
-                />
-              </>
-            )}
-            <Card style={styles.serviceCard}>
-              <Text
-                style={[
-                  styles.connectionStatus,
-                  {
-                    color: !connection.is_active
-                      ? colors.textMuted
-                      : connection.status === "active" &&
-                          !connection.credential_missing &&
-                          connection.connection_status !== "expired"
-                        ? colors.success
-                        : colors.warning,
-                  },
-                ]}
-              >
-                ● {connection.is_active ? "Enabled" : "Disabled"}
-              </Text>
-              <View style={styles.row}>
-                <View
-                  style={[styles.icon, { backgroundColor: colors.ghostBg }]}
-                >
-                  <PlugZap size={18} color={colors.primary} />
-                </View>
-                <View style={styles.flex}>
-                  <Text style={[styles.title, { color: colors.textPrimary }]}>
-                    {connection.label}
-                  </Text>
-                  <Label muted style={styles.cardMetadata}>
-                    {connectionOwner(connection)} ·{" "}
-                    {connection.credential_binding === "platform"
-                      ? "Platform key"
-                      : connection.credential_type === "none"
-                        ? "No auth"
-                        : connection.credential_type === "oauth2"
-                          ? "OAuth"
-                          : connection.credential_type.replaceAll("_", " ")}
-                  </Label>
-                </View>
-              </View>
-              <Label muted style={styles.cardDescription}>
-                Service is {connection.is_active ? "enabled" : "disabled"}.
-                Credential status:{" "}
-                {connection.credential_missing
-                  ? "missing"
-                  : (
-                      connection.connection_status ?? connection.status
-                    ).replaceAll("_", " ")}
-                .
-              </Label>
-              {connection.last_used_at ? (
-                <Label muted style={styles.cardMetadata}>
-                  Last used {new Date(connection.last_used_at).toLocaleString()}
+            <Card>
+              <Label style={styles.sectionTitle}>Use in Chat</Label>
+              {restricted ? (
+                <Label muted style={styles.cardDescription}>
+                  You can view this organization connection, but you cannot use
+                  it yet. Ask an organization admin to grant you access.
                 </Label>
-              ) : null}
-              {connection.error_message && (
-                <Notice message={connection.error_message} tone="error" />
+              ) : !connection.is_active ? (
+                <Label muted style={styles.cardDescription}>
+                  {editable
+                    ? "This connection is paused. Turn on Connection enabled below before using it in Chat."
+                    : "This connection is paused. Ask its administrator to enable it before using it in Chat."}
+                </Label>
+              ) : health?.tone === "error" || health?.tone === "warning" ? (
+                <Label muted style={styles.cardDescription}>
+                  Resolve the connection issue above before using it in Chat.
+                  The agent must also have permission to use this connection.
+                </Label>
+              ) : (
+                <Label muted style={styles.cardDescription}>
+                  Ask your agent to use {providerName}. For a specialist, first
+                  select this connection in Agents & Groups → choose the agent →
+                  Service permissions, then save.
+                </Label>
               )}
             </Card>
-            <Card style={styles.permissionsCard}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Saved permissions"
-                accessibilityState={{ expanded: permissionsOpen }}
-                onPress={() => setPermissionsOpen((value) => !value)}
-                style={styles.permissionsToggle}
-              >
-                <Label style={[styles.sectionTitle, styles.flex]}>
-                  Saved permissions
-                </Label>
-                {permissionsOpen ? (
-                  <ChevronDown size={18} color={colors.textMuted} />
-                ) : (
-                  <ChevronRight size={18} color={colors.textMuted} />
-                )}
-              </Pressable>
-              {permissionsOpen ? (
-                <View style={styles.permissionsContent}>
-                  {connection.granted_scopes?.length ? (
-                    connection.granted_scopes.map((scope, index) => (
-                      <Label
-                        selectable
-                        muted
-                        mono
-                        style={styles.cardMetadata}
-                        key={`${scope}:${index}`}
-                      >
-                        {scope}
-                      </Label>
-                    ))
-                  ) : (
-                    <Label muted style={styles.cardDescription}>
-                      No saved permission scopes were returned for this
-                      connection.
-                    </Label>
-                  )}
+            <Card>
+              <View style={styles.statusRow}>
+                <View style={styles.flex}>
+                  <Label style={styles.sectionTitle}>Connection enabled</Label>
                   <Label muted style={styles.cardDescription}>
-                    Saved scopes describe this connection. Agent access is
-                    managed separately.
+                    {connection.is_active
+                      ? "On — NyxID may use this connection within the agent’s permissions."
+                      : "Off — requests through this connection are paused."}
                   </Label>
-                  {editable && entry?.provider_type === "oauth2" && (
-                    <ActionButton
-                      label="Manage permissions in Web"
-                      variant="secondary"
-                      disabled={busy}
-                      onPress={() =>
-                        void run(async () => {
-                          const url = new URL(
-                            `/keys/${encodeURIComponent(connection.id)}`,
-                            validateBrowserUrl(NYXID_FRONTEND_URL),
-                          );
-                          url.searchParams.set("tab", "overview");
-                          await WebBrowser.openBrowserAsync(url.href);
-                          await reload();
-                        })
-                      }
-                    />
-                  )}
                 </View>
-              ) : null}
-            </Card>
-            {!editable && (
-              <Notice
-                message={
-                  connection.auto_connected
+                <Switch
+                  accessibilityLabel="Connection enabled"
+                  value={connection.is_active}
+                  disabled={
+                    !editable ||
+                    busy ||
+                    (Boolean(connection.credential_missing) &&
+                      !connection.is_active)
+                  }
+                  trackColor={{ true: colors.primary }}
+                  onValueChange={(active) =>
+                    void run(async () => {
+                      await servicesApi.setActive(connection.id, active);
+                      await reload();
+                      setNotice(
+                        active
+                          ? "Connection enabled."
+                          : "Connection paused. Your credential is kept.",
+                      );
+                    })
+                  }
+                />
+              </View>
+              <Label muted style={styles.cardDescription}>
+                Turning this off keeps your saved credential. Turn it on again
+                to resume use.
+              </Label>
+              {!editable && (
+                <Label muted style={styles.cardDescription}>
+                  {connection.auto_connected
                     ? "This connection is managed by the platform."
-                    : "Your current role can view this connection. An organization admin manages it."
-                }
-              />
-            )}
-            {editable && (
-              <Card>
-                <View style={styles.statusRow}>
+                    : "An organization admin manages this connection. Your role has read-only access."}
+                </Label>
+              )}
+            </Card>
+            {showPermissions && (
+              <Card style={styles.permissionsCard}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Provider permissions"
+                  accessibilityHint="Review the access granted by the provider, separate from agent service permissions."
+                  accessibilityState={{ expanded: permissionsOpen }}
+                  onPress={() => setPermissionsOpen((value) => !value)}
+                  style={styles.permissionsToggle}
+                >
                   <View style={styles.flex}>
-                    <Label>Allow this connection</Label>
-                    <Label muted>
-                      Disabling keeps the credential and stops service use.
+                    <Label style={styles.sectionTitle}>
+                      Provider permissions
+                    </Label>
+                    <Label muted style={styles.cardMetadata}>
+                      {scopes.length
+                        ? `${scopes.length} granted permission${scopes.length === 1 ? "" : "s"}`
+                        : "No permission list available"}
                     </Label>
                   </View>
-                  <Switch
-                    accessibilityLabel="Allow this connection"
-                    value={connection.is_active}
-                    disabled={
-                      busy ||
-                      (Boolean(connection.credential_missing) &&
-                        !connection.is_active)
-                    }
-                    trackColor={{ true: colors.primary }}
-                    onValueChange={(active) =>
+                  {permissionsOpen ? (
+                    <ChevronDown size={18} color={colors.textMuted} />
+                  ) : (
+                    <ChevronRight size={18} color={colors.textMuted} />
+                  )}
+                </Pressable>
+                <View style={styles.permissionsContent}>
+                  <Label muted style={styles.cardDescription}>
+                    What {providerName} allows NyxID to access. This does not
+                    decide which agents may use the connection.
+                  </Label>
+                  {permissionsOpen && (
+                    <>
+                      {scopes.length ? (
+                        scopes.map((scope) => {
+                          const info = entry?.scope_catalog?.find(
+                            (item) => item.scope === scope,
+                          );
+                          return (
+                            <View key={scope} style={styles.scopeItem}>
+                              {info?.label && <Label>{info.label}</Label>}
+                              {info?.description && (
+                                <Label muted style={styles.cardDescription}>
+                                  {info.description}
+                                </Label>
+                              )}
+                              <Label
+                                selectable
+                                mono
+                                muted
+                                style={styles.cardMetadata}
+                              >
+                                {scope}
+                              </Label>
+                            </View>
+                          );
+                        })
+                      ) : (
+                        <Label muted style={styles.cardDescription}>
+                          NyxID has no saved permission list for this
+                          connection. This alone does not mean authorization
+                          failed.
+                        </Label>
+                      )}
+                      {canEditPermissions && (
+                        <>
+                          <Label muted style={styles.cardDescription}>
+                            Review or change these permissions in NyxID Web.
+                            Return here when finished.
+                          </Label>
+                          <ActionButton
+                            label="Manage permissions in Web"
+                            variant="secondary"
+                            disabled={busy}
+                            onPress={() => void openWeb("overview")}
+                          />
+                        </>
+                      )}
+                    </>
+                  )}
+                </View>
+              </Card>
+            )}
+            <Card>
+              <Label style={styles.sectionTitle}>Connection details</Label>
+              <ConnectionDetail
+                label="Last used"
+                value={connectionTime(connection.last_used_at, "Never")}
+              />
+              {oauth && (
+                <ConnectionDetail
+                  label="Last authorized"
+                  value={connectionTime(
+                    connection.last_authorized_at,
+                    "Not recorded",
+                  )}
+                />
+              )}
+              {connection.expires_at && (
+                <ConnectionDetail
+                  label="Credential expires"
+                  value={connectionTime(connection.expires_at, "Not recorded")}
+                />
+              )}
+              <ActionButton
+                label="Refresh status"
+                variant="secondary"
+                disabled={busy || detail.isFetching}
+                onPress={() => void run(reload)}
+              />
+            </Card>
+            {(entry?.documentation_url ?? connection.docs_url) && (
+              <ActionButton
+                label="Read provider documentation"
+                variant="secondary"
+                onPress={() =>
+                  void run(async () => {
+                    await Linking.openURL(
+                      validateBrowserUrl(
+                        entry?.documentation_url ?? connection.docs_url!,
+                      ),
+                    );
+                  })
+                }
+                disabled={busy}
+              />
+            )}
+          </>
+        )}
+        {connection && managementTab === "advanced" && (
+          <>
+            <Card>
+              <Label style={styles.sectionTitle}>Developer access</Label>
+              <Label muted style={styles.cardDescription}>
+                Use the NyxID proxy address when connecting an external app or
+                client. Requests also need a NyxID Agent Key with access to this
+                service.
+              </Label>
+              {connection.proxy_url ? (
+                <>
+                  <Label selectable mono muted style={styles.cardMetadata}>
+                    {connection.proxy_url}
+                  </Label>
+                  <ActionButton
+                    label="Copy proxy address"
+                    variant="secondary"
+                    disabled={busy}
+                    onPress={() =>
                       void run(async () => {
-                        await servicesApi.setActive(connection.id, active);
-                        await reload();
+                        await Clipboard.setStringAsync(connection.proxy_url!);
+                        setNotice("Proxy address copied.");
                       })
                     }
                   />
-                </View>
-                {entry && supportsManagedOAuth(entry) && (
-                  <ActionButton
-                    label={
-                      connection.status === "active"
-                        ? "Authorize again"
-                        : "Complete authorization"
-                    }
-                    disabled={busy}
-                    onPress={() => void run(() => authorize(connection, entry))}
-                  />
-                )}
-                {replaceable && (
+                </>
+              ) : (
+                <Label muted style={styles.cardDescription}>
+                  No proxy address was returned for this connection.
+                </Label>
+              )}
+            </Card>
+            <Card>
+              <Label style={styles.sectionTitle}>More settings in Web</Label>
+              <Label muted style={styles.cardDescription}>
+                Configure routing, endpoints, request headers and other service
+                settings in NyxID Web. These settings are not edited in the
+                mobile app yet.
+              </Label>
+              <ActionButton
+                label="Open advanced settings in Web"
+                variant="secondary"
+                disabled={busy}
+                onPress={() => void openWeb("advanced")}
+              />
+            </Card>
+            {replaceable && (
+              <Card>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Replace API key or credential"
+                  accessibilityState={{ expanded: credentialEditorOpen }}
+                  disabled={busy}
+                  onPress={() => {
+                    setCredentialEditorOpen((value) => !value);
+                    setReplacement("");
+                  }}
+                  style={styles.statusRow}
+                >
+                  <View style={styles.flex}>
+                    <Label style={styles.sectionTitle}>
+                      Replace credential
+                    </Label>
+                    <Label muted style={styles.cardDescription}>
+                      Update the saved API key if it was rotated or stopped
+                      working.
+                    </Label>
+                  </View>
+                  {credentialEditorOpen ? (
+                    <ChevronDown size={18} color={colors.textMuted} />
+                  ) : (
+                    <ChevronRight size={18} color={colors.textMuted} />
+                  )}
+                </Pressable>
+                {credentialEditorOpen && (
                   <>
                     <Field
-                      label="Replace credential"
+                      label="New credential"
                       value={focused && foreground ? replacement : ""}
                       onChangeText={setReplacement}
                       secureTextEntry
@@ -605,6 +823,7 @@ export function ServicesScreen({
                             replacement.trim(),
                           );
                           setReplacement("");
+                          setCredentialEditorOpen(false);
                           await reload();
                           setNotice("Credential replaced.");
                         })
@@ -614,36 +833,24 @@ export function ServicesScreen({
                 )}
               </Card>
             )}
-            {(entry?.documentation_url ?? connection.docs_url) && (
-              <ActionButton
-                label="Open documentation"
-                variant="secondary"
-                onPress={() =>
-                  void run(async () => {
-                    await Linking.openURL(
-                      validateBrowserUrl(
-                        entry?.documentation_url ?? connection.docs_url!,
-                      ),
-                    );
-                  })
-                }
-                disabled={busy}
-              />
-            )}
             {editable && (
               <Card>
-                <Label>Remove connection</Label>
-                <Label muted>
-                  {connection.revocation?.revokes_grant
-                    ? "Removing may also revoke NyxID's provider authorization. Shared grants need a separate confirmation."
-                    : "Remove this service and its connection from NyxID."}
+                <Label style={styles.sectionTitle}>Remove connection</Label>
+                <Label muted style={styles.cardDescription}>
+                  Agents using this connection will lose access. To pause use
+                  temporarily, turn off Connection enabled in Overview instead.
+                </Label>
+                <Label muted style={styles.cardDescription}>
+                  {revokesGrant
+                    ? "Removal may also revoke the provider authorization. If it is shared, you can keep it and remove only this connection."
+                    : "This removes the saved connection from NyxID. Where supported, NyxID also revokes its saved token at the provider."}
                 </Label>
                 {confirmRemove ? (
                   <>
                     <Notice
                       message={
                         tokenOnlyRemoval
-                          ? "Only this connection will be removed. Provider authorization remains active."
+                          ? "Only this connection will be removed. Provider authorization and other connections will be kept."
                           : `Remove “${connection.label}”? Agents using it will lose access.`
                       }
                     />
@@ -678,16 +885,6 @@ export function ServicesScreen({
                 )}
               </Card>
             )}
-            <ActionButton
-              label="Check connection status"
-              variant="secondary"
-              disabled={busy || detail.isFetching}
-              onPress={() => void run(reload)}
-            />
-            <Label muted style={styles.cardMetadata}>
-              Service access and credential status are separate. Disabling keeps
-              the credential.
-            </Label>
           </>
         )}
       </WorkspacePage>
@@ -1177,6 +1374,25 @@ function ConnectForm({
   );
 }
 
+function connectionTime(value: string | null | undefined, fallback: string) {
+  if (!value) return fallback;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? fallback : date.toLocaleString();
+}
+
+function ConnectionDetail({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.detailRow}>
+      <Label muted style={styles.cardMetadata}>
+        {label}
+      </Label>
+      <Label selectable style={[styles.cardMetadata, styles.detailValue]}>
+        {value}
+      </Label>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   row: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
@@ -1238,8 +1454,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 12,
     paddingHorizontal: 14,
+    paddingVertical: 12,
   },
-  permissionsContent: { gap: 8, paddingHorizontal: 14, paddingBottom: 14 },
+  permissionsContent: { gap: 12, paddingHorizontal: 14, paddingBottom: 14 },
+  scopeItem: { gap: 4 },
+  detailRow: { flexDirection: "row", justifyContent: "space-between", gap: 14 },
+  detailValue: { flex: 1, textAlign: "right" },
   search: { gap: 8 },
   searchLabel: { fontFamily: fonts.bodySemi, fontSize: 12, lineHeight: 16 },
   searchInput: {

@@ -116,6 +116,7 @@ export function hookHarness<T>(mocks: Record<string, unknown>) {
                 ? mocks[name]
                 : require(name),
           AbortController,
+          URL,
           queueMicrotask,
           // Polling is not advanced by these lifecycle/terminal-refresh tests.
           setInterval: () => 1,
