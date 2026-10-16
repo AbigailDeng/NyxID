@@ -380,12 +380,6 @@ export function AuthHomeScreen({ navigation }: Props) {
       !password
     )
       return;
-    if (!loginConfig?.emailAuthEnabled) {
-      setLoginError(
-        "Email and password sign-in is not available on this server.",
-      );
-      return;
-    }
     emailLoginLock.current = true;
     setIsEmailAuthPending(true);
     setLoginError(null);
@@ -426,6 +420,7 @@ export function AuthHomeScreen({ navigation }: Props) {
           { paddingHorizontal: spacing.xxl },
         ]}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         {/* Hero branding */}
         <View style={styles.heroWrap}>
@@ -438,13 +433,121 @@ export function AuthHomeScreen({ navigation }: Props) {
 
         {/* Email login */}
         <View style={flowStyles.card}>
+          {/* Existing-account password login is available even when the
+              server hides email registration and its Web sign-in form. */}
+          <Text style={styles.emailHeading}>Sign in with email</Text>
+          <TextInput
+            style={styles.input}
+            accessibilityLabel="Email"
+            editable={!isAnyPending}
+            placeholder="Email"
+            placeholderTextColor={colors.textMuted}
+            value={email}
+            onChangeText={(v) => {
+              setEmail(v);
+              setMfaRequired(false);
+              setMfaCode("");
+              setLoginError(null);
+            }}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoComplete="email"
+          />
+          <TextInput
+            style={styles.input}
+            accessibilityLabel="Password"
+            editable={!isAnyPending}
+            placeholder="Password"
+            placeholderTextColor={colors.textMuted}
+            value={password}
+            onChangeText={(v) => {
+              setPassword(v);
+              setLoginError(null);
+            }}
+            secureTextEntry
+            autoComplete="current-password"
+          />
+          {mfaRequired ? (
+            <>
+              <Text
+                style={{
+                  ...typeScale.caption,
+                  color: colors.textSecondary,
+                }}
+              >
+                Enter the six-digit code from your authenticator.
+              </Text>
+              <TextInput
+                style={styles.input}
+                accessibilityLabel="Authenticator code"
+                placeholder="000000"
+                placeholderTextColor={colors.textMuted}
+                value={mfaCode}
+                onChangeText={(value) =>
+                  setMfaCode(value.replace(/\D/g, "").slice(0, 6))
+                }
+                keyboardType="number-pad"
+                autoComplete="one-time-code"
+                maxLength={6}
+                editable={!isAnyPending}
+                autoFocus
+              />
+            </>
+          ) : null}
+          {/* DESIGN.md §Buttons: primary CTA uses `nyx-gradient-vivid`. */}
+          <Pressable
+            onPress={() => void handleEmailLogin()}
+            accessibilityRole="button"
+            disabled={
+              isAnyPending ||
+              !email.trim() ||
+              !password ||
+              (mfaRequired && !/^\d{6}$/.test(mfaCode))
+            }
+            style={[
+              styles.signInButtonWrap,
+              (isEmailAuthPending || !email.trim() || !password) &&
+                styles.buttonDisabled,
+            ]}
+          >
+            <ExpoLinearGradient
+              colors={[colors.gradientStart, colors.gradientEnd]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.signInButton}
+            >
+              <View style={styles.socialAuthContent}>
+                {isEmailAuthPending ? (
+                  <ActivityIndicator size="small" color={colors.onPrimary} />
+                ) : null}
+                <Text style={styles.signInButtonText}>
+                  {isEmailAuthPending
+                    ? "Signing in..."
+                    : mfaRequired
+                      ? "Verify & sign in"
+                      : "Sign In"}
+                </Text>
+              </View>
+            </ExpoLinearGradient>
+          </Pressable>
+
+          {/* Divider */}
+          {loginConfig && loginConfig.socialProviders.length > 0 ? (
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
+          ) : null}
+
+          {/* Social login */}
           {publicConfig.isPending ? (
             <View style={styles.socialAuthContent}>
               <ActivityIndicator size="small" color={colors.primary} />
               <Text
                 style={{ ...typeScale.caption, color: colors.textSecondary }}
               >
-                Loading sign-in methods...
+                Loading social sign-in options...
               </Text>
             </View>
           ) : publicConfig.isError ? (
@@ -452,8 +555,8 @@ export function AuthHomeScreen({ navigation }: Props) {
               <Text
                 style={{ ...typeScale.caption, color: colors.textSecondary }}
               >
-                Could not load sign-in methods. Check your connection and try
-                again.
+                Could not load social sign-in options. You can still sign in
+                with email, or try again.
               </Text>
               <Pressable
                 accessibilityRole="button"
@@ -464,124 +567,11 @@ export function AuthHomeScreen({ navigation }: Props) {
                 <Text style={styles.socialAuthText}>
                   {publicConfig.isFetching
                     ? "Retrying..."
-                    : "Retry sign-in methods"}
+                    : "Retry social sign-in"}
                 </Text>
               </Pressable>
             </View>
           ) : null}
-          {loginConfig?.emailAuthEnabled ? (
-            <>
-              <TextInput
-                style={styles.input}
-                accessibilityLabel="Email"
-                editable={!isAnyPending}
-                placeholder="Email"
-                placeholderTextColor={colors.textMuted}
-                value={email}
-                onChangeText={(v) => {
-                  setEmail(v);
-                  setMfaRequired(false);
-                  setMfaCode("");
-                  setLoginError(null);
-                }}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoComplete="email"
-              />
-              <TextInput
-                style={styles.input}
-                accessibilityLabel="Password"
-                editable={!isAnyPending}
-                placeholder="Password"
-                placeholderTextColor={colors.textMuted}
-                value={password}
-                onChangeText={(v) => {
-                  setPassword(v);
-                  setLoginError(null);
-                }}
-                secureTextEntry
-                autoComplete="current-password"
-              />
-              {mfaRequired ? (
-                <>
-                  <Text
-                    style={{
-                      ...typeScale.caption,
-                      color: colors.textSecondary,
-                    }}
-                  >
-                    Enter the six-digit code from your authenticator.
-                  </Text>
-                  <TextInput
-                    style={styles.input}
-                    accessibilityLabel="Authenticator code"
-                    placeholder="000000"
-                    placeholderTextColor={colors.textMuted}
-                    value={mfaCode}
-                    onChangeText={(value) =>
-                      setMfaCode(value.replace(/\D/g, "").slice(0, 6))
-                    }
-                    keyboardType="number-pad"
-                    autoComplete="one-time-code"
-                    maxLength={6}
-                    editable={!isAnyPending}
-                    autoFocus
-                  />
-                </>
-              ) : null}
-              {/* DESIGN.md §Buttons: primary CTA uses `nyx-gradient-vivid`. */}
-              <Pressable
-                onPress={() => void handleEmailLogin()}
-                accessibilityRole="button"
-                disabled={
-                  isAnyPending ||
-                  !email.trim() ||
-                  !password ||
-                  (mfaRequired && !/^\d{6}$/.test(mfaCode))
-                }
-                style={[
-                  styles.signInButtonWrap,
-                  (isEmailAuthPending || !email.trim() || !password) &&
-                    styles.buttonDisabled,
-                ]}
-              >
-                <ExpoLinearGradient
-                  colors={[colors.gradientStart, colors.gradientEnd]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.signInButton}
-                >
-                  <View style={styles.socialAuthContent}>
-                    {isEmailAuthPending ? (
-                      <ActivityIndicator
-                        size="small"
-                        color={colors.onPrimary}
-                      />
-                    ) : null}
-                    <Text style={styles.signInButtonText}>
-                      {isEmailAuthPending
-                        ? "Signing in..."
-                        : mfaRequired
-                          ? "Verify & sign in"
-                          : "Sign In"}
-                    </Text>
-                  </View>
-                </ExpoLinearGradient>
-              </Pressable>
-            </>
-          ) : null}
-
-          {/* Divider */}
-          {loginConfig?.emailAuthEnabled &&
-          loginConfig.socialProviders.length > 0 ? (
-            <View style={styles.dividerRow}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or</Text>
-              <View style={styles.dividerLine} />
-            </View>
-          ) : null}
-
-          {/* Social login */}
           {loginConfig?.socialProviders.includes("google") ? (
             <SocialAuthButton
               label="Continue with Google"
@@ -612,13 +602,6 @@ export function AuthHomeScreen({ navigation }: Props) {
               loading={isSocialAuthPending && pendingSocialProvider === "apple"}
               onPress={() => void startSocialLogin("apple")}
             />
-          ) : null}
-          {loginConfig && loginConfig.socialProviders.length === 0 ? (
-            <Text style={{ ...typeScale.caption, color: colors.textSecondary }}>
-              {loginConfig.emailAuthEnabled
-                ? "Social sign-in is not enabled on this server. Use your email and password."
-                : "No sign-in methods are enabled on this server. Contact your administrator."}
-            </Text>
           ) : null}
 
           {/* Legal */}
@@ -702,6 +685,10 @@ const createStyles = (c: ThemeColors) =>
       ...typeScale.caption,
       color: c.textMuted,
       textAlign: "center",
+    },
+    emailHeading: {
+      ...typeScale.bodyStrong,
+      color: c.textPrimary,
     },
     // DESIGN.md §Inputs: rounded-lg (8px) with 50%-opacity chrome.
     input: {
