@@ -54,8 +54,23 @@ function renderPermissionForm(root: Element): Element {
   return { ...root, props: { ...root.props, children: renderChild(children) } };
 }
 
-function setup(creating = false, listing = false) {
+function setup(
+  creating = false,
+  listing = false,
+  options: {
+    initialCreate?: boolean;
+    online?: boolean;
+    maxLiveSubagents?: number;
+    onCreated?: (id: string) => void;
+    onClose?: () => void;
+  } = {},
+) {
   const calls: ApiCall[] = [];
+  const alerts: Array<{
+    title: string;
+    buttons: Array<{ text: string; onPress?: () => void }>;
+  }> = [];
+  let guard: Record<string, any> = {};
   let latest = plain(agent);
   const client = {
     invalidateQueries: async () => {
@@ -79,9 +94,19 @@ function setup(creating = false, listing = false) {
         addEventListener: () => ({ remove: () => {} }),
       },
       Keyboard: { dismiss: () => {} },
+      Alert: {
+        alert: (
+          title: string,
+          _message: string,
+          buttons: Array<{ text: string; onPress?: () => void }>,
+        ) => alerts.push({ title, buttons }),
+      },
       StyleSheet: { create: (styles: unknown) => styles },
     },
     "@react-navigation/native": { useIsFocused: () => true },
+    "../../hooks/useNetworkStatus": {
+      useNetworkStatus: () => ({ isConnected: options.online !== false }),
+    },
     "@tanstack/react-query": {
       useQueryClient: () => client,
       useQuery: ({ queryKey }: { queryKey: string[] }) => ({
@@ -92,7 +117,12 @@ function setup(creating = false, listing = false) {
           queryKey[2] === "detail"
             ? { agent, memory: [], threads: [] }
             : queryKey[2] === "list"
-              ? { agents: [agent], limits: { max_live_subagents: 10 } }
+              ? {
+                  agents: [agent],
+                  limits: {
+                    max_live_subagents: options.maxLiveSubagents ?? 10,
+                  },
+                }
               : queryKey[2] === "connections"
                 ? [
                     {
@@ -137,7 +167,11 @@ function setup(creating = false, listing = false) {
       },
     },
     "../../lib/api/servicesApi": { servicesApi: {} },
-    "../../app/WorkspaceHeader": { useWorkspaceBack: () => {} },
+    "../../app/WorkspaceHeader": {
+      useWorkspaceBack: (value: Record<string, any>) => {
+        guard = value;
+      },
+    },
     "../../theme/designTokens": { fonts: {} },
     "../../theme/ThemeContext": {
       useTheme: () => ({ colors: { primaryTone: {} } }),
@@ -153,10 +187,23 @@ function setup(creating = false, listing = false) {
   });
   const { AgentsScreen } = harness.load(
     fileURLToPath(new URL("./AgentsScreen.tsx", import.meta.url)),
-  ) as { AgentsScreen: (props: { agentId?: string }) => Element };
+  ) as {
+    AgentsScreen: (props: {
+      agentId?: string;
+      initialCreate?: boolean;
+      onCreated?: (id: string) => void;
+      onClose?: () => void;
+    }) => Element;
+  };
   harness.mount(() =>
     renderPermissionForm(
-      AgentsScreen({ agentId: creating || listing ? undefined : agent.id }),
+      AgentsScreen({
+        agentId:
+          creating || listing || options.initialCreate ? undefined : agent.id,
+        initialCreate: options.initialCreate,
+        onCreated: options.onCreated,
+        onClose: options.onClose,
+      }),
     ),
   );
   const all = () => elements(harness.value());
@@ -174,6 +221,8 @@ function setup(creating = false, listing = false) {
   return {
     harness,
     calls,
+    alerts,
+    guard: () => guard,
     one,
     action,
     field: () => one((row) => row.type === "AgentPermissionsField"),
@@ -265,6 +314,108 @@ test("creation permission confirmation updates only the local draft until Create
       account_read: true,
     },
   ]);
+});
+
+test("the direct create route opens the real form and reports its created agent only after saving", async () => {
+  const created: string[] = [];
+  const state = setup(false, false, {
+    initialCreate: true,
+    onCreated: (id) => created.push(id),
+  });
+  state
+    .one(
+      (row) =>
+        typeof row.type === "function" && row.type.name === "ProfileFields",
+    )
+    .props.onChange({ name: "researcher", description: "Review documents" });
+  state.harness.flush();
+  assert.equal(state.action("Create agent").props.disabled, false);
+  state.action("Create agent").props.onPress();
+  assert.deepEqual(created, []);
+  await state.harness.settle();
+  assert.equal(
+    state.calls.filter((call) => call.method === "create").length,
+    1,
+  );
+  assert.ok(state.calls.some((call) => call.method === "invalidate"));
+  assert.deepEqual(created, [agent.id]);
+});
+
+test("a new agent draft confirms Back and protects outer drawer dismissal", async () => {
+  let closed = 0;
+  const state = setup(false, false, {
+    initialCreate: true,
+    onClose: () => closed++,
+  });
+  state
+    .one(
+      (row) =>
+        typeof row.type === "function" && row.type.name === "ProfileFields",
+    )
+    .props.onChange({ name: "unfinished" });
+  state.harness.flush();
+  assert.equal(state.guard().active, true);
+  assert.equal(state.guard().discardOnClose.title, "Discard new agent?");
+  state.guard().onBack();
+  assert.equal(closed, 0);
+  assert.equal(state.alerts[0].title, "Discard new agent?");
+  state.alerts[0].buttons
+    .find((button) => button.text === "Discard")
+    ?.onPress?.();
+  await state.harness.settle();
+  assert.equal(closed, 1);
+  assert.deepEqual(state.calls, []);
+});
+
+test("a direct new agent draft stays editable offline but cannot submit", async () => {
+  const state = setup(false, false, { initialCreate: true, online: false });
+  state
+    .one(
+      (row) =>
+        typeof row.type === "function" && row.type.name === "ProfileFields",
+    )
+    .props.onChange({ name: "researcher", description: "Review documents" });
+  state.harness.flush();
+  assert.equal(state.action("Create agent").props.disabled, true);
+  state.action("Create agent").props.onPress();
+  await state.harness.settle();
+  assert.deepEqual(state.calls, []);
+  assert.equal(state.guard().discardOnClose.title, "Discard new agent?");
+});
+
+test("a direct new agent draft stays editable at the personal limit without calling create", async () => {
+  const state = setup(false, false, {
+    initialCreate: true,
+    maxLiveSubagents: 1,
+  });
+  const profile = () =>
+    state.one(
+      (row) =>
+        typeof row.type === "function" && row.type.name === "ProfileFields",
+    );
+  profile().props.onChange({
+    name: "researcher",
+    description: "Review documents",
+  });
+  await state.field().props.onSave({
+    services: ["documents"],
+    account_read: true,
+    guest_access: {},
+  });
+  state.harness.flush();
+  assert.equal(profile().props.disabled, false);
+  assert.equal(state.action("Create agent").props.disabled, true);
+  state.action("Create agent").props.onPress();
+  await state.harness.settle();
+  assert.deepEqual(state.calls, []);
+  assert.equal(profile().props.value.name, "researcher");
+  assert.equal(profile().props.value.description, "Review documents");
+  assert.deepEqual(plain(state.field().props.value), {
+    services: ["documents"],
+    account_read: true,
+    guest_access: {},
+  });
+  assert.equal(state.guard().discardOnClose.title, "Discard new agent?");
 });
 
 test("agent filters open in a sheet and apply only after confirmation", () => {

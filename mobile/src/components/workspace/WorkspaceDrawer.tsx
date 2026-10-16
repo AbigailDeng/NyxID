@@ -46,6 +46,8 @@ export function WorkspaceDrawer({
   onLoginCode,
   currentChat,
   onOpenChat,
+  onCreateAgent,
+  onCreateGroup,
 }: {
   visible: boolean;
   currentRoute?: string;
@@ -56,6 +58,8 @@ export function WorkspaceDrawer({
   onLoginCode: () => void;
   currentChat?: WorkspaceChatTarget;
   onOpenChat: (target: WorkspaceChatTarget) => void;
+  onCreateAgent: () => void;
+  onCreateGroup: () => void;
 }) {
   const { colors } = useTheme();
   const profile = useQuery({
@@ -147,6 +151,8 @@ export function WorkspaceDrawer({
             visible={visible}
             current={currentChat}
             onSelect={onOpenChat}
+            onCreateAgent={onCreateAgent}
+            onCreateGroup={onCreateGroup}
           />
         </ScrollView>
         <Pressable

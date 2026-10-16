@@ -50,6 +50,7 @@ const sheetRouter = StackRouter({ initialRouteName: "Pages" });
 const sheetOptions = {
   routeNames: [
     "Pages",
+    "AgentCreate",
     "AgentDetail",
     "GroupEditor",
     "AutomationDetail",
@@ -309,6 +310,21 @@ test("opening any management destination retains the exact contextual chat and b
     const closed = apply(opened, dismissWorkspaceSheetAction(opened));
     assert.deepEqual(closed.routes, root.routes);
     assert.equal(closed.index, root.index);
+  }
+});
+
+test("agent and group creation drawers retain the exact calling chat", () => {
+  for (const name of ["AgentCreate", "GroupEditor"] as const) {
+    const root = pushContext(fixture());
+    const opened = apply(root, openWorkspaceSheetAction(name));
+    assert.equal(opened.routes[0], root.routes[0]);
+    assert.equal(opened.routes[1], root.routes[1]);
+    assert.equal(selected(opened).name, "WorkspaceSheet");
+    assert.equal((selected(opened).params as { screen: string }).screen, name);
+    assert.deepEqual(
+      apply(opened, dismissWorkspaceSheetAction(opened)).routes,
+      root.routes,
+    );
   }
 });
 

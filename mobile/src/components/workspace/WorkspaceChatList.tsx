@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronRight,
   MessageSquare,
+  Plus,
   Users,
 } from "lucide-react-native";
 import type { WorkspaceChatTarget } from "../../app/workspaceChatNavigation";
@@ -40,6 +41,8 @@ type Props = {
   visible: boolean;
   current?: WorkspaceChatTarget;
   onSelect: (target: WorkspaceChatTarget) => void;
+  onCreateAgent: () => void;
+  onCreateGroup: () => void;
 };
 type BrowseRow =
   | { id: string; agent: AssistantAgent }
@@ -49,7 +52,13 @@ type Browser =
   | { kind: "agents" | "groups" }
   | { kind: "chats"; fromAgents: boolean };
 
-export function WorkspaceChatList({ visible, current, onSelect }: Props) {
+export function WorkspaceChatList({
+  visible,
+  current,
+  onSelect,
+  onCreateAgent,
+  onCreateGroup,
+}: Props) {
   const { colors } = useTheme();
   const epoch = getAuthEpoch();
   const { isConnected } = useNetworkStatus();
@@ -276,6 +285,9 @@ export function WorkspaceChatList({ visible, current, onSelect }: Props) {
         label="Agent chats"
         count={allAgents.length}
         expanded={sections.agents}
+        createLabel="New agent"
+        onCreate={onCreateAgent}
+        createDisabled={!active}
         onPress={() =>
           setSections((value) => ({ ...value, agents: !value.agents }))
         }
@@ -373,6 +385,9 @@ export function WorkspaceChatList({ visible, current, onSelect }: Props) {
         label="Group chats"
         count={allGroups.length}
         expanded={sections.groups}
+        createLabel="New group"
+        onCreate={onCreateGroup}
+        createDisabled={!active}
         onPress={() =>
           setSections((value) => ({ ...value, groups: !value.groups }))
         }
@@ -538,30 +553,48 @@ function SectionHeading({
   count,
   expanded,
   onPress,
+  createLabel,
+  onCreate,
+  createDisabled,
 }: {
   label: string;
   count: number;
   expanded: boolean;
   onPress: () => void;
+  createLabel: string;
+  onCreate: () => void;
+  createDisabled: boolean;
 }) {
   const { colors } = useTheme();
   const Chevron = expanded ? ChevronDown : ChevronRight;
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${expanded ? "Collapse" : "Expand"} ${label.toLowerCase()}`}
-      accessibilityState={{ expanded }}
-      onPress={onPress}
-      style={styles.sectionRow}
-    >
-      <Text style={[styles.section, { color: colors.textMuted }]}>
-        {label.toUpperCase()}
-      </Text>
-      <Text style={[styles.sectionCount, { color: colors.textMuted }]}>
-        {count}
-      </Text>
-      <Chevron size={16} color={colors.textMuted} />
-    </Pressable>
+    <View style={styles.sectionHeading}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${expanded ? "Collapse" : "Expand"} ${label.toLowerCase()}`}
+        accessibilityState={{ expanded }}
+        onPress={onPress}
+        style={styles.sectionRow}
+      >
+        <Text style={[styles.section, { color: colors.textMuted }]}>
+          {label.toUpperCase()}
+        </Text>
+        <Text style={[styles.sectionCount, { color: colors.textMuted }]}>
+          {count}
+        </Text>
+        <Chevron size={16} color={colors.textMuted} />
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={createLabel}
+        accessibilityState={{ disabled: createDisabled }}
+        disabled={createDisabled}
+        onPress={onCreate}
+        style={[styles.createButton, { opacity: createDisabled ? 0.4 : 1 }]}
+      >
+        <Plus size={18} color={colors.textSecondary} />
+      </Pressable>
+    </View>
   );
 }
 function MoreButton({
@@ -794,8 +827,17 @@ function DrawerMessage({
 }
 
 const styles = StyleSheet.create({
+  sectionHeading: { flexDirection: "row", alignItems: "center" },
+  createButton: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+  },
   sections: { gap: 4, marginTop: 12 },
   sectionRow: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     minHeight: 44,

@@ -7,6 +7,7 @@ import {
 } from "react";
 import {
   ActivityIndicator,
+  Alert,
   AppState,
   Keyboard,
   Pressable,
@@ -45,6 +46,7 @@ import {
   type AgentPermissions,
 } from "./AgentPermissionsField";
 import { useTheme } from "../../theme/ThemeContext";
+import { useNetworkStatus } from "../../hooks/useNetworkStatus";
 import type { ServiceConnection } from "../services/serviceContracts";
 import {
   agentProfile,
@@ -78,6 +80,9 @@ export function AgentsScreen({
   onOpenAutomations,
   onClose,
   listHeader,
+  initialCreate = false,
+  onCreate,
+  onCreated,
 }: {
   agentId?: string;
   onOpenChat?: OpenChat;
@@ -85,15 +90,21 @@ export function AgentsScreen({
   onOpenAutomations?: (agentId: string) => void;
   onClose?: () => void;
   listHeader?: ReactNode;
+  initialCreate?: boolean;
+  onCreate?: () => void;
+  onCreated?: (agentId: string) => void;
 } = {}) {
   const { colors } = useTheme();
   const queryClient = useQueryClient();
   const focused = useIsFocused();
+  const { isConnected } = useNetworkStatus();
   const [foreground, setForeground] = useState(
     AppState.currentState === "active",
   );
   const [selectedId, setSelectedId] = useState<string | undefined>(agentId);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(initialCreate);
+  const [creationDirty, setCreationDirty] = useState(false);
+  const [createdId, setCreatedId] = useState<string>();
   const [search, setSearch] = useState("");
   const [includeDestroyed, setIncludeDestroyed] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -136,6 +147,14 @@ export function AgentsScreen({
     enabled: focused && foreground && (creating || Boolean(selectedId)),
     retry: false,
   });
+  const creationAtLimit =
+    !!list.data &&
+    list.data.agents.filter(
+      (agent) =>
+        agent.owner_kind !== "org" &&
+        agent.kind === "specialist" &&
+        agent.status !== "destroyed",
+    ).length >= list.data.limits.max_live_subagents;
   const models = useQuery({
     queryKey: [...ROOT, "models"],
     queryFn: ({ signal }) => agentsApi.models(signal),
@@ -170,30 +189,55 @@ export function AgentsScreen({
     });
     return () => subscription.remove();
   }, [focused, reload]);
-  function back() {
+  function leave() {
     if (onClose) {
+      setCreationDirty(false);
       setCloseRequested(true);
       return;
     }
     setSelectedId(undefined);
     setCreating(false);
+    setCreationDirty(false);
     setError(undefined);
     setConfirmation(undefined);
   }
+  function back() {
+    if (creating && creationDirty) {
+      Alert.alert("Discard new agent?", "Your agent has not been created.", [
+        { text: "Keep editing", style: "cancel" },
+        { text: "Discard", style: "destructive", onPress: leave },
+      ]);
+    } else leave();
+  }
   useWorkspaceBack({
-    active: onClose ? busy : Boolean(selectedId) || creating,
+    active: onClose
+      ? busy || (creating && creationDirty && !closeRequested)
+      : Boolean(selectedId) || creating,
     defaultRole: onClose ? "back" : "menu",
     disabled: busy,
     label: onClose ? "Back" : "Back to agents",
     onBack: () => {
       if (!lock.current) back();
     },
+    discardOnClose:
+      creating && creationDirty && !closeRequested
+        ? {
+            title: "Discard new agent?",
+            message: "Your agent has not been created.",
+          }
+        : undefined,
   });
   useEffect(() => {
     if (busy || !closeRequested) return;
     setCloseRequested(false);
     onClose?.();
   }, [busy, closeRequested, onClose]);
+  useEffect(() => {
+    if (createdId && !busy && !creating && onCreated) {
+      setCreatedId(undefined);
+      onCreated(createdId);
+    }
+  }, [createdId, busy, creating, onCreated]);
 
   async function run(
     action: () => Promise<void>,
@@ -231,6 +275,18 @@ export function AgentsScreen({
     return (
       <WorkspacePage title="New agent" subtitle="Create a personal specialist">
         {error && <Notice message={error} tone="error" />}
+        {!isConnected && (
+          <Notice message="You're offline. Reconnect to create your agent. Your draft is kept." />
+        )}
+        {creationAtLimit && (
+          <Notice message="You've reached your personal agent limit. Destroy an unused specialist before creating another." />
+        )}
+        {list.isError && (
+          <Notice
+            tone="error"
+            message="Agent limits could not be checked. Go back and refresh your agents before creating another."
+          />
+        )}
         {connections.isError && (
           <Notice
             message="Connections could not be loaded. You can create the agent without service access and grant it later."
@@ -242,14 +298,34 @@ export function AgentsScreen({
           connectionsLoading={connections.isPending}
           connectionsError={connections.isError}
           busy={busy}
-          onCreate={(values) =>
+          available={
+            isConnected &&
+            focused &&
+            foreground &&
+            !list.isPending &&
+            !list.isError &&
+            !creationAtLimit
+          }
+          onDirtyChange={setCreationDirty}
+          onCreate={(values) => {
+            if (
+              !isConnected ||
+              !focused ||
+              !foreground ||
+              list.isPending ||
+              list.isError ||
+              creationAtLimit
+            )
+              return;
             void run(async () => {
               const created = await agentsApi.create(values);
+              setCreationDirty(false);
               setCreating(false);
               setSelectedId(created.id);
+              setCreatedId(created.id);
               setEditorVersion((value) => value + 1);
-            }, "Agent created.")
-          }
+            }, "Agent created.");
+          }}
         />
       </WorkspacePage>
     );
@@ -756,10 +832,18 @@ export function AgentsScreen({
       )}
       <ActionButton
         label="Create an agent"
-        disabled={Boolean(atLimit) || list.isPending || list.isError}
+        disabled={
+          !isConnected ||
+          !foreground ||
+          !focused ||
+          Boolean(atLimit) ||
+          list.isPending ||
+          list.isError
+        }
         onPress={() => {
           Keyboard.dismiss();
-          setCreating(true);
+          if (onCreate) onCreate();
+          else setCreating(true);
           setError(undefined);
           setNotice(undefined);
         }}
@@ -832,12 +916,16 @@ function CreateAgentForm({
   connectionsError,
   busy,
   onCreate,
+  available,
+  onDirtyChange,
 }: {
   connections: ServiceConnection[];
   connectionsLoading: boolean;
   connectionsError: boolean;
   busy: boolean;
   onCreate: (values: AgentCreate) => void;
+  available: boolean;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const [value, setValue] = useState<AgentCreate>({
     name: "",
@@ -847,6 +935,18 @@ function CreateAgentForm({
     services: [],
     account_read: false,
   });
+  useEffect(() => {
+    onDirtyChange(
+      Boolean(
+        value.name ||
+        value.display_name ||
+        value.description ||
+        value.persona ||
+        value.services.length ||
+        value.account_read,
+      ),
+    );
+  }, [value, onDirtyChange]);
   return (
     <>
       <Card>
@@ -885,7 +985,7 @@ function CreateAgentForm({
       <ActionButton
         label="Create agent"
         loading={busy}
-        disabled={!value.name.trim() || !value.description.trim()}
+        disabled={!available || !value.name.trim() || !value.description.trim()}
         onPress={() => onCreate(value)}
       />
     </>

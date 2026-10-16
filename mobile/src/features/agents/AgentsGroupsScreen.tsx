@@ -1,4 +1,6 @@
 import { Pressable, StyleSheet, View } from "react-native";
+import { Plus } from "lucide-react-native";
+import { useNetworkStatus } from "../../hooks/useNetworkStatus";
 import { Label, WorkspacePage } from "../../components/workspace/WorkspaceUI";
 import { useTheme } from "../../theme/ThemeContext";
 import { fonts } from "../../theme/designTokens";
@@ -12,14 +14,40 @@ export function AgentsGroupsScreen({
   onTabChange,
   onOpenGroup,
   onCreateGroup,
+  onCreateAgent,
   ...agentsProps
 }: AgentsProps & {
   tab: "agents" | "groups";
   onTabChange: (tab: "agents" | "groups") => void;
   onOpenGroup: (id: string) => void;
   onCreateGroup: () => void;
+  onCreateAgent: () => void;
 }) {
-  const tabs = <AgentsGroupsTabs value={tab} onChange={onTabChange} />;
+  const { colors } = useTheme();
+  const { isConnected } = useNetworkStatus();
+  const tabs = (
+    <View style={styles.tabRow}>
+      <View style={styles.fill}>
+        <AgentsGroupsTabs value={tab} onChange={onTabChange} />
+      </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={tab === "agents" ? "New agent" : "New group"}
+        accessibilityState={{ disabled: !isConnected }}
+        disabled={!isConnected}
+        onPress={tab === "agents" ? onCreateAgent : onCreateGroup}
+        style={[
+          styles.createButton,
+          {
+            backgroundColor: colors.primaryTone.bg,
+            opacity: isConnected ? 1 : 0.4,
+          },
+        ]}
+      >
+        <Plus size={21} color={colors.primaryOnTint} />
+      </Pressable>
+    </View>
+  );
   if (tab === "groups") {
     return (
       <WorkspacePage
@@ -31,7 +59,9 @@ export function AgentsGroupsScreen({
       </WorkspacePage>
     );
   }
-  return <AgentsScreen {...agentsProps} listHeader={tabs} />;
+  return (
+    <AgentsScreen {...agentsProps} onCreate={onCreateAgent} listHeader={tabs} />
+  );
 }
 
 function AgentsGroupsTabs({
@@ -80,6 +110,15 @@ function AgentsGroupsTabs({
 }
 
 const styles = StyleSheet.create({
+  fill: { flex: 1 },
+  tabRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  createButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   tabs: {
     flexDirection: "row",
     padding: 4,

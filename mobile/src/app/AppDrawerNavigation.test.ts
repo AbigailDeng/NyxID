@@ -280,6 +280,14 @@ test("management, chat, scanner and login selections wait for actual menu dismis
         }),
     },
     {
+      choose: (drawer: Element) => drawer.props.onCreateAgent(),
+      expected: () => openWorkspaceSheetAction("AgentCreate"),
+    },
+    {
+      choose: (drawer: Element) => drawer.props.onCreateGroup(),
+      expected: () => openWorkspaceSheetAction("GroupEditor"),
+    },
+    {
       choose: (drawer: Element) => drawer.props.onScan(),
       expected: () =>
         openWorkspaceSheetAction("DeviceLogin", { start_scanner: true }),
@@ -367,6 +375,8 @@ test("signing out clears every queued selection before a stale dismissal callbac
     (drawer: Element) =>
       drawer.props.onOpenChat({ kind: "group", groupId: "group-1" }),
     (drawer: Element) => drawer.props.onScan(),
+    (drawer: Element) => drawer.props.onCreateAgent(),
+    (drawer: Element) => drawer.props.onCreateGroup(),
     (drawer: Element) => drawer.props.onLoginCode(),
   ]) {
     const env = setup();

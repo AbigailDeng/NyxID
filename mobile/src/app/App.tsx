@@ -549,6 +549,18 @@ function ThemedAppShell({
           currentRoute={currentRouteName}
           currentChat={currentChat}
           onOpenChat={openChatFromDrawer}
+          onCreateAgent={() => {
+            closeDrawerThen(() => {
+              if (!navigationRef.isReady()) return;
+              navigationRef.dispatch(openWorkspaceSheetAction("AgentCreate"));
+            });
+          }}
+          onCreateGroup={() => {
+            closeDrawerThen(() => {
+              if (!navigationRef.isReady()) return;
+              navigationRef.dispatch(openWorkspaceSheetAction("GroupEditor"));
+            });
+          }}
           onClose={() => setDrawerOpen(false)}
           onDismiss={onDrawerDismiss}
           onNavigate={navigateFromDrawer}

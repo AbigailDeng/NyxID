@@ -83,6 +83,7 @@ function AgentsRoute({ navigation, route }: WorkspaceScreenProps<"Agents">) {
       tab={route.params?.tab === "groups" ? "groups" : "agents"}
       onTabChange={(tab) => navigation.setParams({ tab })}
       onOpenGroup={sheet.onOpenGroup}
+      onCreateAgent={() => navigation.push("AgentCreate")}
       onCreateGroup={() => navigation.push("GroupEditor")}
       onOpenChat={openChat}
       onOpenSkills={(agentId) => navigation.push("AgentSkills", { agentId })}
@@ -168,6 +169,18 @@ function AgentDetailRoute({
           { merge: true },
         )
       }
+    />
+  );
+}
+
+function AgentCreateRoute({
+  navigation,
+}: NativeStackScreenProps<WorkspaceSheetParamList, "AgentCreate">) {
+  return (
+    <AgentsScreen
+      initialCreate
+      onClose={() => navigation.goBack()}
+      onCreated={(agentId) => navigation.replace("AgentDetail", { agentId })}
     />
   );
 }
@@ -370,6 +383,11 @@ function WorkspaceSheetRoute({
             name="Pages"
             component={WorkspacePages}
             options={{ headerShown: false }}
+          />
+          <SheetStack.Screen
+            name="AgentCreate"
+            component={AgentCreateRoute}
+            options={{ title: "New agent" }}
           />
           <SheetStack.Screen
             name="AgentDetail"

@@ -103,10 +103,12 @@ function content(root: Element): string {
 type SetupOptions = {
   history?: "loaded" | "empty" | "pending" | "error";
   agent?: Partial<AssistantAgent>;
+  online?: boolean;
 };
 
 function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
   const selections: WorkspaceChatTarget[] = [];
+  const creations: string[] = [];
   const historyQueries: QueryOptions[] = [];
   const liveAgents = agents.map((agent) => ({ ...agent }));
   const targetAgentId = current?.kind === "agent" ? current.agentId : undefined;
@@ -120,6 +122,8 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
   const props = {
     visible: true,
     current,
+    onCreateAgent: () => creations.push("agent"),
+    onCreateGroup: () => creations.push("group"),
     onSelect: (target: WorkspaceChatTarget) => {
       selections.push(plain(target));
       props.current = target;
@@ -145,9 +149,14 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
       StyleSheet: { create: (styles: unknown) => styles },
     },
     "lucide-react-native": Object.fromEntries(
-      ["Bot", "ChevronDown", "ChevronRight", "MessageSquare", "Users"].map(
-        (name) => [name, name],
-      ),
+      [
+        "Bot",
+        "ChevronDown",
+        "ChevronRight",
+        "MessageSquare",
+        "Users",
+        "Plus",
+      ].map((name) => [name, name]),
     ),
     "@tanstack/react-query": {
       useQuery: ({ queryKey }: QueryOptions) => ({
@@ -187,7 +196,7 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
       },
     },
     "../../hooks/useNetworkStatus": {
-      useNetworkStatus: () => ({ isConnected: true }),
+      useNetworkStatus: () => ({ isConnected: options.online !== false }),
     },
     "../../lib/api/agentsApi": { agentsApi: {} },
     "../../lib/api/assistantApi": { assistantApi: {} },
@@ -263,6 +272,7 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
   return {
     harness,
     selections,
+    creations,
     all,
     label,
     press,
@@ -281,6 +291,29 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     },
   };
 }
+
+test("agent and group creation buttons stay separate from section disclosure", () => {
+  const env = setup();
+  const expandedBefore = env.agentRows().length;
+  env.press("New agent");
+  env.press("New group");
+  assert.deepEqual(env.creations, ["agent", "group"]);
+  assert.deepEqual(env.selections, []);
+  assert.equal(env.agentRows().length, expandedBefore);
+  assert.equal(env.groupRows().length, 0);
+  env.harness.unmount();
+});
+
+test("offline drawer creation buttons are disabled while saved previews remain available", () => {
+  const env = setup(undefined, { online: false });
+  for (const label of ["New agent", "New group"]) {
+    const button = env.label(label);
+    assert.equal(button.props.disabled, true);
+    assert.equal(button.props.accessibilityState.disabled, true);
+  }
+  assert.equal(env.agentRows().length, 5);
+  env.harness.unmount();
+});
 
 test("agent and group previews stay at five rows and their sections collapse independently", () => {
   const env = setup();
