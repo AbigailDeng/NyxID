@@ -328,38 +328,15 @@ export function AssistantScreen({
   }
 
   useWorkspaceBack({
-    active:
-      !contextual &&
-      Boolean(assistant.conversationId || currentAgent?.kind === "specialist"),
+    // The primary Chats destination always keeps the drawer available. Only
+    // contextual chats pushed from another screen have a native Back parent.
+    active: false,
     defaultRole: contextual ? "back" : "menu",
     disabled:
       assistant.loading ||
       ((assistant.sending || uploads.session.sending) &&
         !assistant.conversationId),
-    label: contextual
-      ? "Back"
-      : assistant.conversationId
-        ? `Back to ${agentName}`
-        : "Back to NyxBot",
-    onBack: () => {
-      if (contextual) {
-        navigation.goBack();
-        return;
-      }
-      if (assistant.conversationId) newChat();
-      else {
-        setComposerGeneration((value) => value + 1);
-        assistant.openConversation();
-        navigation.setParams({
-          conversationId: undefined,
-          acknowledgementId: undefined,
-          agentId: undefined,
-          draft: false,
-          openLatest: false,
-        });
-        updateDraft("");
-      }
-    },
+    onBack: () => navigation.goBack(),
   });
 
   async function sendDraft() {

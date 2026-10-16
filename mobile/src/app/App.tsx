@@ -11,9 +11,22 @@ SplashScreen.preventAutoHideAsync().catch(() => {
   /* no-op — preventAutoHideAsync rejects if the splash has already
      been hidden, e.g. during fast refresh. Safe to ignore. */
 });
-import { ActivityIndicator, AppState, StyleSheet, Text, View } from "react-native";
-import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
-import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  ActivityIndicator,
+  AppState,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import {
+  SafeAreaProvider,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
+import {
+  onlineManager,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
 import NetInfo from "@react-native-community/netinfo";
 import {
   NavigationContainer,
@@ -37,8 +50,14 @@ import {
 import { JetBrainsMono_400Regular } from "@expo-google-fonts/jetbrains-mono";
 import { AppErrorBoundary } from "./AppErrorBoundary";
 import { AppNavigator, RootStackParamList } from "./AppNavigator";
-import { appLinking, extractChallengeIdFromNotificationResponse } from "./linking";
-import { challengeNavigationAction, workspaceNavigateAction } from "./navigationHierarchy";
+import {
+  appLinking,
+  extractChallengeIdFromNotificationResponse,
+} from "./linking";
+import {
+  challengeNavigationAction,
+  workspaceNavigateAction,
+} from "./navigationHierarchy";
 import type { WorkspaceNavigationGuardChange } from "./WorkspaceHeader";
 import {
   consumePendingPushSyncSignal,
@@ -49,13 +68,24 @@ import {
 } from "../lib/notifications/pushNotifications";
 import { ToastOverlay, type ToastState } from "../components/ToastOverlay";
 import { signalApprovalStateMayHaveChanged } from "../lib/notifications/approvalRefreshSignal";
-import { AuthSessionProvider, useAuthSession } from "../features/auth/AuthSessionContext";
+import {
+  AuthSessionProvider,
+  useAuthSession,
+} from "../features/auth/AuthSessionContext";
 import { MobileConsentProvider } from "../lib/consent";
 import { capture } from "../lib/telemetry";
 import type { PushType } from "../lib/telemetry-schema";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { WorkspaceDrawer, type WorkspaceRoute } from "../components/workspace/WorkspaceDrawer";
+import {
+  WorkspaceDrawer,
+  type WorkspaceRoute,
+} from "../components/workspace/WorkspaceDrawer";
 import { ThemeProvider, useTheme } from "../theme/ThemeContext";
+import {
+  activeWorkspaceChatTarget,
+  workspaceChatNavigationAction,
+  type WorkspaceChatTarget,
+} from "./workspaceChatNavigation";
 
 // Wire TanStack Query's online state to NetInfo so queries pause when offline
 // and auto-refetch when connectivity returns.
@@ -95,14 +125,17 @@ function refreshQueryCacheFromPushSignal(signal: PushSyncSignal | null) {
 }
 
 function getActiveRouteName(
-  state: NavigationState | PartialState<NavigationState> | undefined
+  state: NavigationState | PartialState<NavigationState> | undefined,
 ): string | undefined {
   if (!state || state.routes.length === 0) return undefined;
 
   const index = state.index ?? 0;
   const route = state.routes[index];
   if (!route) return undefined;
-  const nested = route.state as NavigationState | PartialState<NavigationState> | undefined;
+  const nested = route.state as
+    | NavigationState
+    | PartialState<NavigationState>
+    | undefined;
   if (nested) {
     return getActiveRouteName(nested);
   }
@@ -112,7 +145,9 @@ function getActiveRouteName(
 
 export default function App() {
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
-  const [currentRouteName, setCurrentRouteName] = useState<string | undefined>(undefined);
+  const [currentRouteName, setCurrentRouteName] = useState<string | undefined>(
+    undefined,
+  );
   const pendingChallengeFromTapRef = useRef<string | null>(null);
   const navigationGuardsRef = useRef(new Set<symbol>());
   const [navigationGuardRevision, setNavigationGuardRevision] = useState(0);
@@ -165,7 +200,7 @@ export default function App() {
       pendingChallengeFromTapRef.current = challengeId;
       flushPendingChallengeTapNavigation();
     },
-    [flushPendingChallengeTapNavigation]
+    [flushPendingChallengeTapNavigation],
   );
 
   const [fontsLoaded] = useFonts({
@@ -210,7 +245,8 @@ export default function App() {
         cleanup = unsubscribe;
       })
       .catch((error) => {
-        if (__DEV__) console.warn("[push] notification runtime bootstrap failed", error);
+        if (__DEV__)
+          console.warn("[push] notification runtime bootstrap failed", error);
       });
 
     return () => {
@@ -259,19 +295,21 @@ export default function App() {
     // for honest emission when the listener does happen to catch a
     // backgrounded-but-live runtime; under normal conditions it reads
     // "foreground".
-    const subscription = Notifications.addNotificationReceivedListener((notification) => {
-      try {
-        const pushType = classifyPushType(notification.request.content.data);
-        const appState =
-          AppState.currentState === "active" ? "foreground" : "background";
-        capture({
-          name: "mobile.push_received",
-          props: { type: pushType, app_state: appState },
-        });
-      } catch {
-        // never break push pipeline on telemetry failure
-      }
-    });
+    const subscription = Notifications.addNotificationReceivedListener(
+      (notification) => {
+        try {
+          const pushType = classifyPushType(notification.request.content.data);
+          const appState =
+            AppState.currentState === "active" ? "foreground" : "background";
+          capture({
+            name: "mobile.push_received",
+            props: { type: pushType, app_state: appState },
+          });
+        } catch {
+          // never break push pipeline on telemetry failure
+        }
+      },
+    );
 
     return () => {
       subscription.remove();
@@ -279,7 +317,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const handleResponse = (response: Notifications.NotificationResponse | null) => {
+    const handleResponse = (
+      response: Notifications.NotificationResponse | null,
+    ) => {
       const challengeId = extractChallengeIdFromNotificationResponse(response);
       if (!challengeId) return;
 
@@ -287,9 +327,10 @@ export default function App() {
       flushPendingChallengeTapNavigation();
     };
 
-    const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
-      handleResponse(response);
-    });
+    const responseSubscription =
+      Notifications.addNotificationResponseReceivedListener((response) => {
+        handleResponse(response);
+      });
 
     void Notifications.getLastNotificationResponseAsync()
       .then((response) => {
@@ -346,19 +387,22 @@ export default function App() {
 
     void consumePendingSignal();
 
-    const appStateSubscription = AppState.addEventListener("change", (nextState) => {
-      const previousState = lastAppStateRef.current;
-      lastAppStateRef.current = nextState;
+    const appStateSubscription = AppState.addEventListener(
+      "change",
+      (nextState) => {
+        const previousState = lastAppStateRef.current;
+        lastAppStateRef.current = nextState;
 
-      const resumedFromBackground =
-        (previousState === "background" || previousState === "inactive") &&
-        nextState === "active";
+        const resumedFromBackground =
+          (previousState === "background" || previousState === "inactive") &&
+          nextState === "active";
 
-      if (!resumedFromBackground) return;
+        if (!resumedFromBackground) return;
 
-      void consumePendingSignal();
-      void queryClient.refetchQueries({ type: "active" });
-    });
+        void consumePendingSignal();
+        void queryClient.refetchQueries({ type: "active" });
+      },
+    );
 
     return () => {
       disposePushSyncHandler();
@@ -389,7 +433,9 @@ export default function App() {
                     navigationRef={navigationRef}
                     currentRouteName={currentRouteName}
                     setCurrentRouteName={setCurrentRouteName}
-                    flushPendingChallengeTapNavigation={flushPendingChallengeTapNavigation}
+                    flushPendingChallengeTapNavigation={
+                      flushPendingChallengeTapNavigation
+                    }
                     onNavigationGuardChange={onNavigationGuardChange}
                     pushToast={pushToast}
                   />
@@ -411,7 +457,9 @@ function ThemedAppShell({
   onNavigationGuardChange,
   pushToast,
 }: {
-  navigationRef: ReturnType<typeof useNavigationContainerRef<RootStackParamList>>;
+  navigationRef: ReturnType<
+    typeof useNavigationContainerRef<RootStackParamList>
+  >;
   currentRouteName: string | undefined;
   setCurrentRouteName: (name: string | undefined) => void;
   flushPendingChallengeTapNavigation: () => void;
@@ -422,18 +470,35 @@ function ThemedAppShell({
   const insets = useSafeAreaInsets();
   const { isAuthenticated } = useAuthSession();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  useEffect(() => { if (!isAuthenticated) setDrawerOpen(false); }, [isAuthenticated]);
+  const [currentChat, setCurrentChat] = useState<WorkspaceChatTarget>();
+  const trackCurrentRoute = () => {
+    setCurrentRouteName(getActiveRouteName(navigationRef.getRootState()));
+    setCurrentChat(activeWorkspaceChatTarget(navigationRef.getCurrentRoute()));
+  };
+  useEffect(() => {
+    if (!isAuthenticated) setDrawerOpen(false);
+  }, [isAuthenticated]);
   const navigateFromDrawer = (route: WorkspaceRoute) => {
     setDrawerOpen(false);
     if (!navigationRef.isReady()) return;
-    const workspace = navigationRef.getRootState().routes.find(
-      (item) => item.name === "Workspace",
-    );
+    const workspace = navigationRef
+      .getRootState()
+      .routes.find((item) => item.name === "Workspace");
     if (!workspace?.state?.key) return;
     navigationRef.dispatch({
       ...workspaceNavigateAction(route),
       target: workspace.state.key,
     });
+  };
+  const openChatFromDrawer = (target: WorkspaceChatTarget) => {
+    if (!navigationRef.isReady()) return;
+    const action = workspaceChatNavigationAction(
+      navigationRef.getRootState(),
+      target,
+    );
+    if (!action) return;
+    setDrawerOpen(false);
+    navigationRef.dispatch(action);
   };
 
   return (
@@ -442,13 +507,11 @@ function ThemedAppShell({
         ref={navigationRef}
         linking={appLinking}
         onReady={() => {
-          const routeName = getActiveRouteName(navigationRef.getRootState());
-          setCurrentRouteName(routeName);
+          trackCurrentRoute();
           flushPendingChallengeTapNavigation();
         }}
-        onStateChange={(state) => {
-          const routeName = getActiveRouteName(state);
-          setCurrentRouteName(routeName);
+        onStateChange={() => {
+          trackCurrentRoute();
           flushPendingChallengeTapNavigation();
         }}
       >
@@ -467,14 +530,28 @@ function ThemedAppShell({
       >
         <ToastOverlay toast={pushToast} duration={6000} />
       </View>
-      {isAuthenticated ? <WorkspaceDrawer
-        visible={drawerOpen}
-        currentRoute={currentRouteName}
-        onClose={() => setDrawerOpen(false)}
-        onNavigate={navigateFromDrawer}
-        onScan={() => { setDrawerOpen(false); navigationRef.dispatch(StackActions.push("DeviceLogin", { start_scanner: true })); }}
-        onLoginCode={() => { setDrawerOpen(false); navigationRef.dispatch(StackActions.push("AgentKeyLogin", { mint: true })); }}
-      /> : null}
+      {isAuthenticated ? (
+        <WorkspaceDrawer
+          visible={drawerOpen}
+          currentRoute={currentRouteName}
+          currentChat={currentChat}
+          onOpenChat={openChatFromDrawer}
+          onClose={() => setDrawerOpen(false)}
+          onNavigate={navigateFromDrawer}
+          onScan={() => {
+            setDrawerOpen(false);
+            navigationRef.dispatch(
+              StackActions.push("DeviceLogin", { start_scanner: true }),
+            );
+          }}
+          onLoginCode={() => {
+            setDrawerOpen(false);
+            navigationRef.dispatch(
+              StackActions.push("AgentKeyLogin", { mint: true }),
+            );
+          }}
+        />
+      ) : null}
     </>
   );
 }
