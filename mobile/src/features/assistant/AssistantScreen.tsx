@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -8,25 +8,22 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationOptions } from "@react-navigation/native-stack";
 import * as WebBrowser from "expo-web-browser";
 import Markdown, {
   MarkdownIt,
   type RenderRules,
 } from "react-native-markdown-display";
 import {
-  History,
-  Bot,
   ChevronDown,
-  MessageSquare,
   Check,
-  Info,
+  MoreHorizontal,
   Paperclip,
   SquarePen,
-  Send,
+  ArrowUp,
   Square,
   X,
 } from "lucide-react-native";
@@ -58,12 +55,18 @@ import { AssistantCopyButton } from "./AssistantCopyButton";
 import { assistantSelectableMarkdown } from "./assistantSelectableMarkdown";
 import { AssistantAttachmentView } from "./AssistantAttachmentView";
 import { AssistantPendingUploads } from "./AssistantPendingUploads";
+import { AssistantMentionInput } from "./AssistantMentionInput";
+import {
+  resolveAttachmentMentions,
+  stripAttachmentMention,
+  type AttachmentMention,
+} from "./assistantMentions";
 import { useAssistantUploads } from "./useAssistantUploads";
 import { describeToolActivity } from "./assistantActivityText";
 import { NativeAuthoredSkillReview } from "../plugins/NativeAuthoredSkillReview";
 import { parseAutomationLink } from "../automations/automationLinks";
 import { NYXID_FRONTEND_URL } from "../../lib/env";
-import { transcriptEndOffset } from "./assistantTranscriptScroll";
+import { useTranscriptScrollFollow } from "./useTranscriptScrollFollow";
 import {
   assistantMarkdownOptions,
   safeAssistantLinkUrl,
@@ -117,17 +120,18 @@ export function AssistantScreen({
     draftRevision.current += 1;
     setDraft(value);
   }
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [agentsOpen, setAgentsOpen] = useState(false);
-  const [modelOpen, setModelOpen] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [sheet, setSheet] = useState<
+    "agents" | "history" | "model" | "details"
+  >();
   const [title, setTitle] = useState("");
   const [localError, setLocalError] = useState<string>();
   const composerPress = useRef(createAssistantComposerPressGuard());
   const [stopProtected, setStopProtected] = useState(false);
   const transcript = useRef<FlatList<AssistantMessage>>(null);
-  const following = useRef(true);
-  const transcriptMetrics = useRef({ height: 0, viewportHeight: 0 });
+  const transcriptScroll = useTranscriptScrollFollow(
+    transcript,
+    assistant.conversationId,
+  );
   const conversation = assistant.history?.conversation;
   const currentAgent = assistant.agent ?? conversation?.agent;
   const agentName = currentAgent
@@ -200,13 +204,23 @@ export function AssistantScreen({
       !assistant.conversationId);
   const modelLocked =
     !!assistant.conversationId || assistant.sending || uploads.session.sending;
+  const attachmentMentions: AttachmentMention[] = uploads.files.map((row) => ({
+    handle: row.handle,
+    kind: row.kind,
+    label: row.item?.label ?? row.file.name,
+  }));
+  const resolvedDraft = resolveAttachmentMentions(draft, attachmentMentions);
+  const headerDisabled =
+    assistant.loading ||
+    ((assistant.sending || uploads.session.sending) &&
+      !assistant.conversationId);
   const canSend =
     canCompose &&
     !uploads.session.sending &&
     !uploads.blocked &&
     !uploads.picking &&
     (!!draft.trim() || uploads.files.length > 0) &&
-    [...draft].length <= 32768;
+    [...resolvedDraft].length <= 32768;
 
   function openSafeLink(url: string): boolean {
     const href = safeAssistantLinkUrl(url);
@@ -273,8 +287,6 @@ export function AssistantScreen({
   ]);
 
   useLayoutEffect(() => {
-    following.current = true;
-    transcriptMetrics.current = { height: 0, viewportHeight: 0 };
     setLocalError(undefined);
   }, [assistant.conversationId]);
   useEffect(() => {
@@ -324,25 +336,88 @@ export function AssistantScreen({
       openLatest: false,
     });
     updateDraft("");
-    setHistoryOpen(false);
+    setSheet(undefined);
   }
+
+  const headerHandlers = useRef({ newChat });
+  headerHandlers.current = { newChat };
+  const headerOptions = useMemo<NativeStackNavigationOptions>(() => {
+    const actions = () => (
+      <View style={styles.headerActions}>
+        <IconButton
+          label="New chat"
+          disabled={newChatDisabled}
+          onPress={() => headerHandlers.current.newChat()}
+        >
+          <SquarePen size={21} color={colors.textPrimary} />
+        </IconButton>
+        <IconButton
+          label="Chat options"
+          onPress={() => {
+            setTitle(conversation?.title ?? "");
+            setSheet("details");
+          }}
+        >
+          <MoreHorizontal size={23} color={colors.textPrimary} />
+        </IconButton>
+      </View>
+    );
+    return {
+      headerTitle: () => (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Chatting with ${agentName}. Choose agent`}
+          accessibilityState={{ disabled: headerDisabled }}
+          disabled={headerDisabled}
+          onPress={() => setSheet("agents")}
+          style={styles.headerIdentity}
+        >
+          <View style={styles.headerName}>
+            <Text
+              numberOfLines={1}
+              style={[styles.agentName, { color: colors.textPrimary }]}
+            >
+              {agentName}
+            </Text>
+            <ChevronDown size={14} color={colors.textSecondary} />
+          </View>
+          <Text
+            numberOfLines={1}
+            style={[styles.headerSubtitle, { color: colors.textSecondary }]}
+          >
+            {chatTitle}
+          </Text>
+        </Pressable>
+      ),
+      headerRight: actions,
+      unstable_headerRightItems: () => [
+        { type: "custom", element: actions(), hidesSharedBackground: true },
+      ],
+    };
+  }, [
+    agentName,
+    chatTitle,
+    conversation?.title,
+    colors.textPrimary,
+    colors.textSecondary,
+    headerDisabled,
+    newChatDisabled,
+  ]);
 
   useWorkspaceBack({
     // The primary Chats destination always keeps the drawer available. Only
     // contextual chats pushed from another screen have a native Back parent.
     active: false,
     defaultRole: contextual ? "back" : "menu",
-    disabled:
-      assistant.loading ||
-      ((assistant.sending || uploads.session.sending) &&
-        !assistant.conversationId),
+    disabled: headerDisabled,
+    options: headerOptions,
     onBack: () => navigation.goBack(),
   });
 
   async function sendDraft() {
     if (!canSend || !composerPress.current("send")) return;
     setStopProtected(true);
-    following.current = true;
+    transcriptScroll.follow();
     await perform(() =>
       submitAssistantDraft({
         draft,
@@ -350,7 +425,11 @@ export function AssistantScreen({
         getRevision: () => draftRevision.current,
         send: (text) =>
           uploads.session.submit((payload) =>
-            assistant.send(text, undefined, payload),
+            assistant.send(
+              resolveAttachmentMentions(text, attachmentMentions),
+              undefined,
+              payload,
+            ),
           ),
       }),
     );
@@ -472,7 +551,7 @@ export function AssistantScreen({
           onToggle={() => {
             // Opening details is an explicit reading action. Keep the header
             // in view instead of following the newly expanded list to its end.
-            following.current = false;
+            transcriptScroll.pause();
           }}
         />
         {isUser ? (
@@ -647,93 +726,6 @@ export function AssistantScreen({
 
   return (
     <WorkspacePage title={chatTitle} showHeading={false} scroll={false}>
-      <View style={styles.chatHeading}>
-        <View style={styles.fill}>
-          <Label muted style={styles.currentChatLabel}>
-            Current chat
-          </Label>
-          <Text
-            accessibilityRole="header"
-            numberOfLines={1}
-            ellipsizeMode="tail"
-            style={[styles.chatTitle, { color: colors.textPrimary }]}
-          >
-            {chatTitle}
-          </Text>
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Chat details"
-          onPress={() => {
-            setTitle(conversation?.title ?? "");
-            setDetailsOpen(true);
-          }}
-          style={({ pressed }) => [
-            styles.labeledAction,
-            { opacity: pressed ? 0.65 : 1 },
-          ]}
-        >
-          <Info size={17} color={colors.textSecondary} />
-          <Label muted style={styles.actionLabel}>
-            Details
-          </Label>
-        </Pressable>
-      </View>
-      <View style={styles.chatNavigation}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Chatting with ${agentName}. Choose agent`}
-          onPress={() => setAgentsOpen(true)}
-          style={[styles.agentSelector, { backgroundColor: colors.cardSoft }]}
-        >
-          <Bot size={17} color={colors.primaryOnTint} />
-          <View style={styles.fill}>
-            <Label numberOfLines={1} style={styles.agentName}>
-              {agentName}
-            </Label>
-            {assistant.agent?.owner_kind === "org" ? (
-              <Label muted numberOfLines={1} style={styles.ownerLabel}>
-                {assistant.agent.owner_name ?? "Organization"}
-              </Label>
-            ) : null}
-          </View>
-          <ChevronDown size={15} color={colors.textMuted} />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Chat history"
-          onPress={() => setHistoryOpen(true)}
-          style={({ pressed }) => [
-            styles.labeledAction,
-            { opacity: pressed ? 0.65 : 1 },
-          ]}
-        >
-          <History size={17} color={colors.textSecondary} />
-          <Label muted style={styles.actionLabel}>
-            History
-          </Label>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="New chat"
-          accessibilityState={{ disabled: newChatDisabled }}
-          disabled={newChatDisabled}
-          onPress={newChat}
-          style={({ pressed }) => [
-            styles.labeledAction,
-            styles.newChatAction,
-            {
-              backgroundColor: colors.primaryGlow,
-              opacity: newChatDisabled ? 0.4 : pressed ? 0.65 : 1,
-            },
-          ]}
-        >
-          <SquarePen size={17} color={colors.primaryOnTint} />
-          <Label style={[styles.actionLabel, { color: colors.primaryOnTint }]}>
-            New chat
-          </Label>
-        </Pressable>
-      </View>
       {!assistant.online ? (
         <Notice message="You're offline. Reconnect to refresh this chat and send messages." />
       ) : null}
@@ -774,44 +766,14 @@ export function AssistantScreen({
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         contentContainerStyle={styles.transcript}
-        // Anchor persisted rows when paging history. A live reply footer
-        // disappears into saved rows, so disable anchoring while it changes.
+        // Anchor stable history only while reading it. Native row anchoring
+        // competes with keeping the newest live or newly saved reply visible.
         maintainVisibleContentPosition={
-          stableTranscript ? { minIndexForVisible: 0 } : undefined
+          stableTranscript && !transcriptScroll.following
+            ? { minIndexForVisible: 0 }
+            : undefined
         }
-        onLayout={(event) => {
-          const metrics = transcriptMetrics.current;
-          metrics.viewportHeight = event.nativeEvent.layout.height;
-          if (following.current)
-            transcript.current?.scrollToOffset({
-              offset: transcriptEndOffset(
-                metrics.height,
-                metrics.viewportHeight,
-              ),
-              animated: false,
-            });
-        }}
-        onScroll={(event) => {
-          const { contentOffset, contentSize, layoutMeasurement } =
-            event.nativeEvent;
-          following.current =
-            contentSize.height - layoutMeasurement.height - contentOffset.y <
-            100;
-        }}
-        onScrollBeginDrag={() => {
-          following.current = false;
-        }}
-        scrollEventThrottle={100}
-        onContentSizeChange={(_width, height) => {
-          const metrics = transcriptMetrics.current;
-          metrics.height = height;
-          if (following.current) {
-            transcript.current?.scrollToOffset({
-              offset: transcriptEndOffset(height, metrics.viewportHeight),
-              animated: false,
-            });
-          }
-        }}
+        {...transcriptScroll.listProps}
         ListHeaderComponent={
           assistant.history?.before_seq ? (
             <ActionButton
@@ -832,7 +794,7 @@ export function AssistantScreen({
                 assistant.mutating
               }
               onPress={() => {
-                following.current = false;
+                transcriptScroll.pause();
                 void assistant.loadOlder();
               }}
             />
@@ -844,42 +806,11 @@ export function AssistantScreen({
             <ActivityIndicator color={colors.primary} />
           ) : !assistant.sending ? (
             <View style={styles.welcome}>
-              <View
-                style={[
-                  styles.welcomeIcon,
-                  { backgroundColor: colors.primaryGlow },
-                ]}
-              >
-                <MessageSquare color={colors.primary} size={30} />
-              </View>
               <Text
                 style={[styles.welcomeTitle, { color: colors.textPrimary }]}
               >
-                What would you like to do?
+                How can I help?
               </Text>
-              <Label muted>
-                {currentAgent?.kind === "specialist"
-                  ? `Start a conversation with ${agentName}.`
-                  : `Ask ${agentName} to help with your connected services.`}
-              </Label>
-              {["Show my connected services", "Check my pending approvals"].map(
-                (prompt) => (
-                  <Pressable
-                    key={prompt}
-                    accessibilityRole="button"
-                    onPress={() => updateDraft(prompt)}
-                    style={[
-                      styles.suggestion,
-                      {
-                        borderColor: colors.border,
-                        backgroundColor: colors.card,
-                      },
-                    ]}
-                  >
-                    <Label>{prompt}</Label>
-                  </Pressable>
-                ),
-              )}
             </View>
           ) : null
         }
@@ -935,7 +866,7 @@ export function AssistantScreen({
                   }
                   activities={liveActivities}
                   onToggle={() => {
-                    following.current = false;
+                    transcriptScroll.pause();
                   }}
                 />
                 {liveText ? (
@@ -1011,7 +942,11 @@ export function AssistantScreen({
       >
         <AssistantPendingUploads
           files={uploads.files}
-          remove={uploads.remove}
+          remove={(key) => {
+            const row = uploads.files.find((item) => item.key === key);
+            if (row) updateDraft(stripAttachmentMention(draft, row.handle));
+            uploads.remove(key);
+          }}
           disabled={running || uploads.session.sending}
         />
         {uploads.error || uploads.notice ? (
@@ -1023,21 +958,6 @@ export function AssistantScreen({
             {uploads.error ?? uploads.notice}
           </Label>
         ) : null}
-        <TextInput
-          accessibilityLabel="Message to assistant"
-          value={draft}
-          onChangeText={updateDraft}
-          multiline
-          editable={
-            !destroyed &&
-            !assistant.recoveryRequired &&
-            !route?.params?.openLatest
-          }
-          placeholder={`Message ${agentName}…`}
-          placeholderTextColor={colors.textMuted}
-          selectionColor={colors.primary}
-          style={[styles.composerInput, { color: colors.textPrimary }]}
-        />
         <View style={styles.composerActions}>
           <IconButton
             label="Attach files"
@@ -1055,15 +975,29 @@ export function AssistantScreen({
               <Paperclip size={20} color={colors.textSecondary} />
             )}
           </IconButton>
-          <Label muted style={styles.composerHint}>
-            {running
-              ? "You can leave this chat and return later."
-              : assistant.recoveryRequired
-                ? "Open the saved chat before continuing."
-                : uploads.blocked
-                  ? "Wait for uploads or remove failed files."
-                  : "Attach images or documents · 20 MB each"}
-          </Label>
+          <AssistantMentionInput
+            value={draft}
+            onChangeText={updateDraft}
+            generation={`${assistant.agentId}:${assistant.conversationId ?? "new"}:${composerGeneration}`}
+            mentions={uploads.files.map((row) => ({
+              id: row.key,
+              handle: row.handle,
+              kind: row.kind,
+              label: row.item?.label ?? row.file.name,
+              detail: row.error
+                ? "Upload failed"
+                : row.item
+                  ? "Attachment"
+                  : "Uploading…",
+            }))}
+            editable={
+              !destroyed &&
+              !assistant.recoveryRequired &&
+              !route?.params?.openLatest
+            }
+            accessibilityLabel="Message to assistant"
+            placeholder={`Message ${agentName}…`}
+          />
           {running && assistant.conversationId ? (
             <IconButton
               label="Stop assistant"
@@ -1084,14 +1018,21 @@ export function AssistantScreen({
               disabled={!canSend}
               onPress={() => void sendDraft()}
             >
-              <Send
-                size={20}
+              <ArrowUp
+                size={21}
                 color={canSend ? colors.primary : colors.textTertiary}
               />
             </IconButton>
           )}
         </View>
-        {[...draft].length > 32768 ? (
+        {assistant.recoveryRequired || uploads.blocked ? (
+          <Label muted style={styles.composerHint}>
+            {assistant.recoveryRequired
+              ? "Open the saved chat before continuing."
+              : "Wait for uploads or remove failed files."}
+          </Label>
+        ) : null}
+        {[...resolvedDraft].length > 32768 ? (
           <Label style={{ color: colors.danger }}>
             Keep the message under 32,768 characters.
           </Label>
@@ -1099,291 +1040,302 @@ export function AssistantScreen({
       </View>
 
       <Sheet
-        visible={agentsOpen}
-        title="Choose agent"
-        onClose={() => setAgentsOpen(false)}
+        visible={!!sheet}
+        title={
+          sheet === "agents"
+            ? "Choose agent"
+            : sheet === "history"
+              ? `${agentName} · Chat history`
+              : sheet === "model"
+                ? "Choose a model"
+                : "Chat details"
+        }
+        onClose={() => setSheet(undefined)}
       >
-        {assistant.agentsLoading ? (
-          <ActivityIndicator color={colors.primary} />
-        ) : null}
-        {assistant.agentsError ? (
-          <Notice message={assistant.agentsError} tone="error" />
-        ) : null}
-        {assistant.agents
-          .filter(
-            (agent) => agent.status !== "destroyed" && agent.can_use === true,
-          )
-          .map((agent) => (
-            <Pressable
-              key={agent.id}
-              accessibilityRole="button"
-              accessibilityLabel={`Chat with ${chatAgentLabel(agent)}`}
-              onPress={() => {
-                setComposerGeneration((value) => value + 1);
-                assistant.openConversation();
-                assistant.setModel(agent.model ?? "nyxagent/chat");
-                navigation.setParams({
-                  agentId: agent.id,
-                  conversationId: undefined,
-                  acknowledgementId: undefined,
-                  draft: false,
-                  openLatest: true,
-                });
-                updateDraft("");
-                setAgentsOpen(false);
-              }}
-            >
-              <Card>
-                <Label>
-                  {chatAgentLabel(agent)}
-                  {assistant.agentId === agent.id ? " · Selected" : ""}
-                </Label>
-                <Label muted>
-                  {agent.owner_kind === "org"
-                    ? (agent.owner_name ?? "Organization")
-                    : "Personal"}{" "}
-                  · @{agent.name}
-                </Label>
-              </Card>
-            </Pressable>
-          ))}
-        <ActionButton
-          label="Manage agents"
-          variant="secondary"
-          onPress={() => {
-            setAgentsOpen(false);
-            if (contextual) navigation.popTo("Workspace", { screen: "Agents" });
-            else navigation.navigate("Agents");
-          }}
-        />
-      </Sheet>
-
-      <Sheet
-        visible={historyOpen}
-        title={`${agentName} · Chat history`}
-        onClose={() => setHistoryOpen(false)}
-      >
-        <ActionButton
-          label="New chat"
-          onPress={newChat}
-          disabled={newChatDisabled}
-        />
-        {!assistant.conversations.length && !assistant.loadingIndex ? (
-          <Label muted>Your saved chats will appear here.</Label>
-        ) : null}
-        {assistant.conversations.map((item) => (
-          <Pressable
-            key={item.id}
-            accessibilityRole="button"
-            accessibilityLabel={`Open chat ${item.title}${item.active_turn ? ", Working" : ""}${item.pending_acknowledgements ? `, ${item.pending_acknowledgements} requests` : ""}, ${formatDate(item.last_message_at)}`}
-            accessibilityState={{
-              selected: item.id === assistant.conversationId,
-            }}
-            onPress={() => {
-              assistant.openConversation(item.id);
-              if (item.id !== assistant.conversationId) {
-                navigation.setParams({
-                  conversationId: item.id,
-                  acknowledgementId: undefined,
-                  agentId: item.agent?.id ?? assistant.agentId,
-                  openLatest: false,
-                });
-                updateDraft("");
-              }
-              setHistoryOpen(false);
-            }}
-          >
-            <Card
-              style={
-                item.id === assistant.conversationId
-                  ? {
-                      borderColor: colors.primary,
-                      backgroundColor: colors.primaryGlow,
-                    }
-                  : undefined
-              }
-            >
-              <View style={styles.row}>
-                <Label
-                  numberOfLines={2}
-                  style={[styles.cardTitle, styles.fill]}
-                >
-                  {item.title}
-                </Label>
-                {item.id === assistant.conversationId ? (
-                  <View style={styles.currentChatBadge}>
-                    <Check size={16} color={colors.primaryOnTint} />
-                    <Label
-                      style={[
-                        styles.actionLabel,
-                        { color: colors.primaryOnTint },
-                      ]}
-                    >
-                      Current
-                    </Label>
-                  </View>
-                ) : null}
-              </View>
-              <Label muted>
-                {item.agent?.display_name ?? item.agent?.name ?? "NyxBot"}
-                {item.active_turn ? " · Working" : ""}
-                {item.pending_acknowledgements
-                  ? ` · ${item.pending_acknowledgements} requests`
-                  : ""}
-              </Label>
-              <Label muted mono>
-                {formatDate(item.last_message_at)}
-              </Label>
-            </Card>
-          </Pressable>
-        ))}
-        {assistant.loadingIndex ? (
-          <ActivityIndicator color={colors.primary} />
-        ) : null}
-        {assistant.hasMoreConversations ? (
-          <ActionButton
-            label="Load more chats"
-            variant="secondary"
-            loading={assistant.loadingIndex}
-            onPress={() => void assistant.loadMoreConversations()}
-          />
-        ) : null}
-      </Sheet>
-      <Sheet
-        visible={modelOpen}
-        title="Choose a model"
-        onClose={() => setModelOpen(false)}
-      >
-        {assistant.models.length ? (
-          assistant.models.map((item) => (
-            <Pressable
-              key={item.id}
-              accessibilityRole="button"
-              disabled={!item.available || modelLocked}
-              onPress={() => {
-                if (modelLocked) return;
-                assistant.setModel(item.id);
-                setModelOpen(false);
-              }}
-            >
-              <Card>
-                <Label
-                  style={{
-                    color:
-                      item.id === assistant.model
-                        ? colors.primaryOnTint
-                        : colors.textPrimary,
+        {sheet === "agents" ? (
+          <>
+            {assistant.agentsLoading ? (
+              <ActivityIndicator color={colors.primary} />
+            ) : null}
+            {assistant.agentsError ? (
+              <Notice message={assistant.agentsError} tone="error" />
+            ) : null}
+            {assistant.agents
+              .filter(
+                (agent) =>
+                  agent.status !== "destroyed" && agent.can_use === true,
+              )
+              .map((agent) => (
+                <Pressable
+                  key={agent.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Chat with ${chatAgentLabel(agent)}`}
+                  onPress={() => {
+                    setComposerGeneration((value) => value + 1);
+                    assistant.openConversation();
+                    assistant.setModel(agent.model ?? "nyxagent/chat");
+                    navigation.setParams({
+                      agentId: agent.id,
+                      conversationId: undefined,
+                      acknowledgementId: undefined,
+                      draft: false,
+                      openLatest: true,
+                    });
+                    updateDraft("");
+                    setSheet(undefined);
                   }}
                 >
-                  {item.label}
-                  {item.id === assistant.model ? " · Selected" : ""}
-                </Label>
-                {item.description ? (
-                  <Label muted>{item.description}</Label>
-                ) : null}
-                {!item.available ? <Label muted>Unavailable</Label> : null}
-              </Card>
-            </Pressable>
-          ))
-        ) : (
-          <Notice message="Model choices are unavailable. The default assistant model will be used." />
-        )}
-      </Sheet>
-      <Sheet
-        visible={detailsOpen}
-        title="Chat details"
-        onClose={() => setDetailsOpen(false)}
-      >
-        <Card>
-          <Label style={styles.cardTitle}>Agent</Label>
-          <Label>{agentName}</Label>
-          <Label muted>
-            {assistant.agent?.owner_kind === "org"
-              ? (assistant.agent.owner_name ?? "Organization")
-              : currentAgent?.kind === "specialist"
-                ? "Personal specialist"
-                : "Your personal assistant"}
-          </Label>
-        </Card>
-        <Card>
-          <Label style={styles.cardTitle}>Model</Label>
-          <Label>{currentModelLabel}</Label>
-          <Label muted>
-            {assistant.conversationId
-              ? "The model used by this saved chat. Model selection is available when starting a new chat."
-              : "Choose the model for this new chat."}
-          </Label>
-          {!assistant.conversationId ? (
+                  <Card>
+                    <Label>
+                      {chatAgentLabel(agent)}
+                      {assistant.agentId === agent.id ? " · Selected" : ""}
+                    </Label>
+                    <Label muted>
+                      {agent.owner_kind === "org"
+                        ? (agent.owner_name ?? "Organization")
+                        : "Personal"}{" "}
+                      · @{agent.name}
+                    </Label>
+                  </Card>
+                </Pressable>
+              ))}
             <ActionButton
-              label="Choose model"
+              label="Manage agents"
               variant="secondary"
-              disabled={modelLocked}
               onPress={() => {
-                setDetailsOpen(false);
-                setModelOpen(true);
+                setSheet(undefined);
+                if (contextual)
+                  navigation.popTo("Workspace", { screen: "Agents" });
+                else navigation.navigate("Agents");
               }}
             />
-          ) : null}
-        </Card>
-        {currentAgent?.id ? (
-          <ActionButton
-            label="Agent details"
-            variant="secondary"
-            onPress={() => {
-              setDetailsOpen(false);
-              navigation.push("AgentDetail", { agentId: currentAgent.id });
-            }}
-          />
+          </>
         ) : null}
-        {assistant.conversationId ? (
-          <View style={styles.detailActions}>
-            <Field
-              label="Chat title"
-              value={title}
-              onChangeText={setTitle}
-              maxLength={200}
-              autoCapitalize="sentences"
-            />
+        {sheet === "history" ? (
+          <>
             <ActionButton
-              label="Save title"
-              loading={assistant.mutating}
-              disabled={!title.trim()}
-              onPress={() =>
-                void perform(async () => {
-                  if (await assistant.rename(title)) setDetailsOpen(false);
-                })
-              }
+              label="New chat"
+              onPress={newChat}
+              disabled={newChatDisabled}
             />
+            {!assistant.conversations.length && !assistant.loadingIndex ? (
+              <Label muted>Your saved chats will appear here.</Label>
+            ) : null}
+            {assistant.conversations.map((item) => (
+              <Pressable
+                key={item.id}
+                accessibilityRole="button"
+                accessibilityLabel={`Open chat ${item.title}${item.active_turn ? ", Working" : ""}${item.pending_acknowledgements ? `, ${item.pending_acknowledgements} requests` : ""}, ${formatDate(item.last_message_at)}`}
+                accessibilityState={{
+                  selected: item.id === assistant.conversationId,
+                }}
+                onPress={() => {
+                  assistant.openConversation(item.id);
+                  if (item.id !== assistant.conversationId) {
+                    navigation.setParams({
+                      conversationId: item.id,
+                      acknowledgementId: undefined,
+                      agentId: item.agent?.id ?? assistant.agentId,
+                      openLatest: false,
+                    });
+                    updateDraft("");
+                  }
+                  setSheet(undefined);
+                }}
+              >
+                <Card
+                  style={
+                    item.id === assistant.conversationId
+                      ? {
+                          borderColor: colors.primary,
+                          backgroundColor: colors.primaryGlow,
+                        }
+                      : undefined
+                  }
+                >
+                  <View style={styles.row}>
+                    <Label
+                      numberOfLines={2}
+                      style={[styles.cardTitle, styles.fill]}
+                    >
+                      {item.title}
+                    </Label>
+                    {item.id === assistant.conversationId ? (
+                      <View style={styles.currentChatBadge}>
+                        <Check size={16} color={colors.primaryOnTint} />
+                        <Label
+                          style={[
+                            styles.actionLabel,
+                            { color: colors.primaryOnTint },
+                          ]}
+                        >
+                          Current
+                        </Label>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Label muted>
+                    {item.agent?.display_name ?? item.agent?.name ?? "NyxBot"}
+                    {item.active_turn ? " · Working" : ""}
+                    {item.pending_acknowledgements
+                      ? ` · ${item.pending_acknowledgements} requests`
+                      : ""}
+                  </Label>
+                  <Label muted mono>
+                    {formatDate(item.last_message_at)}
+                  </Label>
+                </Card>
+              </Pressable>
+            ))}
+            {assistant.loadingIndex ? (
+              <ActivityIndicator color={colors.primary} />
+            ) : null}
+            {assistant.hasMoreConversations ? (
+              <ActionButton
+                label="Load more chats"
+                variant="secondary"
+                loading={assistant.loadingIndex}
+                onPress={() => void assistant.loadMoreConversations()}
+              />
+            ) : null}
+          </>
+        ) : null}
+        {sheet === "model" ? (
+          <>
+            {assistant.models.length ? (
+              assistant.models.map((item) => (
+                <Pressable
+                  key={item.id}
+                  accessibilityRole="button"
+                  disabled={!item.available || modelLocked}
+                  onPress={() => {
+                    if (modelLocked) return;
+                    assistant.setModel(item.id);
+                    setSheet(undefined);
+                  }}
+                >
+                  <Card>
+                    <Label
+                      style={{
+                        color:
+                          item.id === assistant.model
+                            ? colors.primaryOnTint
+                            : colors.textPrimary,
+                      }}
+                    >
+                      {item.label}
+                      {item.id === assistant.model ? " · Selected" : ""}
+                    </Label>
+                    {item.description ? (
+                      <Label muted>{item.description}</Label>
+                    ) : null}
+                    {!item.available ? <Label muted>Unavailable</Label> : null}
+                  </Card>
+                </Pressable>
+              ))
+            ) : (
+              <Notice message="Model choices are unavailable. The default assistant model will be used." />
+            )}
+          </>
+        ) : null}
+        {sheet === "details" ? (
+          <>
             <ActionButton
-              label="Delete chat"
-              variant="danger"
-              disabled={assistant.mutating}
-              onPress={() =>
-                Alert.alert(
-                  "Delete this chat?",
-                  "This deletes its saved messages and permissions. Active work will be stopped.",
-                  [
-                    { text: "Cancel", style: "cancel" },
-                    {
-                      text: "Delete",
-                      style: "destructive",
-                      onPress: () => {
-                        setDetailsOpen(false);
-                        void assistant.remove().then((removed) => {
-                          if (removed)
-                            navigation.setParams({
-                              conversationId: undefined,
-                              acknowledgementId: undefined,
+              label="Chat history"
+              variant="secondary"
+              onPress={() => setSheet("history")}
+            />
+            <Card>
+              <Label style={styles.cardTitle}>Agent</Label>
+              <Label>{agentName}</Label>
+              <Label muted>
+                {assistant.agent?.owner_kind === "org"
+                  ? (assistant.agent.owner_name ?? "Organization")
+                  : currentAgent?.kind === "specialist"
+                    ? "Personal specialist"
+                    : "Your personal assistant"}
+              </Label>
+            </Card>
+            <Card>
+              <Label style={styles.cardTitle}>Model</Label>
+              <Label>{currentModelLabel}</Label>
+              <Label muted>
+                {assistant.conversationId
+                  ? "The model used by this saved chat. Model selection is available when starting a new chat."
+                  : "Choose the model for this new chat."}
+              </Label>
+              {!assistant.conversationId ? (
+                <ActionButton
+                  label="Choose model"
+                  variant="secondary"
+                  disabled={modelLocked}
+                  onPress={() => {
+                    setSheet("model");
+                  }}
+                />
+              ) : null}
+            </Card>
+            {currentAgent?.id ? (
+              <ActionButton
+                label="Agent details"
+                variant="secondary"
+                onPress={() => {
+                  setSheet(undefined);
+                  navigation.push("AgentDetail", { agentId: currentAgent.id });
+                }}
+              />
+            ) : null}
+            {assistant.conversationId ? (
+              <View style={styles.detailActions}>
+                <Field
+                  label="Chat title"
+                  value={title}
+                  onChangeText={setTitle}
+                  maxLength={200}
+                  autoCapitalize="sentences"
+                />
+                <ActionButton
+                  label="Save title"
+                  loading={assistant.mutating}
+                  disabled={!title.trim()}
+                  onPress={() =>
+                    void perform(async () => {
+                      if (await assistant.rename(title)) setSheet(undefined);
+                    })
+                  }
+                />
+                <ActionButton
+                  label="Delete chat"
+                  variant="danger"
+                  disabled={assistant.mutating}
+                  onPress={() =>
+                    Alert.alert(
+                      "Delete this chat?",
+                      "This deletes its saved messages and permissions. Active work will be stopped.",
+                      [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                          text: "Delete",
+                          style: "destructive",
+                          onPress: () => {
+                            setSheet(undefined);
+                            void assistant.remove().then((removed) => {
+                              if (removed)
+                                navigation.setParams({
+                                  conversationId: undefined,
+                                  acknowledgementId: undefined,
+                                });
+                              if (removed) updateDraft("");
                             });
-                          if (removed) updateDraft("");
-                        });
-                      },
-                    },
-                  ],
-                )
-              }
-            />
-          </View>
+                          },
+                        },
+                      ],
+                    )
+                  }
+                />
+              </View>
+            ) : null}
+          </>
         ) : null}
       </Sheet>
     </WorkspacePage>
@@ -1478,42 +1430,21 @@ function formatDate(value: string) {
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   row: { flexDirection: "row", alignItems: "center", gap: 8 },
-  chatHeading: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  currentChatLabel: { fontSize: 10, lineHeight: 15 },
-  chatTitle: { fontFamily: fonts.displaySemi, fontSize: 22, lineHeight: 30 },
-  chatNavigation: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  agentSelector: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
+  headerActions: { flexDirection: "row", alignItems: "center" },
+  headerIdentity: {
+    maxWidth: 190,
     minHeight: 44,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: radius.md,
-  },
-  agentName: { fontSize: 12, fontFamily: fonts.bodySemi },
-  ownerLabel: { fontSize: 10, lineHeight: 13 },
-  labeledAction: {
-    minHeight: 44,
-    flexDirection: "row",
-    alignItems: "center",
     justifyContent: "center",
-    gap: 5,
-    paddingHorizontal: 8,
-    borderRadius: radius.md,
+    alignItems: "center",
+  },
+  headerName: { flexDirection: "row", alignItems: "center", gap: 4 },
+  agentName: { flexShrink: 1, fontSize: 16, fontFamily: fonts.bodySemi },
+  headerSubtitle: {
+    maxWidth: 170,
+    fontSize: 10,
+    fontFamily: fonts.bodyRegular,
   },
   actionLabel: { fontSize: 11, fontFamily: fonts.bodySemi },
-  newChatAction: { paddingHorizontal: 10 },
   currentChatBadge: { flexDirection: "row", alignItems: "center", gap: 4 },
   detailActions: { gap: 14 },
   iconButton: {
@@ -1539,45 +1470,18 @@ const styles = StyleSheet.create({
   runningActivity: { flexShrink: 1, fontSize: 11 },
   timestamp: { fontSize: 10 },
   footer: { gap: 16, paddingTop: 20 },
-  welcome: { alignItems: "center", gap: 16, paddingVertical: 36 },
-  welcomeIcon: {
-    width: 64,
-    height: 64,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 20,
-  },
+  welcome: { alignItems: "center", paddingVertical: 100 },
   welcomeTitle: {
     fontFamily: fonts.displaySemi,
     fontSize: 24,
     lineHeight: 32,
     textAlign: "center",
   },
-  suggestion: {
-    width: "100%",
-    padding: 14,
-    borderWidth: 1,
-    borderRadius: radius.lg,
-  },
   thinking: { alignSelf: "flex-start", marginVertical: 10 },
   cardTitle: { fontFamily: fonts.bodySemi },
-  composer: { borderWidth: 1, borderRadius: radius.lg, padding: 12, gap: 8 },
-  composerInput: {
-    fontFamily: fonts.bodyRegular,
-    fontSize: 14,
-    lineHeight: 22,
-    minHeight: 44,
-    maxHeight: 140,
-    paddingVertical: 8,
-    textAlignVertical: "top",
-  },
-  composerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  composerHint: { flex: 1, fontSize: 10, lineHeight: 15 },
+  composer: { borderWidth: 1, borderRadius: radius.lg, padding: 6, gap: 6 },
+  composerActions: { flexDirection: "row", alignItems: "flex-end", gap: 2 },
+  composerHint: { fontSize: 11, lineHeight: 16, paddingHorizontal: 8 },
   errorRow: { gap: 8 },
   sheet: { flex: 1, paddingTop: 20 },
   sheetHeader: {

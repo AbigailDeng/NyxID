@@ -1,4 +1,5 @@
 import type { AssistantAttachment } from "./assistantTypes";
+import { attachmentKind, type AttachmentKind } from "./assistantMentions";
 import {
   attachmentFileError,
   attachmentUploadError,
@@ -9,6 +10,9 @@ import {
 export type PickedAssistantFile = AssistantUploadFile & { uri: string };
 export type PendingAssistantUpload = {
   key: string;
+  /** Stable composer-local reference, independent of the numeric row key. */
+  handle: string;
+  kind: AttachmentKind;
   file: PickedAssistantFile;
   progress: number;
   item?: AssistantAttachment;
@@ -41,6 +45,8 @@ type Dependencies = {
   current: () => boolean;
   /** Check focus, foreground, connectivity and compose permission live. */
   available: () => boolean;
+  /** Live group member names must not collide with attachment references. */
+  reservedMentionHandles?: () => readonly string[];
   /** Only upload-created drafts synchronize the latest model before send. */
   prepareDraft?: (id: string, signal: AbortSignal) => Promise<void>;
   changed: () => void;
@@ -55,6 +61,11 @@ export class AssistantUploadSession {
   sending = false;
   disposed = false;
   private sequence = 0;
+  private mentionSequence: Record<AttachmentKind, number> = {
+    image: 0,
+    file: 0,
+    "pasted-text": 0,
+  };
   private queue = Promise.resolve();
   private draft?: Promise<string>;
   private id?: string;
@@ -111,6 +122,19 @@ export class AssistantUploadSession {
       throw cause;
     }
   }
+  private nextHandle(kind: AttachmentKind) {
+    const reserved = new Set(
+      (this.deps.reservedMentionHandles?.() ?? []).map((name) =>
+        name.toLowerCase(),
+      ),
+    );
+    const prefix = kind === "pasted-text" ? "text" : kind;
+    let handle: string;
+    do {
+      handle = `${prefix}-${++this.mentionSequence[kind]}`;
+    } while (reserved.has(handle.toLowerCase()));
+    return handle;
+  }
   add(files: PickedAssistantFile[]) {
     if (!this.available() || this.sending) {
       files.forEach((file) => this.disposeFile(file));
@@ -124,8 +148,11 @@ export class AssistantUploadSession {
         this.disposeFile(file);
         continue;
       }
+      const kind = attachmentKind({ type: file.mimeType ?? "" });
       const row: PendingAssistantUpload = {
         key: String(++this.sequence),
+        handle: this.nextHandle(kind),
+        kind,
         file,
         progress: 0,
         controller: new AbortController(),

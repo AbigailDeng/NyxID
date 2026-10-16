@@ -64,6 +64,9 @@ export function hookHarness<T>(mocks: Record<string, unknown>) {
         pendingEffects.push(i);
       }
     },
+    useLayoutEffect: (run: Effect["run"], dependencies?: unknown[]) => {
+      react.useEffect(run, dependencies);
+    },
     useCallback: <V>(callback: V, dependencies: unknown[]) => {
       const i = cursor++;
       const previous = slots[i] as

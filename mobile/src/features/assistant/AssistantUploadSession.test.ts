@@ -627,3 +627,100 @@ test("plain text submission retains the send hook's boolean result", async () =>
   assert.equal(h.drafts.length, 0);
   h.session.dispose();
 });
+
+test("attachment handles count independently by kind and never change when earlier rows are removed", async () => {
+  const h = harness();
+  h.session.add([
+    file("first.txt"),
+    { ...file("chart.png"), mimeType: "image/png" },
+    file("second.txt"),
+  ]);
+  await until(() => !h.session.blocked);
+  assert.deepEqual(
+    [...h.session.entries.values()].map(({ key, handle, kind }) => ({
+      key,
+      handle,
+      kind,
+    })),
+    [
+      { key: "1", handle: "file-1", kind: "file" },
+      { key: "2", handle: "image-1", kind: "image" },
+      { key: "3", handle: "file-2", kind: "file" },
+    ],
+  );
+  const second = h.session.entries.get("3");
+  h.session.remove("1");
+  h.session.add([
+    file("third.txt"),
+    { ...file("next.jpg"), mimeType: "image/jpeg" },
+  ]);
+  await until(() => !h.session.blocked);
+  assert.equal(h.session.entries.get("3"), second);
+  assert.deepEqual(
+    [...h.session.entries.values()].map(({ handle }) => handle),
+    ["image-1", "file-2", "file-3", "image-2"],
+  );
+  h.session.dispose();
+});
+
+test("refused sends restore exactly the same handles while accepted sends never reuse them", async () => {
+  const h = harness();
+  h.session.add([file("first.txt")]);
+  await until(() => !h.session.blocked);
+  const first = h.session.entries.get("1");
+  assert.equal(first?.handle, "file-1");
+  assert.equal(await h.session.submit(async () => false), false);
+  assert.equal(h.session.entries.get("1"), first);
+  assert.equal(h.session.entries.get("1")?.handle, "file-1");
+  assert.equal(await h.session.submit(async () => true), true);
+  h.session.add([file("next.txt")]);
+  await until(() => !h.session.blocked);
+  assert.equal(h.session.entries.get("2")?.handle, "file-2");
+  h.session.dispose();
+});
+
+test("validation and upload failures retain their assigned reference and consume its number", async () => {
+  const h = harness({
+    upload: async (_id, item) => {
+      if (item.name === "failed.txt") throw new Error("Upload refused");
+      return accepted(item.name);
+    },
+  });
+  h.session.add([
+    { ...file("invalid.zip"), mimeType: "application/zip" },
+    file("failed.txt"),
+  ]);
+  const failed = h.session.entries.get("2");
+  assert.equal(failed?.handle, "file-2");
+  await until(() => !!failed?.error);
+  assert.equal(h.session.entries.get("1")?.handle, "file-1");
+  assert.equal(failed?.handle, "file-2");
+  assert.equal(failed?.error, "Upload refused");
+  h.session.remove("1");
+  h.session.remove("2");
+  h.session.add([file("success.txt")]);
+  await until(() => !h.session.blocked);
+  assert.equal(h.session.entries.get("3")?.handle, "file-3");
+  h.session.dispose();
+});
+
+test("attachment allocation skips current group handles case-insensitively and reads membership live", async () => {
+  let members: readonly string[] = ["FILE-1", "file-3", "IMAGE-1"];
+  const h = harness({ reservedMentionHandles: () => members }, "group-id");
+  h.session.add([
+    file("first.txt"),
+    { ...file("chart.png"), mimeType: "image/png" },
+  ]);
+  await until(() => !h.session.blocked);
+  assert.equal(h.session.entries.get("1")?.handle, "file-2");
+  assert.equal(h.session.entries.get("2")?.handle, "image-2");
+  members = ["file-4", "file-5"];
+  h.session.add([file("second.txt")]);
+  await until(() => !h.session.blocked);
+  assert.equal(h.session.entries.get("3")?.handle, "file-3");
+  h.session.add([file("third.txt")]);
+  await until(() => !h.session.blocked);
+  assert.equal(h.session.entries.get("4")?.handle, "file-6");
+  assert.equal(h.session.entries.get("1")?.handle, "file-2");
+  h.session.dispose();
+});

@@ -46,6 +46,7 @@ export function useAssistantUploads({
   generation,
   enabled,
   online,
+  reservedMentionHandles,
 }: {
   conversationId?: string;
   groupId?: string;
@@ -54,6 +55,8 @@ export function useAssistantUploads({
   generation: number;
   enabled: boolean;
   online: boolean;
+  /** Exact live group member handles; not part of upload ownership. */
+  reservedMentionHandles?: readonly string[];
 }) {
   const focused = useIsFocused();
   const [foreground, setForeground] = useState(
@@ -62,8 +65,20 @@ export function useAssistantUploads({
   const [, setVersion] = useState(0);
   const [picking, setPicking] = useState(false);
   const [error, setError] = useState<string>();
-  const live = useRef({ enabled, focused, foreground, online });
-  live.current = { enabled, focused, foreground, online };
+  const live = useRef({
+    enabled,
+    focused,
+    foreground,
+    online,
+    reservedMentionHandles,
+  });
+  live.current = {
+    enabled,
+    focused,
+    foreground,
+    online,
+    reservedMentionHandles,
+  };
   const modelRef = useRef(model);
   modelRef.current = model;
   const current = useRef<AssistantUploadSession | undefined>(undefined);
@@ -84,6 +99,7 @@ export function useAssistantUploads({
     const ctx = new AssistantUploadSession(
       {
         current: () => current.current === ctx && epoch === getAuthEpoch(),
+        reservedMentionHandles: () => live.current.reservedMentionHandles ?? [],
         available: () =>
           live.current.enabled &&
           live.current.focused &&

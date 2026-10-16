@@ -43,6 +43,15 @@ import { getAuthEpoch } from "../../lib/auth/authEpoch";
 import { useTheme } from "../../theme/ThemeContext";
 import { fonts, radius } from "../../theme/designTokens";
 import { AssistantPendingUploads } from "../assistant/AssistantPendingUploads";
+import {
+  AssistantMentionInput,
+  type AssistantMentionOption,
+} from "../assistant/AssistantMentionInput";
+import {
+  resolveAttachmentMentions,
+  stripAttachmentMention,
+  type AttachmentMention,
+} from "../assistant/assistantMentions";
 import { AssistantAttachmentView } from "../assistant/AssistantAttachmentView";
 import { AssistantActivityDisclosure } from "../assistant/AssistantActivityDisclosure";
 import { AssistantCopyButton } from "../assistant/AssistantCopyButton";
@@ -52,7 +61,7 @@ import {
   safeAssistantLinkUrl,
   assistantMarkdownOptions,
 } from "../assistant/assistantMarkdown";
-import { transcriptEndOffset } from "../assistant/assistantTranscriptScroll";
+import { useTranscriptScrollFollow } from "../assistant/useTranscriptScrollFollow";
 import {
   NO_RECIPIENT_EDITS,
   groupCanDecide,
@@ -143,11 +152,6 @@ function GroupChat({
         liveMembers.find((member) => member.kind === "nyxbot")?.id ??
         liveMembers[0]?.id,
     ].filter((id): id is string => !!id);
-  const recipients = resolveRecipients(
-    selection,
-    defaults,
-    group?.members ?? [],
-  );
   const canParticipate =
     !!group &&
     (group.owner?.type !== "org" ||
@@ -162,10 +166,48 @@ function GroupChat({
       !chat.recoveryRequired &&
       liveMembers.length > 0,
     online: chat.online,
+    reservedMentionHandles: liveMembers.map((member) => member.name),
   });
+  const attachmentMentions: AttachmentMention[] = uploads.files.map((row) => ({
+    handle: row.handle,
+    label: row.item?.label ?? row.file.name,
+    kind: row.kind,
+  }));
+  const mentions: AssistantMentionOption[] = [
+    ...liveMembers
+      // A roster update cannot change an existing attachment's stable handle.
+      // The same-name agent remains selectable through the recipient pills.
+      .filter(
+        (member) =>
+          !attachmentMentions.some(
+            (attachment) =>
+              attachment.handle.toLowerCase() === member.name.toLowerCase(),
+          ),
+      )
+      .map((member) => ({
+        id: `agent:${member.id}`,
+        handle: member.name,
+        label: title(member.id, member.name),
+        kind: "agent" as const,
+      })),
+    ...uploads.files.map((row) => ({
+      id: `attachment:${row.key}`,
+      handle: row.handle,
+      label: row.item?.label ?? row.file.name,
+      kind: row.kind,
+      detail: row.error ?? (row.item ? "Ready" : "Uploading…"),
+    })),
+  ];
+  const resolvedDraft = resolveAttachmentMentions(draft, attachmentMentions);
+  const recipients = resolveRecipients(
+    // Route from the text that will reach the server. Recompute on roster
+    // changes so an existing @file-1 cannot become a new agent's mention.
+    withDraft(selection, resolvedDraft, group?.members ?? []),
+    defaults,
+    group?.members ?? [],
+  );
   const list = useRef<FlatList<GroupMessage>>(null);
-  const following = useRef(true);
-  const metrics = useRef({ height: 0, viewportHeight: 0 });
+  const transcriptScroll = useTranscriptScrollFollow(list, groupId);
   const sendLock = useRef(false);
   const mounted = useRef(true);
   useEffect(() => {
@@ -202,12 +244,18 @@ function GroupChat({
     !!recipients.ids.length &&
     liveMembers.length > 0 &&
     (!!draft.trim() || uploads.files.length > 0) &&
-    [...draft].length <= 32768;
+    [...resolvedDraft].length <= 32768;
 
   function edit(value: string) {
     revision.current += 1;
     setDraft(value);
-    setSelection((old) => withDraft(old, value, group?.members ?? []));
+    setSelection((old) =>
+      withDraft(
+        old,
+        resolveAttachmentMentions(value, attachmentMentions),
+        group?.members ?? [],
+      ),
+    );
   }
   function editRecipients(
     update: (old: RecipientSelection) => RecipientSelection,
@@ -215,12 +263,20 @@ function GroupChat({
     revision.current += 1;
     setSelection(update);
   }
+  function removeAttachment(key: string) {
+    if (chat.sending || uploads.session.sending) return;
+    const row = uploads.files.find((file) => file.key === key);
+    if (!row) return;
+    const next = stripAttachmentMention(draft, row.handle);
+    if (next !== draft) edit(next);
+    uploads.remove(key);
+  }
   async function send() {
     if (!canSend || sendLock.current || !chat.available()) return;
     sendLock.current = true;
     setLocalError(undefined);
     const target = recipients;
-    following.current = true;
+    transcriptScroll.follow();
     try {
       await submitGroupDraft({
         draft,
@@ -240,11 +296,15 @@ function GroupChat({
         send: (text) =>
           uploads.session.submit((files) =>
             chat.post({
-              text,
+              text: resolveAttachmentMentions(text, attachmentMentions),
               ...(files?.attachmentIds.length
                 ? { attachment_ids: files.attachmentIds }
                 : {}),
-              ...(target.edited ? { recipient_agent_ids: target.ids } : {}),
+              // Freeze the visible recipients while resolving local file
+              // aliases, including a member joining between edit and POST.
+              ...(target.edited || files?.attachmentIds.length
+                ? { recipient_agent_ids: target.ids }
+                : {}),
             }),
           ),
       });
@@ -328,6 +388,8 @@ function GroupChat({
     group?.members.filter((member) =>
       group.working_agent_ids.includes(member.id),
     ) ?? [];
+  const stableTranscript =
+    !!chat.data?.messages.length && !chat.sending && !working.length;
 
   return (
     <WorkspacePage
@@ -431,42 +493,12 @@ function GroupChat({
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         maintainVisibleContentPosition={
-          chat.data?.messages.length ? { minIndexForVisible: 0 } : undefined
+          stableTranscript && !transcriptScroll.following
+            ? { minIndexForVisible: 0 }
+            : undefined
         }
         contentContainerStyle={styles.transcript}
-        onLayout={(event) => {
-          metrics.current.viewportHeight = event.nativeEvent.layout.height;
-          if (following.current)
-            list.current?.scrollToOffset({
-              offset: transcriptEndOffset(
-                metrics.current.height,
-                metrics.current.viewportHeight,
-              ),
-              animated: false,
-            });
-        }}
-        onContentSizeChange={(_width, height) => {
-          metrics.current.height = height;
-          if (following.current)
-            list.current?.scrollToOffset({
-              offset: transcriptEndOffset(
-                height,
-                metrics.current.viewportHeight,
-              ),
-              animated: false,
-            });
-        }}
-        onScrollBeginDrag={() => {
-          following.current = false;
-        }}
-        onScroll={(event) => {
-          const { contentSize, contentOffset, layoutMeasurement } =
-            event.nativeEvent;
-          following.current =
-            contentSize.height - layoutMeasurement.height - contentOffset.y <
-            80;
-        }}
-        scrollEventThrottle={100}
+        {...transcriptScroll.listProps}
         ListHeaderComponent={
           chat.data?.before_seq ? (
             <ActionButton
@@ -475,7 +507,7 @@ function GroupChat({
               loading={chat.loadingOlder}
               disabled={blocked}
               onPress={() => {
-                following.current = false;
+                transcriptScroll.pause();
                 void chat.loadOlder();
               }}
             />
@@ -510,7 +542,7 @@ function GroupChat({
             onFeedback={(vote) => void feedback(item.id, vote)}
             onComment={() => {
               if (!feedbackEnabled || !chat.available()) return;
-              following.current = false;
+              transcriptScroll.pause();
               setFeedbackDraft({
                 messageId: item.id,
                 vote: item.feedback?.vote,
@@ -518,7 +550,7 @@ function GroupChat({
               });
             }}
             onDisclosure={() => {
-              following.current = false;
+              transcriptScroll.pause();
             }}
           />
         )}
@@ -724,7 +756,7 @@ function GroupChat({
           )}
           <AssistantPendingUploads
             files={uploads.files}
-            remove={uploads.remove}
+            remove={removeAttachment}
             disabled={chat.sending || uploads.session.sending}
           />
           {(uploads.error || uploads.notice) && (
@@ -748,18 +780,16 @@ function GroupChat({
             >
               <Paperclip size={20} color={colors.textMuted} />
             </Icon>
-            <TextInput
-              key={composerGeneration}
+            <AssistantMentionInput
+              generation={composerGeneration}
               accessibilityLabel="Message the group"
-              placeholder="Message · @mention an agent"
-              placeholderTextColor={colors.textMuted}
+              placeholder="Message the group…"
               value={draft}
+              mentions={mentions}
               onChangeText={(value) => {
                 if (currentComposer.current === composerGeneration) edit(value);
               }}
               editable={!blocked && !!liveMembers.length}
-              multiline
-              maxLength={32768}
               style={[styles.input, { color: colors.textPrimary }]}
             />
             <Icon
@@ -777,6 +807,12 @@ function GroupChat({
               )}
             </Icon>
           </View>
+          {[...resolvedDraft].length > 32768 && (
+            <Label style={[styles.small, { color: colors.danger }]}>
+              Keep the message within 32,768 characters, including attachment
+              references.
+            </Label>
+          )}
         </View>
       )}
       <Modal

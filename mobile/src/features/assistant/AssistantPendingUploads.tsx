@@ -32,13 +32,19 @@ export function AssistantPendingUploads({
     <>
       {files.length ? (
         <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
           style={styles.list}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.content}
         >
           {files.map((row) => {
+            // Some native document providers omit MIME metadata. Preserve the
+            // image preview without changing an already assigned handle.
             const image =
-              !row.error && /\.(png|jpe?g|gif|webp)$/i.test(row.file.name);
+              !row.error &&
+              (row.kind === "image" ||
+                /\.(png|jpe?g|gif|webp)$/i.test(row.file.name));
             const status =
               row.error ??
               (row.item
@@ -74,11 +80,17 @@ export function AssistantPendingUploads({
                   <FileText size={23} color={colors.textSecondary} />
                 )}
                 <View style={styles.fill}>
+                  <Label
+                    style={[styles.handle, { color: colors.primaryOnTint }]}
+                  >
+                    @{row.handle}
+                  </Label>
                   <Label numberOfLines={1}>
                     {row.item?.label ?? row.file.name}
                   </Label>
                   <Label
                     muted
+                    numberOfLines={2}
                     style={[
                       styles.status,
                       row.error ? { color: colors.danger } : undefined,
@@ -140,18 +152,20 @@ export function AssistantPendingUploads({
 }
 const styles = StyleSheet.create({
   fill: { flex: 1, minWidth: 0 },
-  list: { maxHeight: 154 },
-  content: { gap: 6 },
+  list: { flexGrow: 0, maxHeight: 100 },
+  content: { gap: 8, padding: 4 },
   card: {
+    width: 260,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     paddingLeft: 10,
-    paddingVertical: 4,
+    paddingVertical: 6,
     borderWidth: 1,
     borderRadius: radius.md,
   },
   thumbnail: { width: 36, height: 36, borderRadius: 6 },
+  handle: { fontSize: 11 },
   status: { fontSize: 11 },
   close: {
     minWidth: 44,

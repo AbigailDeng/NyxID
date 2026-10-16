@@ -107,12 +107,15 @@ export function useWorkspaceBack({
   defaultRole = "menu",
   disabled = false,
   label = "Back",
+  options,
 }: {
   active: boolean;
   onBack: () => void;
   defaultRole?: WorkspaceHeaderRole;
   disabled?: boolean;
   label?: string;
+  /** Screen-specific title/actions must be applied with the navigation role. */
+  options?: NativeStackNavigationOptions;
 }) {
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -137,6 +140,7 @@ export function useWorkspaceBack({
         label: active ? label : "Back",
       }),
       gestureEnabled: !active && !disabled,
+      ...options,
     });
   }, [
     active,
@@ -147,6 +151,7 @@ export function useWorkspaceBack({
     localBack,
     navigation,
     onOpenMenu,
+    options,
   ]);
 
   usePreventRemove(focused && (active || disabled), localBack);
