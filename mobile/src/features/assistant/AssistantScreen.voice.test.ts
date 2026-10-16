@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { deferred, hookHarness } from "./assistantHookTestHarness";
 import type { AssistantUploadedMessage } from "./AssistantUploadSession";
+import * as voiceSelection from "./voice/voiceSelection";
 
 // Exercise the screen's real handlers and render conditions. Native UI, network,
 // and existing assistant/upload hooks are boundaries, not reimplementations of
@@ -41,10 +42,12 @@ function elements(element: Element): Element[] {
   ];
 }
 
-function setup(conversationId?: string) {
+// Opt in here to retain coverage of the paused voice flow.
+function setup(conversationId?: string, enableVoiceForTest = true) {
   const draft = deferred<string>();
   const events: unknown[][] = [];
   const drafts: { agentId: string; signal: AbortSignal }[] = [];
+  const featureQueries: { enabled: boolean }[] = [];
   let epoch = 7;
   let features: string[] | undefined = ["assistant:voice"];
   const agent = {
@@ -169,7 +172,10 @@ function setup(conversationId?: string) {
       }),
     },
     "@tanstack/react-query": {
-      useQuery: () => ({ data: features }),
+      useQuery: (options: { enabled: boolean }) => {
+        featureQueries.push(options);
+        return { data: features };
+      },
     },
     "expo-web-browser": { openBrowserAsync: async () => {} },
     "react-native-markdown-display": {
@@ -229,6 +235,10 @@ function setup(conversationId?: string) {
     "./voice/AssistantVoiceConversation": {
       AssistantVoiceConversation: "AssistantVoiceConversation",
     },
+    "./voice/voiceSelection": {
+      ...voiceSelection,
+      NATIVE_VOICE_ENTRY_ENABLED: enableVoiceForTest,
+    },
     "../../lib/api/assistantVoiceApi": {
       assistantVoiceFeatures: async () => features,
     },
@@ -258,6 +268,7 @@ function setup(conversationId?: string) {
     props,
     events,
     drafts,
+    featureQueries,
     draft,
     all,
     button,
@@ -273,6 +284,19 @@ function setup(conversationId?: string) {
     },
   };
 }
+
+test("native voice entry stays hidden despite a cached server flag in new and saved chats", () => {
+  for (const id of [undefined, A]) {
+    const x = setup(id, voiceSelection.NATIVE_VOICE_ENTRY_ENABLED);
+    assert.equal(x.button("Open voice call"), undefined);
+    assert.equal(x.voice(), undefined);
+    assert.ok(x.button("Attach files"));
+    assert.ok(x.button("Send message"));
+    assert.equal(x.featureQueries.at(-1)?.enabled, false);
+    assert.equal(x.drafts.length, 0);
+    x.harness.unmount();
+  }
+});
 
 test("empty chat creates exactly one real draft and adopts it before opening voice", async () => {
   const x = setup();

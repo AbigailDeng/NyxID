@@ -1,5 +1,8 @@
 import type { VoiceOption, VoicePreferences } from "./voiceContracts";
 
+// Keep native voice entry paused until end-to-end speech is verified.
+export const NATIVE_VOICE_ENTRY_ENABLED = false;
+
 export function voiceOptionKey(option: VoiceOption | VoicePreferences) {
   return JSON.stringify([
     option.service_id,

@@ -70,7 +70,10 @@ import { parseAutomationLink } from "../automations/automationLinks";
 import { NYXID_FRONTEND_URL } from "../../lib/env";
 import { useTranscriptScrollFollow } from "./useTranscriptScrollFollow";
 import { AssistantVoiceConversation } from "./voice/AssistantVoiceConversation";
-import { showVoiceComposer } from "./voice/voiceSelection";
+import {
+  NATIVE_VOICE_ENTRY_ENABLED,
+  showVoiceComposer,
+} from "./voice/voiceSelection";
 import { assistantVoiceFeatures } from "../../lib/api/assistantVoiceApi";
 import { assistantUploadsApi } from "../../lib/api/assistantUploadsApi";
 import { getAuthEpoch } from "../../lib/auth/authEpoch";
@@ -229,12 +232,14 @@ export function AssistantScreen({
   const voiceFeatures = useQuery({
     queryKey: ["workspace", "voice-features", getAuthEpoch()],
     queryFn: ({ signal }) => assistantVoiceFeatures(signal),
-    enabled: assistant.online,
+    enabled: NATIVE_VOICE_ENTRY_ENABLED && assistant.online,
     retry: false,
     staleTime: 30000,
   });
   const voiceAvailable = showVoiceComposer({
-    enabled: voiceFeatures.data?.includes("assistant:voice") === true,
+    enabled:
+      NATIVE_VOICE_ENTRY_ENABLED &&
+      voiceFeatures.data?.includes("assistant:voice") === true,
     running,
     text: draft,
     attachmentCount: uploads.files.length,
