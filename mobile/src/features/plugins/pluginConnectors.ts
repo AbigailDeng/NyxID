@@ -8,6 +8,7 @@ export interface ConnectorCardItem {
   readonly name: string;
   readonly initial: string;
   readonly iconSlug: string | null;
+  readonly iconUrl?: string | null;
   readonly category: string;
   readonly description: string;
   readonly meta: string;
@@ -132,6 +133,13 @@ function addedItem(
     name,
     initial: connectorInitial(name),
     iconSlug,
+    iconUrl:
+      iconSlug === null
+        ? (first.icon_url ?? null)
+        : (connections.length === 1 ? first.icon_url : null) ||
+          first.catalog_icon_url ||
+          catalogEntry?.icon_url ||
+          null,
     category: first.service_type === "ssh" ? "Connector · SSH" : "Connector",
     description:
       catalogEntry?.description ?? first.description ?? endpointDescription,
@@ -184,6 +192,7 @@ export function deriveConnectorItems(
         name: entry.name,
         initial: connectorInitial(entry.name),
         iconSlug: entry.slug,
+        iconUrl: entry.icon_url,
         category:
           entry.service_type === "ssh" ? "Connector · SSH" : "Connector",
         description:

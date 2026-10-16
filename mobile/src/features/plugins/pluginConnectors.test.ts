@@ -164,6 +164,121 @@ test("missing catalog still preserves Added while catalog-only cards are availab
   assert.deepEqual(result.available[0]?.connections, []);
 });
 
+test("a single catalog connection prefers its override then server catalog icon then fetched catalog icon", () => {
+  const override = "https://assets.example/connection.png";
+  const serverCatalog = "https://assets.example/server-catalog.svg";
+  const fetchedCatalog = "https://assets.example/fetched-catalog.svg";
+  const icon = (
+    connectionPatch: Partial<ServiceConnection>,
+    catalogPatch: Partial<CatalogEntry> = { icon_url: fetchedCatalog },
+  ) =>
+    deriveConnectorItems(
+      [{ ...connection, ...connectionPatch }],
+      [{ ...catalog, ...catalogPatch }],
+    ).added[0]?.iconUrl;
+
+  assert.equal(
+    icon({ icon_url: override, catalog_icon_url: serverCatalog }),
+    override,
+  );
+  assert.equal(
+    icon({ icon_url: null, catalog_icon_url: serverCatalog }),
+    serverCatalog,
+  );
+  assert.equal(icon({ catalog_icon_url: serverCatalog }), serverCatalog);
+  assert.equal(
+    icon({ icon_url: "", catalog_icon_url: serverCatalog }),
+    serverCatalog,
+  );
+  assert.equal(
+    icon({ icon_url: null, catalog_icon_url: null }),
+    fetchedCatalog,
+  );
+  assert.equal(icon({ icon_url: "", catalog_icon_url: "" }), fetchedCatalog);
+  assert.equal(icon({}, { icon_url: null }), null);
+  assert.equal(icon({}, {}), null);
+  assert.equal(
+    deriveConnectorItems(
+      [{ ...connection, catalog_icon_url: serverCatalog }],
+      [],
+    ).added[0]?.iconUrl,
+    serverCatalog,
+  );
+});
+
+test("grouped credentials share their catalog icon rather than an individual connection override", () => {
+  const first = {
+    ...connection,
+    icon_url: "https://assets.example/personal.png",
+    catalog_icon_url: "https://assets.example/server-catalog.svg",
+  };
+  const second = {
+    ...connection,
+    id: "github-work",
+    icon_url: "https://assets.example/work.png",
+    catalog_icon_url: "https://assets.example/other-catalog.svg",
+  };
+  const fetched = {
+    ...catalog,
+    icon_url: "https://assets.example/catalog.svg",
+  };
+  assert.equal(
+    deriveConnectorItems([first, second], [fetched]).added[0]?.iconUrl,
+    first.catalog_icon_url,
+  );
+  assert.equal(
+    deriveConnectorItems(
+      [{ ...first, catalog_icon_url: null }, second],
+      [fetched],
+    ).added[0]?.iconUrl,
+    fetched.icon_url,
+  );
+  assert.equal(
+    deriveConnectorItems(
+      [{ ...first, catalog_icon_url: null }, second],
+      [catalog],
+    ).added[0]?.iconUrl,
+    null,
+  );
+});
+
+test("custom connections use only their own icon and keep existing slug fallback", () => {
+  const custom = {
+    ...connection,
+    catalog_service_slug: null,
+    slug: catalog.slug,
+    icon_url: "https://assets.example/custom.png",
+    catalog_icon_url: "https://assets.example/ignored-catalog.svg",
+  };
+  const fetched = {
+    ...catalog,
+    icon_url: "https://assets.example/catalog.svg",
+  };
+  const result = deriveConnectorItems([custom], [fetched]);
+  assert.equal(result.added[0]?.iconSlug, null);
+  assert.equal(result.added[0]?.iconUrl, custom.icon_url);
+  assert.equal(result.available[0]?.iconUrl, fetched.icon_url);
+  for (const icon_url of [undefined, null]) {
+    assert.equal(
+      deriveConnectorItems([{ ...custom, icon_url }], [fetched]).added[0]
+        ?.iconUrl,
+      null,
+    );
+  }
+});
+
+test("available cards preserve catalog icons and older omitted/null metadata", () => {
+  for (const icon_url of [
+    "https://assets.example/catalog.svg",
+    null,
+    undefined,
+  ]) {
+    const result = deriveConnectorItems([], [{ ...catalog, icon_url }]);
+    assert.equal(result.available[0]?.iconUrl, icon_url);
+    assert.equal(result.available[0]?.iconSlug, catalog.slug);
+  }
+});
+
 test("catalog auth metadata follows Web detection and SSH category", () => {
   const meta = (patch: Partial<CatalogEntry>) =>
     deriveConnectorItems([], [{ ...catalog, ...patch }]).available[0]?.meta;

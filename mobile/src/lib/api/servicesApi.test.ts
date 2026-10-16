@@ -104,3 +104,41 @@ test("provider-policy rejection reaches the caller without filtering or retrying
   );
   assert.equal(requests, 1);
 });
+
+test("plugin API reads preserve database icon metadata across keys and catalog responses", async () => {
+  const connection = {
+    id: "github-personal",
+    label: "Personal GitHub",
+    slug: "api-github-personal",
+    catalog_service_slug: "api-github",
+    status: "active",
+    is_active: true,
+    auto_connected: false,
+    credential_type: "oauth2",
+    icon_url: "https://assets.example/personal.png",
+    catalog_icon_url: "https://assets.example/catalog.svg",
+  };
+  const catalogEntry = {
+    slug: "api-github",
+    name: "GitHub",
+    auth_method: "bearer",
+    auth_key_name: "Authorization",
+    service_type: "http",
+    requires_credential: true,
+    requires_gateway_url: false,
+    icon_url: "https://assets.example/catalog.svg",
+  };
+  const paths: string[] = [];
+  const api = loadServicesApi(async (path) => {
+    paths.push(path);
+    if (path === "/keys") return { keys: [connection] };
+    if (path === "/catalog") return { entries: [catalogEntry] };
+    throw new Error("Unexpected icon metadata request");
+  });
+  const keys = await api.pluginConnections();
+  const entries = await api.catalog();
+  assert.equal(keys[0]?.icon_url, connection.icon_url);
+  assert.equal(keys[0]?.catalog_icon_url, connection.catalog_icon_url);
+  assert.equal(entries[0]?.icon_url, catalogEntry.icon_url);
+  assert.deepEqual(paths, ["/keys", "/catalog"]);
+});

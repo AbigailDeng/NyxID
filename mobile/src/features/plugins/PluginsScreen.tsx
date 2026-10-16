@@ -24,6 +24,7 @@ import type {
   WorkspaceNavigationProp,
 } from "../../app/navigationTypes";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
+import { ServiceIcon } from "../../components/ServiceIcon";
 import {
   ActionButton,
   Card,
@@ -157,6 +158,15 @@ export function PluginsScreen({
           >
             <Card>
               <View style={styles.row}>
+                <ServiceIcon
+                  iconUrl={
+                    connection.icon_url ||
+                    connection.catalog_icon_url ||
+                    manageItem?.iconUrl
+                  }
+                  initial={manageItem?.initial ?? "?"}
+                  color={colors.textSecondary}
+                />
                 <View style={styles.flex}>
                   <Label style={styles.name}>{connection.label}</Label>
                   <Label muted style={styles.description}>
@@ -422,11 +432,11 @@ function ConnectorCard({
           <ArrowRight size={16} color={colors.textMuted} />
         </View>
         <View style={styles.row}>
-          <View style={[styles.tile, { backgroundColor: colors.ghostBg }]}>
-            <Text style={[styles.initial, { color: statusColor }]}>
-              {item.initial}
-            </Text>
-          </View>
+          <ServiceIcon
+            iconUrl={item.iconUrl}
+            initial={item.initial}
+            color={statusColor}
+          />
           <View style={styles.flex}>
             <Text style={[styles.name, { color: colors.textPrimary }]}>
               {item.name}
@@ -484,15 +494,6 @@ const styles = StyleSheet.create({
   sectionTitle: { fontFamily: fonts.bodySemi, fontSize: 13 },
   card: { minHeight: 114, padding: 16, gap: 8, borderRadius: 13 },
   badge: { fontFamily: fonts.bodySemi, fontSize: 10, lineHeight: 14 },
-  tile: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
-  initial: { fontFamily: fonts.bodySemi, fontSize: 14 },
   name: { fontFamily: fonts.bodySemi, fontSize: 14, lineHeight: 20 },
   description: { fontFamily: fonts.bodyRegular, fontSize: 12, lineHeight: 18 },
   studio: {

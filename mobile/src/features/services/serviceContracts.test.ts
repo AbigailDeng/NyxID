@@ -264,6 +264,39 @@ test("connection and catalog schemas retain optional health and permission capab
   );
 });
 
+test("service schemas retain database icon URLs and accept omitted or null icon metadata", () => {
+  const connectionIcon = "/api/v1/keys/service-1/icon";
+  const catalogIcon = "https://assets.example/catalog/github.svg";
+  const parsedConnection = serviceConnectionSchema.parse({
+    ...connection,
+    icon_url: connectionIcon,
+    catalog_icon_url: catalogIcon,
+  });
+  assert.equal(parsedConnection.icon_url, connectionIcon);
+  assert.equal(parsedConnection.catalog_icon_url, catalogIcon);
+  assert.equal(
+    catalogEntrySchema.parse({ ...entry, icon_url: catalogIcon }).icon_url,
+    catalogIcon,
+  );
+  assert.equal(serviceConnectionSchema.parse(connection).icon_url, undefined);
+  assert.equal(
+    serviceConnectionSchema.parse(connection).catalog_icon_url,
+    undefined,
+  );
+  assert.equal(catalogEntrySchema.parse(entry).icon_url, undefined);
+  const cleared = serviceConnectionSchema.parse({
+    ...connection,
+    icon_url: null,
+    catalog_icon_url: null,
+  });
+  assert.equal(cleared.icon_url, null);
+  assert.equal(cleared.catalog_icon_url, null);
+  assert.equal(
+    catalogEntrySchema.parse({ ...entry, icon_url: null }).icon_url,
+    null,
+  );
+});
+
 test("token exchange credentials use only declared fields and validate gateway URLs", () => {
   const exchange = {
     ...entry,
