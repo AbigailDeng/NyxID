@@ -4,6 +4,10 @@ import test from "node:test";
 import { deferred, hookHarness } from "./assistantHookTestHarness";
 import type { AssistantUploadedMessage } from "./AssistantUploadSession";
 import * as voiceSelection from "./voice/voiceSelection";
+import {
+  acknowledgementSchema,
+  type AssistantAcknowledgement,
+} from "./assistantTypes";
 
 // Exercise the screen's real handlers and render conditions. Native UI, network,
 // and existing assistant/upload hooks are boundaries, not reimplementations of
@@ -70,7 +74,7 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
       } as Record<string, any>,
       messages: [],
       waiting: [],
-      acknowledgements: [],
+      acknowledgements: [] as AssistantAcknowledgement[],
       approvals: [],
     };
   }
@@ -217,6 +221,9 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     "./AssistantActivityDisclosure": {
       AssistantActivityDisclosure: "AssistantActivityDisclosure",
     },
+    "./AssistantAcknowledgements": {
+      AssistantAcknowledgements: "AssistantAcknowledgements",
+    },
     "./AssistantCopyButton": { AssistantCopyButton: "AssistantCopyButton" },
     "./AssistantAttachmentView": {
       AssistantAttachmentView: "AssistantAttachmentView",
@@ -296,6 +303,50 @@ test("native voice entry stays hidden despite a cached server flag in new and sa
     assert.equal(x.drafts.length, 0);
     x.harness.unmount();
   }
+});
+
+test("the chat screen routes authoritative confirmations through compact history while retaining pending actions", () => {
+  const x = setup(A, false);
+  const row = acknowledgementSchema.parse({
+    id: "d9428888-122b-41e1-85c5-61cd3cbb3210",
+    kind: "action",
+    status: "pending",
+    summary: "Create Twitter assistant",
+    service_name: null,
+    service_slug: null,
+    tool_name: "nyxid__spawn_subagent",
+    created_at: "2026-10-16T00:00:00Z",
+    expires_at: "2099-10-16T00:15:00Z",
+  });
+  x.assistant.history!.acknowledgements = [row];
+  x.harness.render();
+  const footer = () =>
+    elements(
+      expand(
+        x.all().find((node) => node.type === "FlatList")!.props
+          .ListFooterComponent,
+      ),
+    );
+  let confirmations = footer().find(
+    (node) => node.type === "AssistantAcknowledgements",
+  )!;
+  assert.equal(confirmations.key, A);
+  assert.equal(confirmations.props.acknowledgements[0], row);
+  const pending = elements(expand(confirmations.props.renderPending(row)));
+  assert.ok(pending.find((node) => node.props.label === "Allow"));
+  assert.ok(pending.find((node) => node.props.label === "Deny"));
+  row.status = "used";
+  x.harness.render();
+  confirmations = footer().find(
+    (node) => node.type === "AssistantAcknowledgements",
+  )!;
+  assert.equal(confirmations.props.acknowledgements[0].status, "used");
+  assert.equal(confirmations.props.renderPending(row), null);
+  assert.equal(
+    footer().some((node) => node.type === "Card"),
+    false,
+  );
+  x.harness.unmount();
 });
 
 test("empty chat creates exactly one real draft and adopts it before opening voice", async () => {

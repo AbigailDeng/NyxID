@@ -58,6 +58,7 @@ import {
 } from "./assistantComposerPress";
 import { submitAssistantDraft } from "./assistantComposerDraft";
 import { AssistantActivityDisclosure } from "./AssistantActivityDisclosure";
+import { AssistantAcknowledgements } from "./AssistantAcknowledgements";
 import { AssistantCopyButton } from "./AssistantCopyButton";
 import { assistantSelectableMarkdown } from "./assistantSelectableMarkdown";
 import { AssistantAttachmentView } from "./AssistantAttachmentView";
@@ -692,7 +693,24 @@ export function AssistantScreen({
     );
   }
 
+  function renderAuthoredReview(row: AssistantAcknowledgement) {
+    return (
+      <NativeAuthoredSkillReview
+        acknowledgement={row}
+        initiallyOpen={row.id === route?.params?.acknowledgementId}
+        disabled={Boolean(assistant.deciding) || assistant.loadingOlder}
+        online={assistant.online}
+        onDecision={(choice) => assistant.decide(row.id, choice)}
+        onRefresh={() => {
+          if (conversation?.id)
+            return assistant.openConversation(conversation.id);
+        }}
+      />
+    );
+  }
+
   function renderAcknowledgement(row: AssistantAcknowledgement) {
+    if (row.status !== "pending") return null;
     const pending = row.status === "pending";
     const expired = Date.parse(row.expires_at) <= Date.now();
     return (
@@ -744,17 +762,7 @@ export function AssistantScreen({
           </Label>
         ) : null}
         {row.authored_skill ? (
-          <NativeAuthoredSkillReview
-            acknowledgement={row}
-            initiallyOpen={row.id === route?.params?.acknowledgementId}
-            disabled={Boolean(assistant.deciding) || assistant.loadingOlder}
-            online={assistant.online}
-            onDecision={(choice) => assistant.decide(row.id, choice)}
-            onRefresh={() => {
-              if (conversation?.id)
-                return assistant.openConversation(conversation.id);
-            }}
-          />
+          renderAuthoredReview(row)
         ) : pending ? (
           <>
             <Label muted>
@@ -993,7 +1001,14 @@ export function AssistantScreen({
                 message={`${waiting.title}${waiting.detail ? ` · ${waiting.detail}` : ""}`}
               />
             ))}
-            {assistant.history?.acknowledgements.map(renderAcknowledgement)}
+            <AssistantAcknowledgements
+              key={conversation?.id ?? "draft"}
+              acknowledgements={assistant.history?.acknowledgements ?? []}
+              selectedId={route?.params?.acknowledgementId}
+              renderPending={renderAcknowledgement}
+              renderAuthoredReview={renderAuthoredReview}
+              onToggle={() => transcriptScroll.pause()}
+            />
             {assistant.history?.approvals.map((approval) => (
               <Card key={approval.id}>
                 <Label style={styles.cardTitle}>

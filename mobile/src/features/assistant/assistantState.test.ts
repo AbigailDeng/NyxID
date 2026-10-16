@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   continuationText,
   acknowledgementTitle,
+  acknowledgementDecisionLabel,
   mergeAssistantHistory,
   needsClientContinuation,
   retryInput,
@@ -122,6 +123,41 @@ test("account confirmation identifies management versus specialist read access",
       decider: "orchestrator",
     }),
     /read/,
+  );
+});
+
+test("decision labels mirror Web and never equate a used confirmation with action success", () => {
+  assert.equal(
+    acknowledgementDecisionLabel({
+      ...acknowledgement,
+      status: "used",
+      decided_by: "user",
+    }),
+    "Used",
+  );
+  assert.equal(
+    acknowledgementDecisionLabel({ ...acknowledgement, decided_by: "user" }),
+    "Allowed by you",
+  );
+  assert.equal(
+    acknowledgementDecisionLabel({
+      ...acknowledgement,
+      status: "denied",
+      decided_by: "orchestrator",
+      reason: " Outside the requested scope. ",
+    }),
+    "Denied by NyxBot: Outside the requested scope.",
+  );
+  assert.equal(
+    acknowledgementDecisionLabel({ ...acknowledgement, status: "expired" }),
+    "Expired",
+  );
+  assert.equal(
+    acknowledgementDecisionLabel({
+      ...acknowledgement,
+      status: "unknown" as never,
+    }),
+    "Status unavailable",
   );
 });
 

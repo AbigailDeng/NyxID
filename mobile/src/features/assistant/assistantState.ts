@@ -49,6 +49,25 @@ export function acknowledgementTitle(row: AssistantAcknowledgement): string {
   }
 }
 
+/** Match Web's persisted decision labels without implying an action succeeded. */
+export function acknowledgementDecisionLabel(
+  row: AssistantAcknowledgement,
+): string {
+  const status = {
+    pending: "Pending",
+    allowed: "Allowed",
+    denied: "Denied",
+    expired: "Expired",
+    used: "Used",
+  }[row.status];
+  if (!status) return "Status unavailable";
+  if ((row.status !== "allowed" && row.status !== "denied") || !row.decided_by)
+    return status;
+  const by = row.decided_by === "orchestrator" ? "NyxBot" : "you";
+  const reason = row.reason?.trim();
+  return reason ? `${status} by ${by}: ${reason}` : `${status} by ${by}`;
+}
+
 export function retryInput(
   history: AssistantHistory | undefined,
   reply: AssistantMessage,
