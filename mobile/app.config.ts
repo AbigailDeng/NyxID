@@ -1,7 +1,11 @@
 import type { ExpoConfig, ConfigContext } from "expo/config";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { loadEnv, resolveProfile, appIdentity } = require("./scripts/lib/load-env");
+const {
+  loadEnv,
+  resolveProfile,
+  appIdentity,
+} = require("./scripts/lib/load-env");
 
 function safeHost(url: string): string | null {
   try {
@@ -27,9 +31,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const apiHost = safeHost(r.apiBaseUrl);
   const associatedDomains: string[] = [];
   if (apiHost) associatedDomains.push(`applinks:${apiHost}`);
-  if (r.universalLinkHost) associatedDomains.push(`applinks:${r.universalLinkHost}`);
+  if (r.universalLinkHost)
+    associatedDomains.push(`applinks:${r.universalLinkHost}`);
 
-  const androidIntentFilters: NonNullable<ExpoConfig["android"]>["intentFilters"] = [
+  const androidIntentFilters: NonNullable<
+    ExpoConfig["android"]
+  >["intentFilters"] = [
     {
       action: "VIEW",
       data: [{ scheme: ident.scheme }],
@@ -67,14 +74,20 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       associatedDomains,
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
-        NSCameraUsageDescription: "Allow NyxID to scan login approval QR codes.",
+        NSCameraUsageDescription:
+          "Allow NyxID to scan login approval QR codes.",
+        NSMicrophoneUsageDescription:
+          "Allow NyxID to use your microphone during voice conversations.",
       },
     },
     android: {
       package: r.androidPackage,
       versionCode: Number(r.androidVersionCode),
       googleServicesFile: "./google-services.json",
-      permissions: ["android.permission.CAMERA"],
+      permissions: [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+      ],
       blockedPermissions: [
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
@@ -113,8 +126,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         "expo-camera",
         {
           cameraPermission: "Allow NyxID to scan login approval QR codes.",
-          microphonePermission: false,
-          recordAudioAndroid: false,
+          microphonePermission:
+            "Allow NyxID to use your microphone during voice conversations.",
+          recordAudioAndroid: true,
         },
       ],
     ],

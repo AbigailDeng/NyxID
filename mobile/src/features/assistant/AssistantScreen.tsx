@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Keyboard,
   Modal,
   Pressable,
   ScrollView,
@@ -11,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
+import { useQuery } from "@tanstack/react-query";
 import type { NativeStackNavigationOptions } from "@react-navigation/native-stack";
 import * as WebBrowser from "expo-web-browser";
 import Markdown, {
@@ -26,6 +28,7 @@ import {
   ArrowUp,
   Square,
   X,
+  Mic,
 } from "lucide-react-native";
 import type {
   AssistantParams,
@@ -71,6 +74,11 @@ import { NativeAuthoredSkillReview } from "../plugins/NativeAuthoredSkillReview"
 import { parseAutomationLink } from "../automations/automationLinks";
 import { NYXID_FRONTEND_URL } from "../../lib/env";
 import { useTranscriptScrollFollow } from "./useTranscriptScrollFollow";
+import { AssistantVoiceConversation } from "./voice/AssistantVoiceConversation";
+import { showVoiceComposer } from "./voice/voiceSelection";
+import { assistantVoiceFeatures } from "../../lib/api/assistantVoiceApi";
+import { assistantUploadsApi } from "../../lib/api/assistantUploadsApi";
+import { getAuthEpoch } from "../../lib/auth/authEpoch";
 import {
   assistantMarkdownOptions,
   safeAssistantLinkUrl,
@@ -129,6 +137,9 @@ export function AssistantScreen({
   >();
   const [title, setTitle] = useState("");
   const [localError, setLocalError] = useState<string>();
+  const [voiceThread, setVoiceThread] = useState<string>();
+  const [openingVoice, setOpeningVoice] = useState(false);
+  const voiceOpening = useRef<AbortController | undefined>(undefined);
   const composerPress = useRef(createAssistantComposerPressGuard());
   const [stopProtected, setStopProtected] = useState(false);
   const transcript = useRef<FlatList<AssistantMessage>>(null);
@@ -225,6 +236,97 @@ export function AssistantScreen({
     !uploads.picking &&
     (!!draft.trim() || uploads.files.length > 0) &&
     [...resolvedDraft].length <= 32768;
+
+  const voiceFeatures = useQuery({
+    queryKey: ["workspace", "voice-features", getAuthEpoch()],
+    queryFn: ({ signal }) => assistantVoiceFeatures(signal),
+    enabled: assistant.online,
+    retry: false,
+    staleTime: 30000,
+  });
+  const voiceAvailable = showVoiceComposer({
+    enabled: voiceFeatures.data?.includes("assistant:voice") === true,
+    running,
+    text: draft,
+    attachmentCount: uploads.files.length,
+    uploadBlocked:
+      uploads.blocked || uploads.picking || uploads.session.sending,
+    channel: conversation?.channel,
+    subagent: conversation?.role === "subagent",
+    destroyed: !!destroyed,
+  });
+  const voiceContext = useRef({
+    agentId: assistant.agentId,
+    conversationId: assistant.conversationId,
+    epoch: getAuthEpoch(),
+    revision: draftRevision.current,
+    voiceAllowed: canCompose && voiceAvailable,
+  });
+  voiceContext.current = {
+    agentId: assistant.agentId,
+    conversationId: assistant.conversationId,
+    epoch: getAuthEpoch(),
+    revision: draftRevision.current,
+    voiceAllowed: canCompose && voiceAvailable,
+  };
+  useEffect(() => {
+    setOpeningVoice(false);
+    return () => {
+      voiceOpening.current?.abort();
+    };
+  }, [route?.params?.agentId, route?.params?.conversationId]);
+  useEffect(() => {
+    if (voiceThread && voiceThread !== assistant.conversationId)
+      setVoiceThread(undefined);
+  }, [voiceThread, assistant.conversationId]);
+
+  async function openVoice() {
+    if (!canCompose || !voiceAvailable || voiceOpening.current) return;
+    if (voiceThread === assistant.conversationId && voiceThread) return;
+    Keyboard.dismiss();
+    const scope = { ...voiceContext.current, revision: draftRevision.current };
+    const controller = new AbortController();
+    voiceOpening.current = controller;
+    setOpeningVoice(true);
+    const current = () =>
+      !controller.signal.aborted &&
+      voiceContext.current.agentId === scope.agentId &&
+      voiceContext.current.conversationId === scope.conversationId &&
+      voiceContext.current.voiceAllowed &&
+      getAuthEpoch() === scope.epoch &&
+      draftRevision.current === scope.revision;
+    try {
+      const id =
+        scope.conversationId ??
+        (await assistantUploadsApi.createDraft(
+          scope.agentId,
+          controller.signal,
+        ));
+      if (!current()) return;
+      if (!scope.conversationId) {
+        adoptedId.current = id;
+        assistant.openConversation(id);
+        navigation.setParams({
+          conversationId: id,
+          acknowledgementId: undefined,
+          openLatest: false,
+        });
+      }
+      setVoiceThread(id);
+    } catch (cause) {
+      if (current())
+        setLocalError(
+          cause instanceof Error
+            ? cause.message
+            : "Voice could not open. Try again.",
+        );
+    } finally {
+      if (voiceOpening.current === controller) {
+        voiceOpening.current = undefined;
+        if (!controller.signal.aborted) setOpeningVoice(false);
+      }
+    }
+  }
 
   function openSafeLink(url: string): boolean {
     const href = safeAssistantLinkUrl(url);
@@ -927,6 +1029,23 @@ export function AssistantScreen({
           </View>
         }
       />
+      {voiceThread && voiceThread === assistant.conversationId ? (
+        <AssistantVoiceConversation
+          key={`voice:${voiceThread}`}
+          thread={voiceThread}
+          agentName={agentName}
+          onClose={() => setVoiceThread(undefined)}
+          onUpdate={() => void assistant.recover()}
+          onReview={(acknowledgementId) => {
+            assistant.openConversation(voiceThread, acknowledgementId);
+            navigation.setParams({
+              conversationId: voiceThread,
+              acknowledgementId,
+              openLatest: false,
+            });
+          }}
+        />
+      ) : null}
       <View
         style={[
           styles.composer,
@@ -1004,6 +1123,22 @@ export function AssistantScreen({
               }}
             >
               <Square size={18} color={colors.danger} />
+            </IconButton>
+          ) : voiceAvailable &&
+            (!voiceThread || voiceThread !== assistant.conversationId) ? (
+            <IconButton
+              label="Open voice call"
+              disabled={!canCompose || openingVoice}
+              onPress={() => void openVoice()}
+            >
+              {openingVoice ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Mic
+                  size={21}
+                  color={canCompose ? colors.primary : colors.textTertiary}
+                />
+              )}
             </IconButton>
           ) : (
             <IconButton
