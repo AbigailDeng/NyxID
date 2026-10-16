@@ -8,6 +8,41 @@ export type VoiceStartStep =
   | "response"
   | "transport";
 
+export type VoiceStartRecovery = {
+  kind: "credits" | "wallet_suspended" | "billing_unavailable";
+  message: string;
+};
+
+/** Billing codes overlap other APIs, so recovery also requires the voice stage. */
+export function voiceStartRecovery(
+  error: unknown,
+  step: VoiceStartStep,
+): VoiceStartRecovery | undefined {
+  if (!(error instanceof ApiError) || step !== "server") return undefined;
+  const details = voiceStartDetailsSchema.safeParse(error.details);
+  if (!details.success || details.data.stage !== "billing_reservation")
+    return undefined;
+  if (error.errorCode === 11300)
+    return {
+      kind: "credits",
+      message:
+        "There are not enough available credits for the initial voice reservation. Open Billing to review your balance and applicable benefits, or choose another eligible voice source.",
+    };
+  if (error.errorCode === 11307)
+    return {
+      kind: "wallet_suspended",
+      message:
+        "Your billing wallet is suspended. Open Billing to review your wallet status before starting voice again.",
+    };
+  if (error.errorCode === 11301 || error.errorCode === 11302)
+    return {
+      kind: "billing_unavailable",
+      message:
+        "Voice billing is temporarily unavailable. Try again later, or choose another eligible voice source.",
+    };
+  return undefined;
+}
+
 type StartStage = ReturnType<typeof voiceStartDetailsSchema.parse>["stage"];
 const stageMessages: Record<StartStage, string> = {
   flag: "Voice is not enabled for this account",

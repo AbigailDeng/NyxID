@@ -6,6 +6,7 @@ import { getAuthEpoch } from "../../../lib/auth/authEpoch";
 import type { nativeVoiceEnvironment } from "../../../lib/api/assistantVoiceApi";
 import { AssistantVoiceClient } from "./AssistantVoiceClient";
 import { NativeVoiceMedia } from "./VoiceMediaBridge";
+import type { VoiceStartRecovery } from "./voiceStartError";
 import type {
   VoicePreferences,
   VoiceProtocol,
@@ -69,6 +70,7 @@ export function useNativeVoice(
   const [speakerMuted, setSpeakerMuted] = useState(false);
   const [snapshot, setSnapshot] = useState<VoiceSnapshot | null>(null);
   const [error, setError] = useState<string>();
+  const [recovery, setRecovery] = useState<VoiceStartRecovery>();
   const [conflict, setConflict] = useState<VoiceSession | null>(null);
   const [endingConflict, setEndingConflict] = useState(false);
   const current = useRef<AssistantVoiceClient | null>(null);
@@ -87,6 +89,11 @@ export function useNativeVoice(
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
+
+  function reportError(message?: string, nextRecovery?: VoiceStartRecovery) {
+    setError(message);
+    setRecovery(nextRecovery);
+  }
 
   function refresh() {
     if (refreshTimer.current) return;
@@ -128,7 +135,7 @@ export function useNativeVoice(
     latestSnapshot.current = null;
     setSnapshot(null);
     setConflict(null);
-    setError(undefined);
+    reportError();
     setConnected(false);
     setStarting(false);
     setHolding(false);
@@ -141,10 +148,12 @@ export function useNativeVoice(
         state !== "active" &&
         !(state === "inactive" && permissionAttempt.current === ticket.current)
       ) {
+        const hadVoiceWork = busy.current || current.current !== null;
         stopRef.current();
-        setError(
-          "Voice ended while the app was inactive. Start a new call to continue.",
-        );
+        if (hadVoiceWork)
+          reportError(
+            "Voice ended while the app was inactive. Start a new call to continue.",
+          );
       }
     });
     return () => {
@@ -168,7 +177,7 @@ export function useNativeVoice(
       !controller.signal.aborted &&
       getAuthEpoch() === environment.epoch;
     setStarting(true);
-    setError(undefined);
+    reportError();
     latestSnapshot.current = null;
     setSnapshot(null);
     setSpeakerMuted(false);
@@ -233,8 +242,8 @@ export function useNativeVoice(
           );
           refresh();
         },
-        onError: (message) => {
-          if (valid()) setError(message);
+        onError: (message, nextRecovery) => {
+          if (valid()) reportError(message, nextRecovery);
         },
         onConflict: (session) => {
           if (valid()) setConflict(session);
@@ -255,7 +264,7 @@ export function useNativeVoice(
       if (valid() && next.isClosed) current.current = null;
     } catch (cause) {
       if (valid())
-        setError(
+        reportError(
           cause instanceof Error
             ? cause.message
             : "Voice could not start. Try again.",
@@ -282,7 +291,7 @@ export function useNativeVoice(
       ticket.current === generation &&
       environment.epoch === getAuthEpoch();
     setEndingConflict(true);
-    setError(undefined);
+    reportError();
     try {
       await environment.api.control(thread, conflict.id, {
         command_id: Crypto.randomUUID(),
@@ -295,7 +304,7 @@ export function useNativeVoice(
       }
     } catch {
       if (!valid()) return;
-      setError(
+      reportError(
         "The existing call could not be ended. Refresh its state and try again.",
       );
       try {
@@ -339,7 +348,7 @@ export function useNativeVoice(
       if (valid()) refresh();
     } catch {
       if (valid())
-        setError("The task could not be stopped. Try again from the chat.");
+        reportError("The task could not be stopped. Try again from the chat.");
     } finally {
       if (taskCancellations.current.get(id) === controller)
         taskCancellations.current.delete(id);
@@ -355,6 +364,7 @@ export function useNativeVoice(
     holding,
     speakerMuted,
     error,
+    recovery,
     conflict,
     endingConflict,
     start,

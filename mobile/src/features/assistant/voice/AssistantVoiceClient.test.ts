@@ -16,6 +16,7 @@ import type {
   VoiceSnapshot,
   VoiceStartRequest,
 } from "./voiceContracts";
+import type { VoiceStartRecovery } from "./voiceStartError";
 
 const conversationId = "nyxa-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -198,6 +199,7 @@ function setup() {
   }[] = [];
   const cancels: { thread: string; id: string }[] = [];
   const errors: string[] = [];
+  const recoveries: (VoiceStartRecovery | undefined)[] = [];
   const conflicts: (VoiceSession | null)[] = [];
   const snapshots: VoiceSnapshot[] = [];
   const paths: string[] = [];
@@ -243,7 +245,10 @@ function setup() {
       return responses.socket();
     },
     onSnapshot: (value) => snapshots.push(value),
-    onError: (value) => errors.push(value),
+    onError: (value, recovery) => {
+      errors.push(value);
+      recoveries.push(recovery);
+    },
     onConflict: (value) => conflicts.push(value),
     onClosed: () => {
       closed++;
@@ -275,6 +280,7 @@ function setup() {
     controls,
     cancels,
     errors,
+    recoveries,
     conflicts,
     snapshots,
     paths,
@@ -442,6 +448,54 @@ test("response, local WebRTC and control transport startup failures retain their
     assert.equal(e.media.input, false, phase);
     assert.equal(e.client.isClosed, true, phase);
   }
+});
+
+test("HTTP billing rejection forwards recovery while disposing media without retrying", async () => {
+  const e = setup();
+  e.responses.start = async () => {
+    throw new ApiError({
+      statusCode: 402,
+      errorCode: 11300,
+      errorKey: "insufficient_credits",
+      message: "private wallet state",
+      details: { stage: "billing_reservation", reason: "private balance" },
+    });
+  };
+  await e.client.start(preferences);
+  await e.client.start(preferences);
+  assert.deepEqual(e.errors, [
+    "Insufficient voice credits (billing_reservation · code 11300)",
+  ]);
+  assert.equal(e.recoveries[0]?.kind, "credits");
+  assert.match(e.recoveries[0]!.message, /initial voice reservation/);
+  assert.equal(e.starts.length, 1);
+  assert.equal(e.media.input, false);
+  assert.equal(e.media.closed, 1);
+  assert.equal(e.client.isClosed, true);
+  assert.deepEqual(e.controls, []);
+});
+
+test("streamed billing failure forwards recovery and still ends its owned session", async () => {
+  const e = setup();
+  await e.open();
+  e.socket.receive({
+    type: "start_failed",
+    error: {
+      error: "wallet_suspended",
+      error_code: 11307,
+      message: "private wallet state",
+      details: { stage: "billing_reservation", reason: "private reason" },
+    },
+  });
+  assert.equal(e.recoveries[0]?.kind, "wallet_suspended");
+  assert.match(e.errors[0]!, /billing_reservation/);
+  assert.equal(e.errors[0]!.includes("private"), false);
+  assert.equal(e.media.input, false);
+  assert.equal(e.client.isClosed, true);
+  assert.deepEqual(
+    e.controls.map((item) => item.input.action),
+    ["end"],
+  );
 });
 
 test("startup failure from the control stream uses the same sanitized provider diagnosis", async () => {

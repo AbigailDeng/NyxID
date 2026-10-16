@@ -8,6 +8,7 @@ import type {
   VoiceSession,
   VoiceSnapshot,
 } from "./voiceContracts";
+import type { VoiceStartRecovery } from "./voiceStartError";
 
 type VoiceHook = ReturnType<typeof import("./useNativeVoice").useNativeVoice>;
 const firstThread = "nyxa-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -23,6 +24,10 @@ const preferences: VoicePreferences = {
   input_mode: "push_to_talk",
   language: null,
   notify_on_completion: false,
+};
+const creditRecovery: VoiceStartRecovery = {
+  kind: "credits",
+  message: "Review available credits in Billing before trying voice again.",
 };
 function session(changes: Partial<VoiceSession> = {}): VoiceSession {
   return {
@@ -594,6 +599,81 @@ test("conflict metadata survives client closure and blocks new calls until expli
   ]);
   assert.equal(e.harness.flush().conflict, null);
 });
+
+test("billing recovery survives failed client closure and clears as soon as a new explicit attempt starts", async (context) => {
+  const e = setup(context);
+  e.responses.start = async (client) => {
+    client.options.onError("Safe billing diagnostic", creditRecovery);
+    client.closed();
+  };
+  const failed = await e.start();
+  assert.equal(failed.error, "Safe billing diagnostic");
+  assert.deepEqual(failed.recovery, creditRecovery);
+  assert.equal(failed.starting, false);
+  assert.equal(failed.connected, false);
+  const waiting = deferred<any>();
+  e.responses.options = () => waiting.promise;
+  const next = e.harness.value().start(preferences, "openai_live");
+  const starting = e.harness.flush();
+  assert.equal(starting.error, undefined);
+  assert.equal(starting.recovery, undefined);
+  assert.equal(starting.starting, true);
+  waiting.resolve({ options: [] });
+  await next;
+  assert.equal(e.harness.flush().recovery, undefined);
+});
+
+test("another error replaces billing recovery instead of retaining unrelated billing instructions", async (context) => {
+  const e = setup(context);
+  await e.connect();
+  const client = e.clients[0]!;
+  client.options.onError("Safe billing diagnostic", creditRecovery);
+  assert.deepEqual(e.harness.flush().recovery, creditRecovery);
+  client.options.onError("Tap Resume audio to hear the assistant.");
+  const state = e.harness.flush();
+  assert.equal(state.error, "Tap Resume audio to hear the assistant.");
+  assert.equal(state.recovery, undefined);
+  client.options.onError("Safe billing diagnostic", creditRecovery);
+  e.harness.flush();
+  assert.equal(e.appState("background").recovery, undefined);
+});
+
+test("opening another app while idle preserves billing recovery and never claims an idle call ended", async (context) => {
+  const e = setup(context);
+  assert.equal(e.appState("inactive").error, undefined);
+  assert.equal(e.appState("background").error, undefined);
+  e.appState("active");
+  e.responses.start = async (client) => {
+    client.options.onError("Safe billing diagnostic", creditRecovery);
+    client.closed();
+  };
+  await e.start();
+  for (const appState of ["inactive", "background", "active"]) {
+    const state = e.appState(appState);
+    assert.equal(state.error, "Safe billing diagnostic");
+    assert.deepEqual(state.recovery, creditRecovery);
+    assert.equal(state.connected, false);
+  }
+  assert.equal(e.clients.length, 1);
+});
+
+for (const scope of ["thread", "account"] as const) {
+  test(`${scope} replacement clears billing recovery and rejects stale recovery callbacks`, async (context) => {
+    const e = setup(context);
+    await e.connect();
+    const old = e.clients[0]!;
+    old.options.onError("Old billing diagnostic", creditRecovery);
+    assert.deepEqual(e.harness.flush().recovery, creditRecovery);
+    const next =
+      scope === "thread"
+        ? e.replaceScope(secondThread)
+        : e.replaceScope(firstThread, 2);
+    assert.equal(next.error, undefined);
+    assert.equal(next.recovery, undefined);
+    old.options.onError("Late billing diagnostic", creditRecovery);
+    assert.equal(e.harness.flush().recovery, undefined);
+  });
+}
 
 test("duplicate End existing call presses must issue one durable control", async (context) => {
   const e = setup(context);

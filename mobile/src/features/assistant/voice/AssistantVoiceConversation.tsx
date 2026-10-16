@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
 import { useQuery } from "@tanstack/react-query";
+import * as WebBrowser from "expo-web-browser";
 import {
   ChevronDown,
   ChevronLeft,
@@ -106,6 +107,8 @@ function VoiceConversation({
   const [mode, setMode] = useState<VoicePreferences["input_mode"]>();
   const [notify, setNotify] = useState<boolean>();
   const [expandedCaptions, setExpandedCaptions] = useState(false);
+  const [showErrorDetails, setShowErrorDetails] = useState(false);
+  const [billingOpenError, setBillingOpenError] = useState(false);
   const [now, setNow] = useState(Date.now());
   const options = useQuery({
     queryKey: ["workspace", "voice-options", environment.epoch, thread],
@@ -150,9 +153,13 @@ function VoiceConversation({
       ? session?.state === "closing"
         ? "Ending…"
         : "Connected"
-      : voice.snapshot
-        ? "Call ended"
-        : "Ready to talk";
+      : voice.recovery || (voice.error && !voice.snapshot)
+        ? "Unable to start"
+        : voice.conflict
+          ? "Call already active"
+          : voice.snapshot
+            ? "Call ended"
+            : "Ready to talk";
   const duration = voiceElapsed(session?.created_at, session?.closed_at, now);
   const captions = voice.snapshot?.captions ?? [];
   const shownCaptions = expandedCaptions ? captions : captions.slice(-2);
@@ -178,6 +185,9 @@ function VoiceConversation({
   useEffect(() => {
     if (!isConnected) void voice.end();
   }, [isConnected]);
+  useEffect(() => {
+    setShowErrorDetails(false);
+  }, [voice.error]);
 
   function close() {
     void voice.end();
@@ -193,6 +203,7 @@ function VoiceConversation({
   }
   async function start() {
     if (!canStart || !option) return;
+    setBillingOpenError(false);
     await voice.start(
       {
         service_id: option.service_id,
@@ -206,6 +217,16 @@ function VoiceConversation({
       },
       option.voice.protocol,
     );
+  }
+  async function openBilling() {
+    setBillingOpenError(false);
+    try {
+      await WebBrowser.openBrowserAsync(
+        new URL("/billing", environment.origin).href,
+      );
+    } catch {
+      setBillingOpenError(true);
+    }
   }
   const pickerRows =
     picker === "source"
@@ -412,7 +433,7 @@ function VoiceConversation({
                   <Text style={[styles.agentTitle, theme]}>
                     Talk with {agentName}
                   </Text>
-                  <Label muted>Connected to this conversation</Label>
+                  <Label muted>Uses this chat’s context</Label>
                   <Text
                     accessibilityLiveRegion="polite"
                     style={[
@@ -420,7 +441,9 @@ function VoiceConversation({
                       {
                         color: voice.connected
                           ? colors.success
-                          : colors.textSecondary,
+                          : voice.error
+                            ? colors.danger
+                            : colors.textSecondary,
                       },
                     ]}
                   >
@@ -428,8 +451,60 @@ function VoiceConversation({
                     {active ? ` · ${duration}` : ""}
                   </Text>
                 </View>
-                {voice.error ? (
+                {voice.recovery ? (
+                  <Card>
+                    <Notice message={voice.recovery.message} tone="error" />
+                    <ActionButton
+                      label="Review billing on Web"
+                      variant="secondary"
+                      onPress={openBilling}
+                    />
+                    {choices.some(
+                      (row) =>
+                        row.available &&
+                        option &&
+                        voiceOptionKey(row) !== voiceOptionKey(option),
+                    ) ? (
+                      <ActionButton
+                        label="Choose another voice source"
+                        variant="secondary"
+                        onPress={() => setPicker("source")}
+                      />
+                    ) : null}
+                    <ActionButton
+                      label="Continue with text"
+                      variant="secondary"
+                      onPress={close}
+                    />
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        showErrorDetails
+                          ? "Hide error details"
+                          : "Show error details"
+                      }
+                      accessibilityState={{ expanded: showErrorDetails }}
+                      onPress={() => setShowErrorDetails((value) => !value)}
+                      style={styles.textButton}
+                    >
+                      <Label muted>
+                        {showErrorDetails
+                          ? "Hide error details"
+                          : "Show error details"}
+                      </Label>
+                    </Pressable>
+                    {showErrorDetails ? (
+                      <Label muted>{voice.error}</Label>
+                    ) : null}
+                  </Card>
+                ) : voice.error ? (
                   <Notice message={voice.error} tone="error" />
+                ) : null}
+                {billingOpenError ? (
+                  <Notice
+                    message="Billing could not open. Visit Billing & Usage on the NyxID website to review your available credits and benefits."
+                    tone="error"
+                  />
                 ) : null}
                 {!isConnected ? (
                   <Notice message="You’re offline. Reconnect to start a voice call." />
@@ -542,6 +617,13 @@ function VoiceConversation({
                             : `Billed to ${option.billing_owner}`}
                         </Label>
                         <Label muted>{voiceTariff(option)}</Label>
+                        {option.pricing ? (
+                          <Label muted>
+                            Starting a call reserves the first 30 seconds of
+                            usage plus any start fee. Applicable benefits are
+                            applied first.
+                          </Label>
+                        ) : null}
                         <Label muted>
                           Silence and mute still count toward call time. Agent
                           tasks are billed separately.
@@ -734,7 +816,7 @@ function VoiceConversation({
               style={[styles.startActions, { borderTopColor: colors.border }]}
             >
               <ActionButton
-                label="Start voice"
+                label={voice.error ? "Try again" : "Start voice"}
                 disabled={!canStart}
                 onPress={() => void start()}
               />

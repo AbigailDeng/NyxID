@@ -13,7 +13,12 @@ import {
   type VoiceStartRequest,
 } from "./voiceContracts";
 import { ApiError } from "../../../lib/api/ApiError";
-import { voiceStartError, type VoiceStartStep } from "./voiceStartError";
+import {
+  voiceStartError,
+  voiceStartRecovery,
+  type VoiceStartRecovery,
+  type VoiceStartStep,
+} from "./voiceStartError";
 
 export type VoiceMediaEvent =
   | { type: "provider-ready" }
@@ -79,7 +84,7 @@ export interface AssistantVoiceClientOptions {
   api: AssistantVoiceApi;
   createSocket(path: string, signal: AbortSignal): Promise<VoiceControlSocket>;
   onSnapshot(snapshot: VoiceSnapshot): void;
-  onError(message: string): void;
+  onError(message: string, recovery?: VoiceStartRecovery): void;
   onClosed?(): void;
   onConflict?(session: VoiceSession | null): void;
   randomId?(): string;
@@ -217,6 +222,7 @@ export class AssistantVoiceClient {
           conflict
             ? "Another voice call is active. End it before starting a new call."
             : voiceStartError(error, step),
+          conflict ? undefined : voiceStartRecovery(error, step),
         );
       }
     }
@@ -341,17 +347,16 @@ export class AssistantVoiceClient {
       }
       if (event.type === "start_failed") {
         const failure = voiceStartFailureSchema.parse(event).error;
+        const error = new ApiError({
+          statusCode: 503,
+          errorCode: failure.error_code,
+          errorKey: failure.error,
+          message: failure.message,
+          details: failure.details,
+        });
         this.fail(
-          voiceStartError(
-            new ApiError({
-              statusCode: 503,
-              errorCode: failure.error_code,
-              errorKey: failure.error,
-              message: failure.message,
-              details: failure.details,
-            }),
-            "server",
-          ),
+          voiceStartError(error, "server"),
+          voiceStartRecovery(error, "server"),
         );
         return;
       }
@@ -583,9 +588,9 @@ export class AssistantVoiceClient {
     }
   }
 
-  private fail(message: string) {
+  private fail(message: string, recovery?: VoiceStartRecovery) {
     if (this.closed) return;
-    this.options.onError(message);
+    this.options.onError(message, recovery);
     void this.end();
   }
 

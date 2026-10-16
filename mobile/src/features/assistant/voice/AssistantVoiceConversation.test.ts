@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { hookHarness } from "../assistantHookTestHarness";
+import type { VoiceStartRecovery } from "./voiceStartError";
 import type {
   VoiceOption,
   VoicePreferences,
@@ -102,11 +103,14 @@ function setup(
     source?: VoiceOption;
     saved?: VoicePreferences;
     snapshot?: VoiceSnapshot;
+    error?: string;
+    recovery?: VoiceStartRecovery;
   } = {},
 ) {
   const events: unknown[][] = [];
   let focused = true;
   let online = true;
+  let browserFails = false;
   const environment = { origin: "https://nyx.example", epoch: 7 };
   const voice = {
     media: { id: 1 },
@@ -116,7 +120,8 @@ function setup(
     holding: false,
     speakerMuted: false,
     snapshot: input.snapshot ?? (input.active ? snapshot : null),
-    error: undefined,
+    error: input.error,
+    recovery: input.recovery,
     conflict: null,
     endingConflict: false,
     start: async (preferences: VoicePreferences, protocol: string) => {
@@ -201,6 +206,12 @@ function setup(
       StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 },
     },
     "@react-navigation/native": { useIsFocused: () => focused },
+    "expo-web-browser": {
+      openBrowserAsync: async (url: string) => {
+        events.push(["billing", url]);
+        if (browserFails) throw new Error("private device error");
+      },
+    },
     "@tanstack/react-query": {
       useQuery: ({ queryKey }: { queryKey: unknown[] }) =>
         queryKey.includes("voice-options") ? query.options : query.settings,
@@ -258,6 +269,14 @@ function setup(
     voice,
     query,
     all,
+    text: () =>
+      all()
+        .flatMap((row) => row.props.children.flat(Infinity))
+        .filter((child) => typeof child === "string")
+        .join(" "),
+    failBrowser: () => {
+      browserFails = true;
+    },
     button: (label: string) =>
       one(
         (row) =>
@@ -285,6 +304,106 @@ test("voice setup starts with the exact saved source, voice, input mode and noti
   assert.equal(f.events[0]?.[0], "start");
   assert.deepEqual(JSON.parse(JSON.stringify(f.events[0]?.[1])), saved);
   assert.equal(f.events[0]?.[2], "openai_live");
+  f.harness.unmount();
+});
+
+const creditFailure = {
+  error: "Insufficient voice credits (billing_reservation · code 11300)",
+  recovery: {
+    kind: "credits" as const,
+    message:
+      "There aren’t enough available credits to reserve this voice call. Review your balance and applicable benefits in Billing, or choose another eligible voice source.",
+  },
+};
+
+test("a rejected reservation shows a failed start and recovery while keeping diagnostics collapsed", () => {
+  const f = setup(creditFailure);
+  assert.match(f.text(), /Unable to start/);
+  assert.doesNotMatch(f.text(), /Ready to talk|Connected to this conversation/);
+  assert.equal(
+    f.all().some((row) => row.props.message === creditFailure.recovery.message),
+    true,
+  );
+  assert.equal(f.text().includes(creditFailure.error), false);
+  assert.equal(f.button("Try again").props.disabled, false);
+  f.button("Show error details").props.onPress();
+  assert.equal(f.text().includes(creditFailure.error), true);
+  assert.equal(
+    f.button("Hide error details").props.accessibilityState.expanded,
+    true,
+  );
+  f.voice.error = undefined;
+  f.voice.recovery = undefined;
+  f.voice.starting = true;
+  f.harness.render();
+  assert.match(f.text(), /Connecting/);
+  assert.doesNotMatch(f.text(), /Unable to start|11300/);
+  f.harness.unmount();
+});
+
+test("billing recovery opens the configured Web billing page and text recovery closes voice", async () => {
+  const f = setup(creditFailure);
+  await f.button("Review billing on Web").props.onPress();
+  assert.deepEqual(f.events, [["billing", "https://nyx.example/billing"]]);
+  f.button("Continue with text").props.onPress();
+  assert.deepEqual(f.events.slice(1), [["end"], ["close"]]);
+  f.harness.unmount();
+});
+
+test("billing browser errors retain the reservation error and provide fixed website guidance", async () => {
+  const f = setup(creditFailure);
+  f.failBrowser();
+  await f.button("Review billing on Web").props.onPress();
+  assert.equal(
+    f
+      .all()
+      .some((row) => /Billing could not open/.test(row.props.message ?? "")),
+    true,
+  );
+  assert.match(f.text(), /Unable to start/);
+  assert.doesNotMatch(f.text(), /private device error/);
+  f.harness.unmount();
+});
+
+test("a credit failure never switches paid sources automatically and offers only eligible alternatives", async () => {
+  const f = setup(creditFailure);
+  assert.equal(
+    f.all().some((row) => row.props.label === "Choose another voice source"),
+    false,
+  );
+  f.query.options.data.options.push({
+    ...source,
+    connection_id: sessionId,
+    key_source: "own",
+    available: false,
+  });
+  f.harness.render();
+  assert.equal(
+    f.all().some((row) => row.props.label === "Choose another voice source"),
+    false,
+  );
+  f.query.options.data.options[1]!.available = true;
+  f.harness.render();
+  f.button("Choose another voice source").props.onPress();
+  assert.equal(
+    f.all().filter((row) => row.props.accessibilityRole === "radio").length,
+    2,
+  );
+  assert.deepEqual(f.events, []);
+  f.button("Back to voice call").props.onPress();
+  await f.button("Try again").props.onPress();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.events[0]?.[1])), saved);
+  f.harness.unmount();
+});
+
+test("other startup errors also avoid claiming the call is ready or connected", () => {
+  const f = setup({ error: "Microphone permission was denied" });
+  assert.match(f.text(), /Unable to start/);
+  assert.doesNotMatch(f.text(), /Ready to talk|Connected to this conversation/);
+  assert.equal(
+    f.all().some((row) => row.props.label === "Review billing on Web"),
+    false,
+  );
   f.harness.unmount();
 });
 

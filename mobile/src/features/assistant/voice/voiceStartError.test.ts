@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ApiError } from "../../../lib/api/ApiError";
-import { voiceStartError, type VoiceStartStep } from "./voiceStartError";
+import {
+  voiceStartError,
+  voiceStartRecovery,
+  type VoiceStartStep,
+} from "./voiceStartError";
 
 function apiError(
   changes: Partial<ConstructorParameters<typeof ApiError>[0]> = {},
@@ -76,6 +80,71 @@ test("billing and conflict messages use mobile numeric fields instead of raw API
   const conflict = voiceStartError(apiError({ statusCode: 409 }), "server");
   assert.match(conflict, /Another voice call is active/);
   assert.match(conflict, /HTTP 409/);
+});
+
+test("validated billing failures provide fixed actionable recovery without claiming the wallet is empty", () => {
+  for (const [errorCode, kind] of [
+    [11300, "credits"],
+    [11307, "wallet_suspended"],
+    [11301, "billing_unavailable"],
+    [11302, "billing_unavailable"],
+  ] as const) {
+    const error = apiError({
+      errorCode,
+      details: { stage: "billing_reservation", reason: "private balance" },
+    });
+    const recovery = voiceStartRecovery(error, "server");
+    assert.equal(recovery?.kind, kind);
+    assert.equal(/private|11300|empty|free/.test(recovery!.message), false);
+    assert.equal(voiceStartError(error, "server").includes("code"), true);
+    if (kind === "credits") {
+      assert.match(recovery!.message, /available credits/);
+      assert.match(recovery!.message, /initial voice reservation/);
+      assert.match(recovery!.message, /Billing/);
+      assert.match(recovery!.message, /applicable benefits/);
+      assert.match(recovery!.message, /eligible voice source/);
+    }
+  }
+});
+
+test("colliding codes and unverified or non-server errors cannot offer billing recovery", () => {
+  for (const errorCode of [11300, 11307, 11301, 11302]) {
+    for (const details of [
+      undefined,
+      { stage: "credential", reason: "private" },
+      { stage: "provider_create", reason: "private" },
+      { stage: "billing_reservation" },
+      { stage: "billing_reservation", reason: "a".repeat(401) },
+      { stage: "billing_reservation", reason: "private", provider: "unknown" },
+    ]) {
+      assert.equal(
+        voiceStartRecovery(apiError({ errorCode, details }), "server"),
+        undefined,
+      );
+    }
+    const error = apiError({
+      errorCode,
+      details: { stage: "billing_reservation", reason: "private" },
+    });
+    for (const step of [
+      "microphone",
+      "webrtc",
+      "response",
+      "transport",
+    ] as const)
+      assert.equal(voiceStartRecovery(error, step), undefined);
+    assert.equal(voiceStartRecovery({ ...error }, "server"), undefined);
+  }
+  assert.equal(
+    voiceStartRecovery(
+      apiError({
+        errorCode: 12501,
+        details: { stage: "billing_reservation", reason: "private" },
+      }),
+      "server",
+    ),
+    undefined,
+  );
 });
 
 test("unknown or malformed diagnostic structures cannot display their fields", () => {
