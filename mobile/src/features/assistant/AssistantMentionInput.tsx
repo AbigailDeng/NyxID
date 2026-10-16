@@ -35,7 +35,7 @@ type ScopedSelection = {
 export function AssistantMentionInput({
   value,
   onChangeText,
-  mentions,
+  mentions = [],
   editable,
   placeholder,
   accessibilityLabel,
@@ -44,7 +44,7 @@ export function AssistantMentionInput({
 }: {
   value: string;
   onChangeText: (value: string) => void;
-  mentions: readonly AssistantMentionOption[];
+  mentions?: readonly AssistantMentionOption[];
   editable: boolean;
   placeholder: string;
   accessibilityLabel: string;
@@ -275,31 +275,33 @@ export function AssistantMentionInput({
         }}
         style={[styles.input, { color: colors.textPrimary }, style]}
       />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Mention an attachment or agent"
-        accessibilityState={{
-          disabled: !editable || !mentions.length,
-          expanded: !!trigger,
-        }}
-        disabled={!editable || !mentions.length}
-        onPress={openMentions}
-        style={styles.mentionButton}
-      >
-        <Text
-          style={[
-            styles.at,
-            {
-              color:
-                editable && mentions.length
-                  ? colors.primaryOnTint
-                  : colors.textMuted,
-            },
-          ]}
+      {mentions.length ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Mention an attachment or agent"
+          accessibilityState={{
+            disabled: !editable || !mentions.length,
+            expanded: !!trigger,
+          }}
+          disabled={!editable || !mentions.length}
+          onPress={openMentions}
+          style={styles.mentionButton}
         >
-          @
-        </Text>
-      </Pressable>
+          <Text
+            style={[
+              styles.at,
+              {
+                color:
+                  editable && mentions.length
+                    ? colors.primaryOnTint
+                    : colors.textMuted,
+              },
+            ]}
+          >
+            @
+          </Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }

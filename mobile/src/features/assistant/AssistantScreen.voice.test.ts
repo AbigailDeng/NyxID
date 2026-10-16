@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { deferred, hookHarness } from "./assistantHookTestHarness";
+import type { AssistantUploadedMessage } from "./AssistantUploadSession";
 
 // Exercise the screen's real handlers and render conditions. Native UI, network,
 // and existing assistant/upload hooks are boundaries, not reimplementations of
@@ -94,8 +95,13 @@ function setup(conversationId?: string) {
     recover: async () => {
       events.push(["recover"]);
     },
-    send: async (text: string) => {
-      events.push(["send", text]);
+    send: async (
+      text: string,
+      _options?: unknown,
+      files?: AssistantUploadedMessage,
+    ) => {
+      events.push(["send", text, files]);
+      return true;
     },
     stop: async () => {
       events.push(["stop"]);
@@ -105,12 +111,18 @@ function setup(conversationId?: string) {
     files: [] as any[],
     session: {
       sending: false,
-      submit: async (submit: (payload: undefined) => Promise<void>) =>
-        submit(undefined),
+      submit: async (
+        submit: (
+          payload: AssistantUploadedMessage | undefined,
+        ) => Promise<unknown>,
+      ) => submit(undefined),
     },
     blocked: false,
     picking: false,
     pick: async () => {},
+    remove: (key: string) => {
+      uploads.files = uploads.files.filter((file) => file.key !== key);
+    },
   };
   const props = {
     route: {
@@ -371,6 +383,49 @@ test("voice entry yields to text, attachments, upload work and the active turn's
   await x.harness.settle();
   assert.equal(x.events.filter(([name]) => name === "stop").length, 1);
   assert.equal(x.drafts.length, 0);
+  x.harness.unmount();
+});
+
+test("private attachments send directly without mention aliases or rewriting the draft", async () => {
+  const x = setup(A);
+  const file = {
+    key: "report",
+    handle: "file-1",
+    kind: "file",
+    file: { name: "report.txt" },
+  };
+  const text = "Please check @file-1 in this report";
+  const payload: AssistantUploadedMessage = {
+    conversationId: A,
+    attachmentIds: ["11111111-1111-4111-8111-111111111111"],
+    attachments: [],
+  };
+  x.uploads.files = [file];
+  x.input().props.onChangeText(text);
+  x.harness.flush();
+  assert.equal(x.input().props.mentions, undefined);
+  const pending = x
+    .all()
+    .find((element) => element.type === "AssistantPendingUploads")!;
+  assert.equal(pending.props.showMentionHandles, false);
+  pending.props.remove(file.key);
+  x.harness.render();
+  assert.equal(
+    x.input().props.value,
+    text,
+    "removing a file must preserve the user's text",
+  );
+  assert.equal(x.uploads.files.length, 0);
+  x.uploads.files = [file];
+  x.uploads.session.submit = async (submit) => submit(payload);
+  x.harness.render();
+  x.button("Send message")!.props.onPress();
+  await x.harness.settle();
+  assert.deepEqual(
+    x.events.find(([name]) => name === "send"),
+    ["send", text, payload],
+  );
+  assert.equal(x.input().props.value, "");
   x.harness.unmount();
 });
 

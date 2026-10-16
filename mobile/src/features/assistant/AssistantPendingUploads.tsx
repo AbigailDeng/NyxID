@@ -18,10 +18,12 @@ export function AssistantPendingUploads({
   files,
   remove,
   disabled,
+  showMentionHandles = true,
 }: {
   files: PendingAssistantUpload[];
   remove: (key: string) => void;
   disabled: boolean;
+  showMentionHandles?: boolean;
 }) {
   const { colors } = useTheme();
   const [preview, setPreview] = useState<PendingAssistantUpload>();
@@ -80,11 +82,13 @@ export function AssistantPendingUploads({
                   <FileText size={23} color={colors.textSecondary} />
                 )}
                 <View style={styles.fill}>
-                  <Label
-                    style={[styles.handle, { color: colors.primaryOnTint }]}
-                  >
-                    @{row.handle}
-                  </Label>
+                  {showMentionHandles ? (
+                    <Label
+                      style={[styles.handle, { color: colors.primaryOnTint }]}
+                    >
+                      @{row.handle}
+                    </Label>
+                  ) : null}
                   <Label numberOfLines={1}>
                     {row.item?.label ?? row.file.name}
                   </Label>

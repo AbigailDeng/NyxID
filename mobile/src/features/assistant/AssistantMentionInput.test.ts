@@ -189,6 +189,22 @@ test("native typing and IME updates do not force a controlled cursor or remount 
   assert.deepEqual(view.writes, ["n", "ni", "你", "你好", ""]);
 });
 
+test("a private composer has no mention action or suggestions and keeps typed @ text intact", () => {
+  const view = setup({ mentions: undefined });
+  view.focus();
+  view.input().props.onChangeText("Please check @file-1");
+  view.harness.render();
+  view.select("Please check @file-1".length);
+  assert.equal(view.props.value, "Please check @file-1");
+  assert.equal(view.candidates().length, 0);
+  assert.equal(
+    elements(view.harness.value()).some(
+      (element) => element.type === "Pressable",
+    ),
+    false,
+  );
+});
+
 test("generation changes fence old text, selection and suggestion handlers", () => {
   const view = setup({ value: "@fi" });
   view.focus();

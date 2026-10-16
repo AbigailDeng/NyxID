@@ -63,11 +63,6 @@ import { assistantSelectableMarkdown } from "./assistantSelectableMarkdown";
 import { AssistantAttachmentView } from "./AssistantAttachmentView";
 import { AssistantPendingUploads } from "./AssistantPendingUploads";
 import { AssistantMentionInput } from "./AssistantMentionInput";
-import {
-  resolveAttachmentMentions,
-  stripAttachmentMention,
-  type AttachmentMention,
-} from "./assistantMentions";
 import { useAssistantUploads } from "./useAssistantUploads";
 import { describeToolActivity } from "./assistantActivityText";
 import { NativeAuthoredSkillReview } from "../plugins/NativeAuthoredSkillReview";
@@ -219,12 +214,6 @@ export function AssistantScreen({
       !assistant.conversationId);
   const modelLocked =
     !!assistant.conversationId || assistant.sending || uploads.session.sending;
-  const attachmentMentions: AttachmentMention[] = uploads.files.map((row) => ({
-    handle: row.handle,
-    kind: row.kind,
-    label: row.item?.label ?? row.file.name,
-  }));
-  const resolvedDraft = resolveAttachmentMentions(draft, attachmentMentions);
   const headerDisabled =
     assistant.loading ||
     ((assistant.sending || uploads.session.sending) &&
@@ -235,7 +224,7 @@ export function AssistantScreen({
     !uploads.blocked &&
     !uploads.picking &&
     (!!draft.trim() || uploads.files.length > 0) &&
-    [...resolvedDraft].length <= 32768;
+    [...draft].length <= 32768;
 
   const voiceFeatures = useQuery({
     queryKey: ["workspace", "voice-features", getAuthEpoch()],
@@ -518,11 +507,7 @@ export function AssistantScreen({
         getRevision: () => draftRevision.current,
         send: (text) =>
           uploads.session.submit((payload) =>
-            assistant.send(
-              resolveAttachmentMentions(text, attachmentMentions),
-              undefined,
-              payload,
-            ),
+            assistant.send(text, undefined, payload),
           ),
       }),
     );
@@ -1054,12 +1039,9 @@ export function AssistantScreen({
       >
         <AssistantPendingUploads
           files={uploads.files}
-          remove={(key) => {
-            const row = uploads.files.find((item) => item.key === key);
-            if (row) updateDraft(stripAttachmentMention(draft, row.handle));
-            uploads.remove(key);
-          }}
+          remove={uploads.remove}
           disabled={running || uploads.session.sending}
+          showMentionHandles={false}
         />
         {uploads.error || uploads.notice ? (
           <Label
@@ -1091,17 +1073,6 @@ export function AssistantScreen({
             value={draft}
             onChangeText={updateDraft}
             generation={`${assistant.agentId}:${assistant.conversationId ?? "new"}:${composerGeneration}`}
-            mentions={uploads.files.map((row) => ({
-              id: row.key,
-              handle: row.handle,
-              kind: row.kind,
-              label: row.item?.label ?? row.file.name,
-              detail: row.error
-                ? "Upload failed"
-                : row.item
-                  ? "Attachment"
-                  : "Uploading…",
-            }))}
             editable={
               !destroyed &&
               !assistant.recoveryRequired &&
@@ -1160,7 +1131,7 @@ export function AssistantScreen({
               : "Wait for uploads or remove failed files."}
           </Label>
         ) : null}
-        {[...resolvedDraft].length > 32768 ? (
+        {[...draft].length > 32768 ? (
           <Label style={{ color: colors.danger }}>
             Keep the message under 32,768 characters.
           </Label>
