@@ -30,7 +30,6 @@ import {
 import NetInfo from "@react-native-community/netinfo";
 import {
   NavigationContainer,
-  StackActions,
   NavigationState,
   PartialState,
   useNavigationContainerRef,
@@ -56,6 +55,7 @@ import {
 } from "./linking";
 import {
   challengeNavigationAction,
+  openWorkspaceSheetAction,
   workspaceNavigateAction,
 } from "./navigationHierarchy";
 import type { WorkspaceNavigationGuardChange } from "./WorkspaceHeader";
@@ -470,35 +470,48 @@ function ThemedAppShell({
   const insets = useSafeAreaInsets();
   const { isAuthenticated } = useAuthSession();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const pendingDrawerNavigation = useRef<(() => void) | undefined>(undefined);
   const [currentChat, setCurrentChat] = useState<WorkspaceChatTarget>();
   const trackCurrentRoute = () => {
     setCurrentRouteName(getActiveRouteName(navigationRef.getRootState()));
     setCurrentChat(activeWorkspaceChatTarget(navigationRef.getCurrentRoute()));
   };
   useEffect(() => {
-    if (!isAuthenticated) setDrawerOpen(false);
+    if (!isAuthenticated) {
+      pendingDrawerNavigation.current = undefined;
+      setDrawerOpen(false);
+    }
   }, [isAuthenticated]);
-  const navigateFromDrawer = (route: WorkspaceRoute) => {
+  // Finish dismissing the menu's native modal before presenting another one.
+  const closeDrawerThen = (navigate: () => void) => {
+    pendingDrawerNavigation.current = navigate;
     setDrawerOpen(false);
-    if (!navigationRef.isReady()) return;
-    const workspace = navigationRef
-      .getRootState()
-      .routes.find((item) => item.name === "Workspace");
-    if (!workspace?.state?.key) return;
-    navigationRef.dispatch({
-      ...workspaceNavigateAction(route),
-      target: workspace.state.key,
+  };
+  const onDrawerDismiss = useCallback(() => {
+    const navigate = pendingDrawerNavigation.current;
+    pendingDrawerNavigation.current = undefined;
+    navigate?.();
+  }, []);
+  const navigateFromDrawer = (route: WorkspaceRoute) => {
+    closeDrawerThen(() => {
+      if (!navigationRef.isReady()) return;
+      const action = workspaceNavigateAction(
+        route,
+        undefined,
+        navigationRef.getRootState(),
+      );
+      if (action) navigationRef.dispatch(action);
     });
   };
   const openChatFromDrawer = (target: WorkspaceChatTarget) => {
-    if (!navigationRef.isReady()) return;
-    const action = workspaceChatNavigationAction(
-      navigationRef.getRootState(),
-      target,
-    );
-    if (!action) return;
-    setDrawerOpen(false);
-    navigationRef.dispatch(action);
+    closeDrawerThen(() => {
+      if (!navigationRef.isReady()) return;
+      const action = workspaceChatNavigationAction(
+        navigationRef.getRootState(),
+        target,
+      );
+      if (action) navigationRef.dispatch(action);
+    });
   };
 
   return (
@@ -537,18 +550,25 @@ function ThemedAppShell({
           currentChat={currentChat}
           onOpenChat={openChatFromDrawer}
           onClose={() => setDrawerOpen(false)}
+          onDismiss={onDrawerDismiss}
           onNavigate={navigateFromDrawer}
           onScan={() => {
-            setDrawerOpen(false);
-            navigationRef.dispatch(
-              StackActions.push("DeviceLogin", { start_scanner: true }),
-            );
+            closeDrawerThen(() => {
+              if (!navigationRef.isReady()) return;
+              navigationRef.dispatch(
+                openWorkspaceSheetAction("DeviceLogin", {
+                  start_scanner: true,
+                }),
+              );
+            });
           }}
           onLoginCode={() => {
-            setDrawerOpen(false);
-            navigationRef.dispatch(
-              StackActions.push("AgentKeyLogin", { mint: true }),
-            );
+            closeDrawerThen(() => {
+              if (!navigationRef.isReady()) return;
+              navigationRef.dispatch(
+                openWorkspaceSheetAction("AgentKeyLogin", { mint: true }),
+              );
+            });
           }}
         />
       ) : null}

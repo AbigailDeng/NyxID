@@ -14,10 +14,13 @@ import {
   SlidersHorizontal,
 } from "lucide-react-native";
 import type {
-  RootStackParamList,
+  WorkspaceSheetParamList,
   WorkspaceScreenProps,
 } from "../../app/navigationTypes";
-import { useWorkspaceBack } from "../../app/WorkspaceHeader";
+import {
+  useOpenWorkspaceChat,
+  useWorkspaceBack,
+} from "../../app/WorkspaceHeader";
 import {
   ActionButton,
   Card,
@@ -60,6 +63,7 @@ export function AutomationsScreen({
   navigation,
   route,
 }: WorkspaceScreenProps<"Automations">) {
+  const openChat = useOpenWorkspaceChat();
   const runtime = useAutomationRuntime();
   const { colors } = useTheme();
   const [search, setSearch] = useState("");
@@ -242,9 +246,7 @@ export function AutomationsScreen({
             <ActionButton
               label="Ask NyxBot"
               variant="secondary"
-              onPress={() =>
-                navigation.push("AssistantContext", { draft: true })
-              }
+              onPress={() => openChat({ draft: true })}
             />
           )}
         </Card>
@@ -256,7 +258,7 @@ export function AutomationsScreen({
 export function AutomationDetailScreen({
   navigation,
   route,
-}: NativeStackScreenProps<RootStackParamList, "AutomationDetail">) {
+}: NativeStackScreenProps<WorkspaceSheetParamList, "AutomationDetail">) {
   const write = useAutomationWrite();
   const { colors } = useTheme();
   const client = useQueryClient();
@@ -540,9 +542,9 @@ function AutomationDeliveryCard({
 }
 
 export function AutomationRunsScreen({
-  navigation,
   route,
-}: NativeStackScreenProps<RootStackParamList, "AutomationRuns">) {
+}: NativeStackScreenProps<WorkspaceSheetParamList, "AutomationRuns">) {
+  const openChat = useOpenWorkspaceChat();
   const runtime = useAutomationRuntime();
   const settings = useQuery({
     queryKey: AUTOMATION_SETTINGS,
@@ -628,11 +630,7 @@ export function AutomationRunsScreen({
             <ActionButton
               label="Open thread"
               variant="secondary"
-              onPress={() =>
-                navigation.push("AssistantContext", {
-                  conversationId: run.thread_id!,
-                })
-              }
+              onPress={() => openChat({ conversationId: run.thread_id! })}
             />
           )}
         </Card>

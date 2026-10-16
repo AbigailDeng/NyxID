@@ -3,7 +3,7 @@ import { Alert, Switch, View } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
-import type { RootStackParamList } from "../../app/navigationTypes";
+import type { WorkspaceSheetParamList } from "../../app/navigationTypes";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import {
   ActionButton,
@@ -46,7 +46,10 @@ import {
 } from "./AutomationUI";
 import { useTheme } from "../../theme/ThemeContext";
 
-type Props = NativeStackScreenProps<RootStackParamList, "AutomationEditor">;
+type Props = NativeStackScreenProps<
+  WorkspaceSheetParamList,
+  "AutomationEditor"
+>;
 type SecretValue = { label: string; value: string };
 const steps = ["Task", "When", "Delivery", "Review"];
 
@@ -297,6 +300,13 @@ function AutomationEditor({
     disabled: !exitTo && (write.busy || !!savedId),
     label: step > 0 ? "Previous step" : "Back",
     onBack: leave,
+    discardOnClose:
+      !exitTo && changed && !savedId
+        ? {
+            title: "Discard automation changes?",
+            message: "Your changes haven’t been saved.",
+          }
+        : undefined,
   });
   useEffect(() => {
     if (write.busy || !write.active) return;

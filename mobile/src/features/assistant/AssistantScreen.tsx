@@ -33,6 +33,10 @@ import type {
 } from "../../app/navigationTypes";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import {
+  openWorkspaceSheetAction,
+  workspaceNavigateAction,
+} from "../../app/navigationHierarchy";
+import {
   WorkspacePage,
   ActionButton,
   Card,
@@ -230,30 +234,17 @@ export function AssistantScreen({
       Alert.alert("Could not open automation", automation.message);
     } else if (automation?.kind === "automation") {
       if (automation.params.setup) {
-        navigation.push("AutomationEditor", automation.params);
-      } else if (contextual) {
-        navigation.popTo(
-          "Workspace",
-          {
-            screen: "Automations",
-            params: {
-              agentId: undefined,
-              setup: undefined,
-              ...automation.params,
-            },
-          },
-          { merge: true },
+        navigation.dispatch(
+          openWorkspaceSheetAction("AutomationEditor", automation.params),
         );
       } else {
-        navigation.navigate({
-          name: "Automations",
-          params: {
+        navigation.dispatch(
+          workspaceNavigateAction("Automations", {
             agentId: undefined,
             setup: undefined,
             ...automation.params,
-          },
-          merge: true,
-        });
+          }),
+        );
       }
     } else {
       void WebBrowser.openBrowserAsync(href).catch(() => undefined);
@@ -924,9 +915,11 @@ export function AssistantScreen({
                   label="Review request"
                   variant="secondary"
                   onPress={() =>
-                    navigation.push("ActivityDetail", {
-                      challengeId: approval.id,
-                    })
+                    navigation.dispatch(
+                      openWorkspaceSheetAction("ActivityDetail", {
+                        challengeId: approval.id,
+                      }),
+                    )
                   }
                 />
               </Card>
@@ -1104,9 +1097,7 @@ export function AssistantScreen({
               variant="secondary"
               onPress={() => {
                 setSheet(undefined);
-                if (contextual)
-                  navigation.popTo("Workspace", { screen: "Agents" });
-                else navigation.navigate("Agents");
+                navigation.dispatch(workspaceNavigateAction("Agents"));
               }}
             />
           </>
@@ -1281,7 +1272,11 @@ export function AssistantScreen({
                 variant="secondary"
                 onPress={() => {
                   setSheet(undefined);
-                  navigation.push("AgentDetail", { agentId: currentAgent.id });
+                  navigation.dispatch(
+                    openWorkspaceSheetAction("AgentDetail", {
+                      agentId: currentAgent.id,
+                    }),
+                  );
                 }}
               />
             ) : null}

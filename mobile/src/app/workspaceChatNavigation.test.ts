@@ -7,16 +7,20 @@ import {
   TabRouter,
   type NavigationState,
 } from "@react-navigation/routers";
-import { workspaceRouterOptions } from "./navigationHierarchy";
+import {
+  openWorkspaceSheetAction,
+  workspaceRouterOptions,
+} from "./navigationHierarchy";
 import {
   activeWorkspaceChatTarget,
   workspaceChatNavigationAction,
+  workspaceContextChatNavigationAction,
   type WorkspaceChatTarget,
 } from "./workspaceChatNavigation";
 
 const workspaceRouter = TabRouter(workspaceRouterOptions);
 const workspaceOptions = {
-  routeNames: ["Assistant", "Agents", "Plugins", "Automations", "Activity"],
+  routeNames: ["Assistant"],
   routeParamList: {},
   routeGetIdList: {},
 };
@@ -27,7 +31,7 @@ const rootOptions = {
     "Workspace",
     "AssistantContext",
     "GroupChat",
-    "AgentDetail",
+    "WorkspaceSheet",
   ],
   routeParamList: {},
   routeGetIdList: {},
@@ -36,35 +40,27 @@ type RootState = ReturnType<typeof rootRouter.getInitialState>;
 
 function fixture(): RootState {
   let workspace = workspaceRouter.getInitialState(workspaceOptions);
-  for (const [name, params] of [
-    [
-      "Assistant",
-      {
+  const next = workspaceRouter.getStateForAction(
+    workspace,
+    CommonActions.navigate({
+      name: "Assistant",
+      params: {
         agentId: "old-agent",
         conversationId: "old-chat",
         acknowledgementId: "old-card",
         draft: true,
         openLatest: true,
       },
-    ],
-    ["Plugins", { tab: "skills", agentId: "plugin-agent" }],
-    ["Automations", { agentId: "automation-agent", setup: "saved-setup" }],
-    ["Agents", { tab: "agents" }],
-  ] as const) {
-    const next = workspaceRouter.getStateForAction(
-      workspace,
-      CommonActions.navigate({ name, params }),
-      workspaceOptions,
-    );
-    assert.ok(next);
-    workspace = next;
-  }
+    }),
+    workspaceOptions,
+  );
+  assert.ok(next);
+  workspace = next;
   const initial = rootRouter.getInitialState(rootOptions);
   return {
     ...initial,
     routes: initial.routes.map((route) => ({
       ...route,
-      params: { screen: "Plugins", params: { tab: "skills" } },
       state: workspace,
     })),
   };
@@ -103,7 +99,10 @@ function route(state: NavigationState, index = state.index) {
 
 test("a drawer chat replaces contextual detail history and clears stale assistant flags", () => {
   let root = fixture();
-  root = push(root, "AgentDetail", { agentId: "detail-agent" });
+  root = push(root, "WorkspaceSheet", {
+    screen: "AgentDetail",
+    params: { agentId: "detail-agent" },
+  });
   root = push(root, "AssistantContext", {
     agentId: "detail-agent",
     conversationId: "detail-chat",
@@ -138,12 +137,6 @@ test("a drawer chat replaces contextual detail history and clears stale assistan
     draft: false,
     openLatest: false,
   });
-  for (const name of ["Plugins", "Automations", "Agents"]) {
-    assert.equal(
-      tabs.routes.find((route) => route.name === name),
-      before.routes.find((route) => route.name === name),
-    );
-  }
   assert.equal(
     workspaceRouter.getStateForAction(
       tabs,
@@ -168,26 +161,26 @@ test("agent targets without a conversation start a draft, including default NyxB
   }
 });
 
-test("group selection reuses its existing route and native Back lands on the Groups tab", () => {
+test("group selection dismisses its drawer and native Back lands on the unchanged base chat", () => {
   let root = fixture();
+  const base = route(root);
   root = push(root, "GroupChat", { groupId: "chosen-group" });
   const groupKey = route(root).key;
-  root = push(root, "AgentDetail", { agentId: "member-agent" });
-  root = push(root, "GroupChat", { groupId: "other-group" });
-  const before = child(root);
+  root = push(root, "WorkspaceSheet", {
+    screen: "GroupEditor",
+    params: { groupId: "chosen-group" },
+  });
   const next = select(root, { kind: "group", groupId: "chosen-group" });
   assert.deepEqual(
     next.routes.map((route) => route.name),
     ["Workspace", "GroupChat"],
   );
-  assert.equal(route(next, 0).key, route(root, 0).key);
+  assert.equal(route(next, 0), base);
   assert.equal(route(next, 1).key, groupKey);
-  assert.deepEqual(route(next, 1).params, { groupId: "chosen-group" });
   const selectedAgain = select(next, {
     kind: "group",
     groupId: "chosen-group",
   });
-  assert.equal(selectedAgain.routes.length, 2);
   assert.equal(route(selectedAgain, 1).key, groupKey);
   const back = rootRouter.getStateForAction(
     selectedAgain,
@@ -195,15 +188,9 @@ test("group selection reuses its existing route and native Back lands on the Gro
     rootOptions,
   );
   assert.ok(back);
-  const tabs = child(back);
-  assert.equal(route(tabs).name, "Agents");
-  assert.deepEqual(route(tabs).params, { tab: "groups" });
-  for (const name of ["Assistant", "Plugins", "Automations"]) {
-    assert.equal(
-      tabs.routes.find((route) => route.name === name),
-      before.routes.find((route) => route.name === name),
-    );
-  }
+  assert.equal(route(back), base);
+  assert.equal(route(child(back)).name, "Assistant");
+  assert.deepEqual(route(child(back)).params, route(child(fixture())).params);
 });
 
 test("a newly selected group replaces old group details without accumulating routes", () => {
@@ -226,12 +213,11 @@ test("an unmounted workspace child can be initialized by a drawer target", () =>
     { kind: "group", groupId: "group" },
   ] as const) {
     const next = select(initial, target);
-    const tabs = child(next);
-    assert.equal(
-      route(tabs).name,
-      target.kind === "agent" ? "Assistant" : "Agents",
-    );
-    assert.equal(tabs.routes.length, workspaceOptions.routeNames.length);
+    if (target.kind === "agent") {
+      assert.equal(route(child(next)).name, "Assistant");
+    } else {
+      assert.equal(route(next).name, "GroupChat");
+    }
     assert.equal(route(next, 0).key, route(initial, 0).key);
   }
 });
@@ -249,6 +235,119 @@ test("missing root or authenticated workspace produces no navigation action", ()
       kind: "group",
       groupId: "group",
     }),
+    null,
+  );
+});
+
+function contextual(
+  state: RootState,
+  params: Parameters<typeof workspaceContextChatNavigationAction>[1],
+) {
+  const action = workspaceContextChatNavigationAction(state, params);
+  assert.ok(action);
+  assert.equal(action.target, state.key);
+  const next = rootRouter.getStateForAction(state, action, rootOptions);
+  assert.ok(next);
+  return rootRouter.getRehydratedState(next, rootOptions);
+}
+
+test("opening an agent chat from a drawer preserves the calling transcript and base draft", () => {
+  const caller = push(fixture(), "AssistantContext", {
+    conversationId: "calling-chat",
+    agentId: "calling-agent",
+  });
+  const opened = push(
+    caller,
+    "WorkspaceSheet",
+    openWorkspaceSheetAction("AgentDetail", { agentId: "new-agent" }).payload
+      .params,
+  );
+  const params = {
+    agentId: "new-agent",
+    conversationId: "new-chat",
+    draft: false,
+  };
+  const next = contextual(opened, params);
+  assert.deepEqual(
+    next.routes.map((route) => route.name),
+    ["Workspace", "AssistantContext", "AssistantContext"],
+  );
+  assert.equal(next.routes[0], caller.routes[0]);
+  assert.equal(next.routes[1], caller.routes[1]);
+  assert.deepEqual(route(next).params, params);
+  const back = rootRouter.getStateForAction(
+    next,
+    CommonActions.goBack(),
+    rootOptions,
+  );
+  assert.ok(back);
+  assert.equal(route(back), route(caller));
+});
+
+test("reopening an existing contextual conversation reuses its route after dismissing the drawer", () => {
+  const caller = push(fixture(), "AssistantContext", {
+    conversationId: "current-chat",
+    agentId: "agent-1",
+  });
+  const opened = push(caller, "WorkspaceSheet", {
+    screen: "AgentDetail",
+    params: { agentId: "agent-1" },
+  });
+  const params = {
+    conversationId: "current-chat",
+    agentId: "agent-1",
+    acknowledgementId: "card-2",
+  };
+  const next = contextual(opened, params);
+  assert.equal(next.routes.length, 2);
+  assert.equal(route(next).key, route(caller).key);
+  assert.deepEqual(route(next).params, params);
+  assert.equal(next.routes[0], caller.routes[0]);
+});
+
+test("starting a contextual draft retains another unfinished draft route", () => {
+  const caller = push(fixture(), "AssistantContext", {
+    agentId: "agent-1",
+    draft: true,
+  });
+  const opened = push(caller, "WorkspaceSheet", {
+    screen: "AgentDetail",
+    params: { agentId: "agent-1" },
+  });
+  const next = contextual(opened, { agentId: "agent-1", draft: true });
+  assert.equal(next.routes.length, 3);
+  assert.notEqual(route(next).key, route(caller).key);
+  assert.equal(next.routes[1], caller.routes[1]);
+});
+
+test("opening a specialist chat from group settings preserves the actual group underneath", () => {
+  const caller = push(fixture(), "GroupChat", { groupId: "group-1" });
+  const opened = push(caller, "WorkspaceSheet", {
+    screen: "GroupEditor",
+    params: { groupId: "group-1" },
+  });
+  const next = contextual(opened, { agentId: "specialist", draft: true });
+  assert.deepEqual(
+    next.routes.map((route) => route.name),
+    ["Workspace", "GroupChat", "AssistantContext"],
+  );
+  assert.equal(next.routes[1], caller.routes[1]);
+});
+
+test("contextual navigation waits for an authenticated chat navigator", () => {
+  assert.equal(workspaceContextChatNavigationAction(undefined, {}), null);
+  assert.equal(
+    workspaceContextChatNavigationAction(
+      { ...fixture(), routes: [{ key: "auth", name: "Auth" }] },
+      {},
+    ),
+    null,
+  );
+  assert.equal(
+    workspaceContextChatNavigationAction(
+      { ...fixture(), routeNames: ["Workspace", "Auth"] },
+      {},
+    ),
     null,
   );
 });

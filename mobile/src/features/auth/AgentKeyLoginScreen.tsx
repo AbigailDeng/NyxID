@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useWorkspaceBack, useWorkspaceSheet } from "../../app/WorkspaceHeader";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -9,8 +10,8 @@ import {
   View,
 } from "react-native";
 import { ChevronLeft } from "lucide-react-native";
-import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import type { RootStackParamList } from "../../app/AppNavigator";
+import type { SheetScreenProps } from "../../app/navigationTypes";
+import { workspaceNavigateAction } from "../../app/navigationHierarchy";
 import { ScreenContainer } from "../../components/ScreenContainer";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { WorkspaceSelectionField } from "../../components/workspace/WorkspaceSelectionField";
@@ -57,7 +58,7 @@ import {
   permissionRows,
 } from "./agentKeyLoginModel";
 
-type Props = NativeStackScreenProps<RootStackParamList, "AgentKeyLogin">;
+type Props = SheetScreenProps<"AgentKeyLogin">;
 type Step =
   | "code"
   | "review"
@@ -70,6 +71,7 @@ type Step =
   | "expired";
 
 export function AgentKeyLoginScreen({ navigation, route }: Props) {
+  const inWorkspaceSheet = Boolean(useWorkspaceSheet());
   const flow = route.params?.flow ?? "agent-key";
   const mint = route.params?.mint ?? false;
   const [issued, setIssued] = useState<IssuedLoginCode | null>(null);
@@ -95,6 +97,13 @@ export function AgentKeyLoginScreen({ navigation, route }: Props) {
   const [now, setNow] = useState(Date.now);
   const [pending, setPending] = useState(false);
   const [scanning, setScanning] = useState(false);
+  useWorkspaceBack({
+    active: inWorkspaceSheet && scanning,
+    defaultRole: "back",
+    options: { headerShown: inWorkspaceSheet },
+    label: "Back to login",
+    onBack: () => setScanning(false),
+  });
   const [error, setError] = useState<string | null>(null);
   const lastAction = useRef(0);
   const generation = useRef(0);
@@ -238,7 +247,7 @@ export function AgentKeyLoginScreen({ navigation, route }: Props) {
     if (navigation.canGoBack()) {
       navigation.goBack();
     } else if (isAuthenticated) {
-      navigation.navigate("Workspace", { screen: "Activity" });
+      navigation.dispatch(workspaceNavigateAction("Activity"));
     } else {
       navigation.navigate("Auth");
     }
@@ -246,6 +255,7 @@ export function AgentKeyLoginScreen({ navigation, route }: Props) {
   if (scanning)
     return (
       <DeviceCodeScanner
+        showHeader={!inWorkspaceSheet}
         onCancel={() => setScanning(false)}
         onManualEntry={() => setScanning(false)}
         onCode={(value, kind) => {
@@ -290,19 +300,21 @@ export function AgentKeyLoginScreen({ navigation, route }: Props) {
           contentContainerStyle={[styles.content, { gap: 16 }]}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.screenHeader}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Back"
-              onPress={back}
-              style={styles.headerBackButton}
-            >
-              <ChevronLeft size={24} color={colors.textPrimary} />
-            </Pressable>
-            <Text style={styles.title}>
-              {mint ? "One-time login code" : "Agent Key login"}
-            </Text>
-          </View>
+          {!inWorkspaceSheet && (
+            <View style={styles.screenHeader}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Back"
+                onPress={back}
+                style={styles.headerBackButton}
+              >
+                <ChevronLeft size={24} color={colors.textPrimary} />
+              </Pressable>
+              <Text style={styles.title}>
+                {mint ? "One-time login code" : "Agent Key login"}
+              </Text>
+            </View>
+          )}
           {issued ? (
             <LoginCodeStatusView
               issued={issued}

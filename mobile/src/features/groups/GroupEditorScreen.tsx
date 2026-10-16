@@ -193,6 +193,13 @@ function GroupEditor({
     disabled: !exitTo && busy,
     label: groupId ? "Back to group" : "Back to groups",
     onBack: back,
+    discardOnClose:
+      !exitTo && dirty
+        ? {
+            title: "Discard group changes?",
+            message: "Your changes have not been saved.",
+          }
+        : undefined,
   });
   useEffect(() => {
     if (!exitTo || busy || !live.active) return;

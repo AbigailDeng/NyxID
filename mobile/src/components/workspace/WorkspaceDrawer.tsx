@@ -40,6 +40,7 @@ export function WorkspaceDrawer({
   visible,
   currentRoute,
   onClose,
+  onDismiss,
   onNavigate,
   onScan,
   onLoginCode,
@@ -49,6 +50,7 @@ export function WorkspaceDrawer({
   visible: boolean;
   currentRoute?: string;
   onClose: () => void;
+  onDismiss?: () => void;
   onNavigate: (route: WorkspaceRoute) => void;
   onScan: () => void;
   onLoginCode: () => void;
@@ -64,7 +66,11 @@ export function WorkspaceDrawer({
   const title =
     profile.data?.display_name || profile.data?.email || "Your account";
   return (
-    <WorkspaceDrawerModal visible={visible} onClose={onClose}>
+    <WorkspaceDrawerModal
+      visible={visible}
+      onClose={onClose}
+      onDismiss={onDismiss}
+    >
       <SafeAreaView
         style={[
           styles.panel,

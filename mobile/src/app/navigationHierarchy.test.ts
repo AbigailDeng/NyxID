@@ -12,142 +12,160 @@ import {
 import { navigationLinkingConfig } from "./navigationLinking";
 import {
   challengeNavigationAction,
+  dismissWorkspaceSheetAction,
+  openWorkspaceSheetAction,
   withWorkspaceFallback,
   workspaceNavigateAction,
+  workspacePanelRouterOptions,
   workspaceRouterOptions,
+  workspaceSharedEntryNavigationAction,
 } from "./navigationHierarchy";
-import type { WorkspaceParamList } from "./navigationTypes";
 
-const workspaceLinking = navigationLinkingConfig.screens?.Workspace;
-assert.ok(workspaceLinking && typeof workspaceLinking === "object");
-const workspaceRouteNames = Object.keys(workspaceLinking.screens ?? {});
-const workspaceRouter = TabRouter(workspaceRouterOptions);
-const workspaceOptions = {
-  routeNames: workspaceRouteNames,
+const rootRouter = StackRouter({ initialRouteName: "Workspace" });
+const rootOptions = {
+  routeNames: Object.keys(navigationLinkingConfig.screens ?? {}),
   routeParamList: {},
   routeGetIdList: {},
 };
-const rootRouter = StackRouter({
-  initialRouteName: navigationLinkingConfig.initialRouteName,
-});
-const rootOptions = {
+const chatRouter = TabRouter(workspaceRouterOptions);
+const chatOptions = {
+  routeNames: ["Assistant"],
+  routeParamList: {},
+  routeGetIdList: {},
+};
+const panelRouter = TabRouter(workspacePanelRouterOptions);
+const panelOptions = {
   routeNames: [
-    ...Object.keys(navigationLinkingConfig.screens ?? {}),
-    "ServiceSetup",
-    "AgentSkills",
-    "ActivityDetail",
+    "Agents",
+    "Plugins",
+    "Automations",
+    "Services",
+    "Activity",
+    "AccountSettings",
   ],
   routeParamList: {},
   routeGetIdList: {},
 };
+const sheetRouter = StackRouter({ initialRouteName: "Pages" });
+const sheetOptions = {
+  routeNames: [
+    "Pages",
+    "AgentDetail",
+    "GroupEditor",
+    "AutomationDetail",
+    "AutomationEditor",
+    "AutomationRuns",
+    "AutomationPreferences",
+    "AccountSecurity",
+    "DeviceLogin",
+    "AgentKeyLogin",
+    "TermsOfService",
+    "PrivacyPolicy",
+  ],
+  routeParamList: {},
+  routeGetIdList: {},
+};
+type State = ReturnType<typeof rootRouter.getInitialState>;
 
 function linkedState(path: string) {
   const state = withWorkspaceFallback(
     getStateFromPath(path, navigationLinkingConfig),
   );
-  assert.ok(state, `Expected a navigation state for ${path}`);
+  assert.ok(state, `Expected navigation state for ${path}`);
   return state;
 }
-
-function focusedRoute(state: NavigationState | PartialState<NavigationState>) {
+function selected(state: NavigationState | PartialState<NavigationState>) {
   const route = state.routes[state.index ?? state.routes.length - 1];
   assert.ok(route);
   return route;
 }
-
 function focusedNames(state: NavigationState | PartialState<NavigationState>) {
   const names: string[] = [];
   let next: NavigationState | PartialState<NavigationState> | undefined = state;
   while (next) {
-    const route = focusedRoute(next);
+    const route = selected(next);
     names.push(route.name);
     next = route.state;
   }
   return names;
 }
-
-function switchWorkspace(
-  state: ReturnType<typeof workspaceRouter.getInitialState>,
-  name: keyof WorkspaceParamList,
-  params?: object,
-) {
-  let next = workspaceRouter.getStateForAction(
-    state,
-    workspaceNavigateAction(name),
-    workspaceOptions,
+function fixture(): State {
+  const root = rootRouter.getInitialState(rootOptions);
+  let chat = chatRouter.getInitialState(chatOptions);
+  const next = chatRouter.getStateForAction(
+    chat,
+    CommonActions.setParams({
+      conversationId: "base-chat",
+      agentId: "base-agent",
+      draft: true,
+    }),
+    chatOptions,
   );
   assert.ok(next);
-  if (params) {
-    next = workspaceRouter.getStateForAction(
-      next,
-      CommonActions.setParams(params),
-      workspaceOptions,
-    );
-    assert.ok(next);
-  }
+  chat = next;
+  return {
+    ...root,
+    routes: root.routes.map((route) => ({ ...route, state: chat })),
+  };
+}
+function apply(
+  state: State,
+  action:
+    | ReturnType<typeof openWorkspaceSheetAction>
+    | ReturnType<typeof dismissWorkspaceSheetAction>
+    | ReturnType<typeof workspaceSharedEntryNavigationAction>,
+) {
+  assert.ok(action);
+  const next = rootRouter.getStateForAction(state, action, rootOptions);
+  assert.ok(next);
+  return rootRouter.getRehydratedState(next, rootOptions);
+}
+function pushContext(
+  state: State,
+  name = "AssistantContext",
+  params: object = {
+    conversationId: "context-chat",
+    acknowledgementId: "card-1",
+  },
+) {
+  const next = rootRouter.getStateForAction(
+    state,
+    StackActions.push(name, params),
+    rootOptions,
+  );
+  assert.ok(next);
   return next;
 }
 
-test("workspace destinations are siblings, without an added root stack entry", () => {
-  for (const [path, name] of [
-    ["chat", "Assistant"],
+test("non-chat workspace links open one drawer with a chat underneath", () => {
+  for (const [path, page] of [
     ["automations", "Automations"],
     ["agents", "Agents"],
     ["plugins", "Plugins"],
     ["services", "Services"],
     ["activity", "Activity"],
     ["account", "AccountSettings"],
-  ] as const) {
-    assert.ok(path && name);
-    const state = linkedState(path);
+  ]) {
+    const state = linkedState(path!);
     assert.deepEqual(
       state.routes.map((route) => route.name),
-      ["Workspace"],
+      ["Workspace", "WorkspaceSheet"],
     );
-    assert.deepEqual(focusedNames(state), ["Workspace", name]);
+    assert.deepEqual(focusedNames(state), ["WorkspaceSheet", "Pages", page]);
+    assert.deepEqual(focusedNames(state.routes[0]!.state!), ["Assistant"]);
     assert.equal(getPathFromState(state, navigationLinkingConfig), `/${path}`);
+    const root = rootRouter.getRehydratedState(state, rootOptions);
+    const closed = apply(root, dismissWorkspaceSheetAction(root));
+    assert.deepEqual(focusedNames(closed), ["Workspace", "Assistant"]);
   }
 });
 
-test("contextual chat deep links retain their exact conversation and card", () => {
-  const state = linkedState(
-    "chat/conversation-1?acknowledgementId=card-1&agentId=agent-1&draft=false&openLatest=true",
-  );
-  assert.deepEqual(
-    state.routes.map((route) => route.name),
-    ["Workspace", "AssistantContext"],
-  );
-  assert.deepEqual(focusedRoute(state).params, {
-    conversationId: "conversation-1",
-    acknowledgementId: "card-1",
-    agentId: "agent-1",
-    draft: false,
-    openLatest: true,
-  });
-  const path = getPathFromState(state, navigationLinkingConfig);
-  const reopened = linkedState(path);
-  assert.deepEqual(focusedNames(reopened), ["AssistantContext"]);
-  assert.deepEqual(focusedRoute(reopened).params, focusedRoute(state).params);
-});
-
-test("a chat link without an ID opens the workspace conversation", () => {
-  const state = linkedState("chat?agentId=agent-1&draft=true&openLatest=false");
-  assert.deepEqual(focusedNames(state), ["Workspace", "Assistant"]);
-  const workspace = focusedRoute(state).state;
-  assert.ok(workspace);
-  assert.deepEqual(focusedRoute(workspace).params, {
-    agentId: "agent-1",
-    draft: true,
-    openLatest: false,
-  });
-});
-
-test("workspace links keep encoded query values on their destination page", () => {
+test("panel URLs retain encoded filters and selected group tabs", () => {
   for (const [path, name, params] of [
     [
-      "automations?agentId=agent%20one&setup=4b47953b-92cc-482f-8443-e0bcc30ade21",
+      "automations?agentId=agent%20one&setup=watch-1",
       "Automations",
-      { agentId: "agent one", setup: "4b47953b-92cc-482f-8443-e0bcc30ade21" },
+      { agentId: "agent one", setup: "watch-1" },
     ],
     [
       "plugins?tab=skills&agentId=agent%20one",
@@ -159,18 +177,86 @@ test("workspace links keep encoded query values on their destination page", () =
       "Activity",
       { challengeId: "challenge/one" },
     ],
+    ["agents?tab=groups", "Agents", { tab: "groups" }],
   ] as const) {
     const state = linkedState(path);
-    assert.deepEqual(focusedNames(state), ["Workspace", name]);
-    const workspace = focusedRoute(state).state;
-    assert.ok(workspace);
-    assert.deepEqual(focusedRoute(workspace).params, params);
+    assert.deepEqual(focusedNames(state), ["WorkspaceSheet", "Pages", name]);
+    const panel = selected(selected(state).state!).state!;
+    assert.deepEqual(selected(panel).params, params);
   }
 });
 
-test("existing security, login and legal links keep their destination and parameters", () => {
+test("cold detail links have an appropriate module inside the same drawer", () => {
+  for (const [path, name, panel] of [
+    ["agents/agent%20one", "AgentDetail", "Agents"],
+    ["groups/edit", "GroupEditor", "Agents"],
+    ["groups/edit/group-1", "GroupEditor", "Agents"],
+    ["automations/automation-1", "AutomationDetail", "Automations"],
+    ["automations/edit", "AutomationEditor", "Automations"],
+    ["automations/edit/automation-1", "AutomationEditor", "Automations"],
+    ["automations/automation-1/runs", "AutomationRuns", "Automations"],
+    ["automations/preferences", "AutomationPreferences", "Automations"],
+    ["account/security", "AccountSecurity", "AccountSettings"],
+  ]) {
+    const state = linkedState(path!);
+    assert.deepEqual(
+      state.routes.map((route) => route.name),
+      ["Workspace", "WorkspaceSheet"],
+    );
+    assert.deepEqual(focusedNames(state), ["WorkspaceSheet", name]);
+    const sheet = selected(state).state!;
+    const pages = sheet.routes.find((route) => route.name === "Pages");
+    assert.ok(pages?.state);
+    assert.equal(selected(pages.state).name, panel);
+    if (name === "GroupEditor")
+      assert.deepEqual(selected(pages.state).params, { tab: "groups" });
+    const hydrated = sheetRouter.getRehydratedState(sheet, sheetOptions);
+    const back = sheetRouter.getStateForAction(
+      hydrated,
+      CommonActions.goBack(),
+      sheetOptions,
+    );
+    assert.ok(back);
+    assert.deepEqual(focusedNames(back), ["Pages", panel]);
+    const root = rootRouter.getRehydratedState(state, rootOptions);
+    assert.deepEqual(
+      focusedNames(apply(root, dismissWorkspaceSheetAction(root))),
+      ["Workspace", "Assistant"],
+    );
+    assert.equal(getPathFromState(state, navigationLinkingConfig), `/${path}`);
+  }
+});
+
+test("chat and group deep links remain full chat routes", () => {
+  const base = linkedState("chat?agentId=agent-1&draft=true&openLatest=false");
+  assert.deepEqual(focusedNames(base), ["Workspace", "Assistant"]);
+  assert.deepEqual(selected(selected(base).state!).params, {
+    agentId: "agent-1",
+    draft: true,
+    openLatest: false,
+  });
+  const context = linkedState(
+    "chat/conversation-1?acknowledgementId=card-1&agentId=agent-1&draft=false&openLatest=true",
+  );
+  assert.deepEqual(focusedNames(context), ["AssistantContext"]);
+  assert.deepEqual(selected(context).params, {
+    conversationId: "conversation-1",
+    acknowledgementId: "card-1",
+    agentId: "agent-1",
+    draft: false,
+    openLatest: true,
+  });
+  const reopened = linkedState(
+    getPathFromState(context, navigationLinkingConfig),
+  );
+  assert.deepEqual(selected(reopened).params, selected(context).params);
+  const group = linkedState("groups/group-1");
+  assert.deepEqual(focusedNames(group), ["GroupChat"]);
+  assert.deepEqual(focusedNames(group.routes[0]!.state!), ["Assistant"]);
+});
+
+test("shared login/legal entry links keep their signed-out root destinations", () => {
   for (const [path, name, params] of [
-    ["account/security", "AccountSecurity", undefined],
     [
       "login/device?user_code=ABCD-EFGH",
       "DeviceLogin",
@@ -185,419 +271,375 @@ test("existing security, login and legal links keep their destination and parame
     ["privacy", "PrivacyPolicy", undefined],
     ["auth", "Auth", undefined],
   ] as const) {
-    const route = focusedRoute(linkedState(path));
-    assert.equal(route.name, name);
-    assert.deepEqual(route.params, params);
+    assert.equal(selected(linkedState(path)).name, name);
+    assert.deepEqual(selected(linkedState(path)).params, params);
   }
 });
 
-test("repeated workspace switches reuse routes and retain conversation and plugin context", () => {
-  let state = workspaceRouter.getInitialState(workspaceOptions);
-  assert.equal(focusedRoute(state).name, "Assistant");
-  assert.equal(
-    workspaceLinking.initialRouteName,
-    workspaceRouterOptions.initialRouteName,
-  );
-  const keys = state.routes.map((route) => route.key);
-  const conversation = {
-    conversationId: "conversation-1",
-    acknowledgementId: "card-1",
-    agentId: "agent-1",
-    draft: true,
-  };
-  state = switchWorkspace(state, "Assistant", conversation);
-  state = switchWorkspace(state, "Plugins", {
-    tab: "skills",
-    agentId: "agent-2",
-  });
-  state = switchWorkspace(state, "Automations", { agentId: "agent-2" });
-
-  for (const name of [
-    "Services",
-    "Agents",
-    "Automations",
-    "Activity",
-    "AccountSettings",
-    "Assistant",
-    "Plugins",
-    "Services",
-    "Assistant",
-    "Plugins",
-  ] as const) {
-    state = switchWorkspace(state, name);
-    assert.equal(focusedRoute(state).name, name);
-    assert.deepEqual(
-      state.routes.map((route) => route.key),
-      keys,
-    );
-    assert.equal(state.routes.length, workspaceRouteNames.length);
-    assert.equal(state.history.length, 1);
-  }
-
-  assert.deepEqual(
-    state.routes.find((route) => route.name === "Assistant")?.params,
-    conversation,
-  );
-  assert.deepEqual(
-    state.routes.find((route) => route.name === "Automations")?.params,
-    { agentId: "agent-2" },
-  );
-  assert.deepEqual(
-    state.routes.find((route) => route.name === "Plugins")?.params,
-    { tab: "skills", agentId: "agent-2" },
-  );
-  assert.equal(
-    workspaceRouter.getStateForAction(
-      state,
-      CommonActions.goBack(),
-      workspaceOptions,
-    ),
-    null,
-  );
-});
-
-test("closing nested details restores the calling workspace with its route state", () => {
-  let workspace = workspaceRouter.getInitialState(workspaceOptions);
-  workspace = switchWorkspace(workspace, "Activity", {
-    challengeId: "challenge-1",
-  });
-  let root = rootRouter.getInitialState(rootOptions);
-  root = {
-    ...root,
-    routes: root.routes.map((route) => ({ ...route, state: workspace })),
-  };
-  const caller = root.routes[0];
-
-  for (const [name, params] of [
-    ["ActivityDetail", { challengeId: "challenge-1" }],
-    [
-      "AssistantContext",
-      { conversationId: "conversation-2", acknowledgementId: "card-2" },
-    ],
-  ] as const) {
-    const pushed = rootRouter.getStateForAction(
-      root,
-      StackActions.push(name, params),
-      rootOptions,
-    );
-    assert.ok(pushed);
-    root = pushed;
-  }
-  assert.deepEqual(
-    root.routes.map((route) => route.name),
-    ["Workspace", "ActivityDetail", "AssistantContext"],
-  );
-  const existingContext = { routes: root.routes, index: root.index };
-  assert.equal(withWorkspaceFallback(existingContext), existingContext);
-  assert.equal(
-    withWorkspaceFallback(existingContext)?.routes[0]?.state,
-    workspace,
-  );
-
-  const backToDetail = rootRouter.getStateForAction(
-    root,
-    CommonActions.goBack(),
-    rootOptions,
-  );
-  assert.ok(backToDetail);
-  assert.equal(focusedRoute(backToDetail).name, "ActivityDetail");
-  const closed = rootRouter.getStateForAction(
-    backToDetail,
-    CommonActions.goBack(),
-    rootOptions,
-  );
-  assert.ok(closed);
-  assert.equal(closed.routes.length, 1);
-  assert.equal(closed.routes[0], caller);
-  assert.deepEqual(focusedNames(closed), ["Workspace", "Activity"]);
-});
-
-test("cold detail links return to their own workspace destination", () => {
-  for (const [path, name, parent] of [
-    [
-      "chat/conversation-1?acknowledgementId=card-1",
-      "AssistantContext",
-      "Assistant",
-    ],
-    ["agents/agent%20one", "AgentDetail", "Agents"],
-    ["groups/group-1", "GroupChat", "Agents"],
-    ["groups/edit", "GroupEditor", "Agents"],
-    ["groups/edit/group-1", "GroupEditor", "Agents"],
-    ["automations/automation-1", "AutomationDetail", "Automations"],
-    ["automations/edit", "AutomationEditor", "Automations"],
-    ["automations/edit/automation-1", "AutomationEditor", "Automations"],
-    ["automations/automation-1/runs", "AutomationRuns", "Automations"],
-    ["automations/preferences", "AutomationPreferences", "Automations"],
-    ["account/security", "AccountSecurity", "AccountSettings"],
-    ["terms", "TermsOfService", "AccountSettings"],
-    ["privacy", "PrivacyPolicy", "AccountSettings"],
-  ] as const) {
-    const root = rootRouter.getRehydratedState(linkedState(path), rootOptions);
-    assert.equal(focusedRoute(root).name, name);
-    const back = rootRouter.getStateForAction(
-      root,
-      CommonActions.goBack(),
-      rootOptions,
-    );
-    assert.ok(back);
-    assert.deepEqual(
-      back.routes.map((route) => route.name),
-      ["Workspace"],
-    );
-    assert.deepEqual(focusedNames(back), ["Workspace", parent]);
-    const workspace = focusedRoute(back).state;
-    assert.ok(workspace);
-    const hydrated = workspaceRouter.getRehydratedState(
-      workspace,
-      workspaceOptions,
-    );
-    assert.equal(focusedRoute(hydrated).name, parent);
-    assert.equal(hydrated.routes.length, workspaceRouteNames.length);
-  }
-});
-
-test("group details return to the Groups tab and settings preserve the calling transcript", () => {
-  const linked = linkedState("groups/group-1");
-  const parent = linked.routes.find(
-    (route) => route.name === "Workspace",
-  )?.state;
-  assert.ok(parent);
-  assert.deepEqual(focusedRoute(parent).params, { tab: "groups" });
-
-  const root = rootRouter.getRehydratedState(linked, rootOptions);
-  const caller = focusedRoute(root);
-  const editing = rootRouter.getStateForAction(
-    root,
-    StackActions.push("GroupEditor", { groupId: "group-1" }),
-    rootOptions,
-  );
-  assert.ok(editing);
-  const closed = rootRouter.getStateForAction(
-    editing,
-    CommonActions.goBack(),
-    rootOptions,
-  );
-  assert.ok(closed);
-  assert.equal(focusedRoute(closed), caller);
-  assert.deepEqual(focusedRoute(closed).params, { groupId: "group-1" });
-});
-
-test("the Groups hub tab survives other drawer destinations", () => {
-  let state = workspaceRouter.getInitialState(workspaceOptions);
-  state = switchWorkspace(state, "Agents", { tab: "groups" });
-  const key = focusedRoute(state).key;
-  state = switchWorkspace(state, "Assistant");
-  state = switchWorkspace(state, "Agents");
-  assert.equal(focusedRoute(state).key, key);
-  assert.deepEqual(focusedRoute(state).params, { tab: "groups" });
-  const linked = linkedState("agents?tab=groups");
-  const workspace = focusedRoute(linked).state;
-  assert.ok(workspace);
-  assert.deepEqual(focusedRoute(workspace).params, { tab: "groups" });
-});
-
-test("the Web automation alias resolves to the same native workspace sibling", () => {
+test("the existing Web automation alias opens the drawer and produces the canonical URL", () => {
   const state = linkedState("assistant/automations");
-  assert.deepEqual(focusedNames(state), ["Workspace", "Automations"]);
+  assert.deepEqual(focusedNames(state), [
+    "WorkspaceSheet",
+    "Pages",
+    "Automations",
+  ]);
   assert.equal(
     getPathFromState(state, navigationLinkingConfig),
     "/automations",
   );
 });
 
-test("selecting an agent automation filter merges the sibling without retaining setup", () => {
-  let state = workspaceRouter.getInitialState(workspaceOptions);
-  state = switchWorkspace(state, "Automations", { setup: "previous-watch" });
-  const key = focusedRoute(state).key;
-  const selected = workspaceRouter.getStateForAction(
-    state,
-    workspaceNavigateAction("Automations", {
-      agentId: "researcher",
-      setup: undefined,
-    }),
-    workspaceOptions,
-  );
-  assert.ok(selected);
-  assert.equal(focusedRoute(selected).key, key);
-  assert.deepEqual(focusedRoute(selected).params, {
-    agentId: "researcher",
-    setup: undefined,
-  });
-});
-
-test("an editor opened from chat retains the exact conversation underneath", () => {
-  let root = rootRouter.getRehydratedState(
-    linkedState("chat/conversation-1?acknowledgementId=card-1"),
-    rootOptions,
-  );
-  const caller = focusedRoute(root);
-  const pushed = rootRouter.getStateForAction(
-    root,
-    StackActions.push("AutomationEditor", {
-      setup: "4b47953b-92cc-482f-8443-e0bcc30ade21",
-      agentId: "researcher",
-    }),
-    rootOptions,
-  );
-  assert.ok(pushed);
-  assert.equal(focusedRoute(pushed).name, "AutomationEditor");
-  const closed = rootRouter.getStateForAction(
-    pushed,
-    CommonActions.goBack(),
-    rootOptions,
-  );
-  assert.ok(closed);
-  assert.equal(focusedRoute(closed), caller);
-  assert.deepEqual(focusedRoute(closed).params, {
-    conversationId: "conversation-1",
-    acknowledgementId: "card-1",
-  });
-});
-
-test("a pending approval tap replaces a restored detail when no workspace caller exists", () => {
-  const root = rootRouter.getRehydratedState(
-    { routes: [{ name: "AgentDetail", params: { agentId: "agent-1" } }] },
-    rootOptions,
-  );
-  assert.equal(
-    rootRouter.getStateForAction(root, CommonActions.goBack(), rootOptions),
-    null,
-  );
-  const action = challengeNavigationAction(root, "challenge-1");
-  assert.ok(action);
-  assert.equal(action.target, root.key);
-  const fallback = rootRouter.getStateForAction(root, action, rootOptions);
-  assert.ok(fallback);
-  assert.deepEqual(
-    fallback.routes.map((route) => route.name),
-    ["Workspace"],
-  );
-  assert.deepEqual(focusedRoute(fallback).params, {
-    screen: "Activity",
-    params: { challengeId: "challenge-1" },
-  });
-});
-
-test("notification taps defer until authentication exposes the workspace navigator", () => {
-  assert.equal(challengeNavigationAction(undefined, "challenge-1"), null);
-  const authOptions = {
-    ...rootOptions,
-    routeNames: ["Auth", "DeviceLogin", "AgentKeyLogin"],
-  };
-  const authRouter = StackRouter({ initialRouteName: "Auth" });
-  const authState = authRouter.getInitialState(authOptions);
-  assert.equal(challengeNavigationAction(authState, "challenge-1"), null);
-
-  const signedInState = rootRouter.getInitialState(rootOptions);
-  const action = challengeNavigationAction(signedInState, "challenge-1");
-  assert.ok(action);
-  assert.equal(action.target, signedInState.key);
-  const opened = rootRouter.getStateForAction(
-    signedInState,
-    action,
-    rootOptions,
-  );
-  assert.ok(opened);
-  assert.equal(opened.routes.length, 1);
-  assert.deepEqual(focusedRoute(opened).params, {
-    screen: "Activity",
-    params: { challengeId: "challenge-1" },
-  });
-});
-
-test("approval taps wait for all critical guards before removing a contextual caller", () => {
-  let root = rootRouter.getInitialState(rootOptions);
-  const detail = rootRouter.getStateForAction(
-    root,
-    StackActions.push("ServiceSetup", { connectionId: "connection-1" }),
-    rootOptions,
-  );
-  assert.ok(detail);
-  root = detail;
-  const guards = new Set([Symbol("saving"), Symbol("uploading")]);
-  const pendingChallengeId = "challenge-after-save";
-  const pendingAction = () =>
-    challengeNavigationAction(root, pendingChallengeId, guards.size > 0);
-
-  assert.equal(pendingAction(), null);
-  assert.deepEqual(
-    root.routes.map((route) => route.name),
-    ["Workspace", "ServiceSetup"],
-  );
-  guards.delete([...guards][0]!);
-  assert.equal(pendingAction(), null);
-  guards.clear();
-  const action = pendingAction();
-  assert.ok(action);
-  const opened = rootRouter.getStateForAction(root, action, rootOptions);
-  assert.ok(opened);
-  assert.deepEqual(
-    opened.routes.map((route) => route.name),
-    ["Workspace"],
-  );
-  assert.deepEqual(focusedRoute(opened).params, {
-    screen: "Activity",
-    params: { challengeId: pendingChallengeId },
-  });
-});
-
-test("notification navigation removes contextual screens without duplicating the workspace", () => {
-  let workspace = workspaceRouter.getInitialState(workspaceOptions);
-  workspace = switchWorkspace(workspace, "Assistant", {
-    conversationId: "conversation-1",
-  });
-  workspace = switchWorkspace(workspace, "Plugins", {
-    tab: "skills",
-    agentId: "agent-1",
-  });
-  let root = rootRouter.getInitialState(rootOptions);
-  root = {
-    ...root,
-    routes: root.routes.map((route) => ({ ...route, state: workspace })),
-  };
-  const workspaceKey = root.routes[0]?.key;
-  for (const [name, params] of [
-    ["AgentDetail", { agentId: "agent-1" }],
-    ["AssistantContext", { conversationId: "conversation-2" }],
+test("opening any management destination retains the exact contextual chat and base draft", () => {
+  for (const page of [
+    "AccountSettings",
+    "Plugins",
+    "Agents",
+    "Automations",
+    "Activity",
+    "Services",
   ] as const) {
-    const next = rootRouter.getStateForAction(
-      root,
-      StackActions.push(name, params),
-      rootOptions,
-    );
-    assert.ok(next);
-    root = next;
-  }
-
-  for (const challengeId of ["challenge-1", "challenge-2", "challenge-2"]) {
-    const action = challengeNavigationAction(root, challengeId);
-    assert.ok(action);
-    assert.equal(action.target, root.key);
-    const next = rootRouter.getStateForAction(root, action, rootOptions);
-    assert.ok(next);
-    root = next;
+    const root = pushContext(fixture());
+    const opened = apply(root, workspaceNavigateAction(page));
     assert.deepEqual(
-      root.routes.map((route) => route.name),
-      ["Workspace"],
+      opened.routes.map((route) => route.name),
+      ["Workspace", "AssistantContext", "WorkspaceSheet"],
     );
-    assert.equal(root.routes[0]?.key, workspaceKey);
-    assert.equal(root.routes[0]?.state, workspace);
-    assert.deepEqual(focusedRoute(root).params, {
-      screen: "Activity",
-      params: { challengeId },
+    assert.equal(opened.routes[0], root.routes[0]);
+    assert.equal(opened.routes[1], root.routes[1]);
+    const closed = apply(opened, dismissWorkspaceSheetAction(opened));
+    assert.deepEqual(closed.routes, root.routes);
+    assert.equal(closed.index, root.index);
+  }
+});
+
+test("group chat stays directly beneath the management drawer", () => {
+  const root = pushContext(fixture(), "GroupChat", { groupId: "group-1" });
+  const opened = apply(
+    root,
+    openWorkspaceSheetAction("GroupEditor", { groupId: "group-1" }),
+  );
+  assert.equal(opened.routes[1], root.routes[1]);
+  assert.deepEqual(
+    apply(opened, dismissWorkspaceSheetAction(opened)).routes,
+    root.routes,
+  );
+});
+
+test("nested destinations and repeated selections reuse a single drawer route", () => {
+  let root = apply(
+    fixture(),
+    openWorkspaceSheetAction("AutomationEditor", { agentId: "agent-1" }),
+  );
+  const key = selected(root).key;
+  assert.deepEqual(selected(root).params, {
+    screen: "AutomationEditor",
+    params: { agentId: "agent-1" },
+    initial: false,
+    merge: true,
+    pop: true,
+  });
+  for (const page of ["Plugins", "AccountSettings", "Activity"] as const) {
+    root = apply(root, workspaceNavigateAction(page));
+    assert.equal(root.routes.length, 2);
+    assert.equal(selected(root).key, key);
+    assert.deepEqual(selected(root).params, {
+      screen: "Pages",
+      params: { screen: page, params: undefined, initial: false, merge: true },
+      initial: false,
+      merge: true,
+      pop: true,
     });
   }
 });
 
-test("workspace fallbacks leave unknown paths and existing workspace state untouched", () => {
+test("Chats closes the whole drawer instead of changing the underlying chat", () => {
+  const caller = pushContext(fixture());
+  const opened = apply(
+    caller,
+    openWorkspaceSheetAction("AgentDetail", { agentId: "agent-1" }),
+  );
+  const action = workspaceNavigateAction("Assistant", undefined, opened);
+  assert.ok(action);
+  assert.equal(action.target, opened.key);
+  assert.deepEqual(apply(opened, action).routes, caller.routes);
+  assert.equal(workspaceNavigateAction("Assistant", undefined, caller), null);
+  assert.equal(dismissWorkspaceSheetAction(undefined), null);
+});
+
+test("panel selections merge filters and preserve mounted module route keys", () => {
+  let state = panelRouter.getInitialState(panelOptions);
+  const keys = state.routes.map((route) => route.key);
+  for (const [name, params] of [
+    ["Automations", { setup: "watch-1" }],
+    ["Plugins", { tab: "skills" }],
+    ["Agents", { tab: "groups" }],
+    ["Automations", { agentId: "researcher", setup: undefined }],
+  ] as const) {
+    const action = workspaceNavigateAction(name, params);
+    assert.ok(action?.type === "NAVIGATE");
+    const nested = action.payload.params.params;
+    const next = panelRouter.getStateForAction(
+      state,
+      CommonActions.navigate({
+        name: nested.screen,
+        params: nested.params,
+        merge: nested.merge,
+      }),
+      panelOptions,
+    );
+    assert.ok(next);
+    state = next;
+  }
+  assert.deepEqual(
+    state.routes.map((route) => route.key),
+    keys,
+  );
+  assert.deepEqual(selected(state).params, {
+    agentId: "researcher",
+    setup: undefined,
+  });
+  assert.deepEqual(
+    state.routes.find((route) => route.name === "Agents")?.params,
+    { tab: "groups" },
+  );
+  assert.equal(
+    panelRouter.getStateForAction(state, CommonActions.goBack(), panelOptions),
+    null,
+  );
+});
+
+test("notification taps wait for authentication and all critical-write guards", () => {
+  assert.equal(challengeNavigationAction(undefined, "challenge-1"), null);
+  const auth = {
+    ...fixture(),
+    routeNames: ["Auth", "DeviceLogin", "AgentKeyLogin"],
+  };
+  assert.equal(challengeNavigationAction(auth, "challenge-1"), null);
+  const root = apply(
+    pushContext(fixture()),
+    openWorkspaceSheetAction("AutomationEditor", { id: "automation-1" }),
+  );
+  const guards = new Set([Symbol("saving"), Symbol("uploading")]);
+  assert.equal(
+    challengeNavigationAction(root, "challenge-1", guards.size > 0),
+    null,
+  );
+  guards.delete([...guards][0]!);
+  assert.equal(
+    challengeNavigationAction(root, "challenge-1", guards.size > 0),
+    null,
+  );
+  guards.clear();
+  assert.ok(challengeNavigationAction(root, "challenge-1", guards.size > 0));
+});
+
+test("approval notifications reuse the drawer while preserving the exact active chat", () => {
+  const caller = pushContext(fixture());
+  const opened = apply(
+    caller,
+    openWorkspaceSheetAction("AgentDetail", { agentId: "agent-1" }),
+  );
+  const action = challengeNavigationAction(opened, "challenge-1");
+  assert.ok(action);
+  assert.equal(action.target, opened.key);
+  const next = apply(opened, action);
+  assert.equal(next.routes.length, 3);
+  assert.equal(selected(next).key, selected(opened).key);
+  assert.equal(next.routes[1], caller.routes[1]);
+  assert.deepEqual(selected(next).params, {
+    screen: "Pages",
+    params: {
+      screen: "Activity",
+      params: { challengeId: "challenge-1" },
+      initial: false,
+      merge: true,
+    },
+    initial: false,
+    merge: true,
+    pop: true,
+  });
+  assert.deepEqual(
+    apply(next, dismissWorkspaceSheetAction(next)).routes,
+    caller.routes,
+  );
+});
+
+test("notification restoration repairs a missing base without discarding a contextual chat", () => {
+  const root = rootRouter.getRehydratedState(
+    {
+      routes: [
+        {
+          name: "AssistantContext",
+          params: { conversationId: "restored-chat" },
+        },
+      ],
+    },
+    rootOptions,
+  );
+  const action = challengeNavigationAction(root, "challenge-1");
+  assert.ok(action);
+  const next = apply(root, action);
+  assert.deepEqual(
+    next.routes.map((route) => route.name),
+    ["Workspace", "AssistantContext", "WorkspaceSheet"],
+  );
+  assert.equal(next.routes[1], root.routes[0]);
+});
+
+test("link fallback is idempotent and does not replace existing chat state", () => {
   assert.equal(withWorkspaceFallback(undefined), undefined);
   assert.equal(
-    withWorkspaceFallback(
-      getStateFromPath("unrecognized/path", navigationLinkingConfig),
-    ),
+    getStateFromPath("unrecognized/path", navigationLinkingConfig),
     undefined,
   );
-  const existing = linkedState("plugins?tab=skills&agentId=agent-1");
-  assert.equal(withWorkspaceFallback(existing), existing);
-  assert.deepEqual(focusedNames(existing), ["Workspace", "Plugins"]);
+  const state = linkedState("account");
+  assert.equal(withWorkspaceFallback(state), state);
+  const live = fixture();
+  assert.equal(withWorkspaceFallback(live), live);
+});
+
+test("a signed-in shared entry replaces its temporary root route with one drawer", () => {
+  for (const [name, params] of [
+    ["DeviceLogin", { user_code: "ABCD-EFGH" }],
+    ["AgentKeyLogin", { user_code: "IJKL-MNOP" }],
+    ["TermsOfService", undefined],
+    ["PrivacyPolicy", undefined],
+  ] as const) {
+    const caller = pushContext(fixture());
+    const entry = pushContext(caller, name, params ?? {});
+    const action = workspaceSharedEntryNavigationAction(entry, name, params);
+    assert.ok(action);
+    assert.equal(action.target, entry.key);
+    assert.ok("source" in action);
+    assert.equal(action.source, selected(entry).key);
+    const next = apply(entry, action);
+    assert.deepEqual(
+      next.routes.map((route) => route.name),
+      ["Workspace", "AssistantContext", "WorkspaceSheet"],
+    );
+    assert.equal(next.routes[0], caller.routes[0]);
+    assert.equal(next.routes[1], caller.routes[1]);
+    assert.deepEqual(selected(next).params, {
+      screen: name,
+      params,
+      initial: false,
+    });
+    assert.deepEqual(
+      apply(next, dismissWorkspaceSheetAction(next)).routes,
+      caller.routes,
+    );
+  }
+});
+
+test("an external shared entry reuses the existing drawer and retains the dirty editor underneath", () => {
+  for (const [name, params] of [
+    ["DeviceLogin", { user_code: "ABCD-EFGH" }],
+    ["AgentKeyLogin", { mint: true }],
+    ["TermsOfService", undefined],
+    ["PrivacyPolicy", undefined],
+  ] as const) {
+    let sheet = sheetRouter.getInitialState(sheetOptions);
+    const editing = sheetRouter.getStateForAction(
+      sheet,
+      StackActions.push("AutomationEditor", { id: "unsaved-automation" }),
+      sheetOptions,
+    );
+    assert.ok(editing);
+    sheet = editing;
+    const editor = selected(sheet);
+    const caller = pushContext(fixture());
+    let root = apply(
+      caller,
+      openWorkspaceSheetAction("AutomationEditor", {
+        id: "unsaved-automation",
+      }),
+    );
+    root = {
+      ...root,
+      routes: root.routes.map((route) =>
+        route.name === "WorkspaceSheet" ? { ...route, state: sheet } : route,
+      ),
+    };
+    const previousDrawer = selected(root);
+    const entry = pushContext(root, name, params ?? {});
+    const entryKey = selected(entry).key;
+    const action = workspaceSharedEntryNavigationAction(entry, name, params);
+    assert.ok(action);
+    assert.equal(action.target, entry.key);
+    const next = apply(entry, action);
+    assert.deepEqual(
+      next.routes.map((route) => route.name),
+      ["Workspace", "AssistantContext", "WorkspaceSheet"],
+    );
+    const drawer = selected(next);
+    assert.equal(drawer.key, previousDrawer.key);
+    assert.equal(drawer.params, undefined);
+    assert.equal(next.routes[0], caller.routes[0]);
+    assert.equal(next.routes[1], caller.routes[1]);
+    assert.ok(drawer.state);
+    const nested = sheetRouter.getRehydratedState(drawer.state, sheetOptions);
+    assert.equal(nested.key, sheet.key);
+    assert.equal(nested.routes.length, sheet.routes.length + 1);
+    for (let i = 0; i < sheet.routes.length; i += 1)
+      assert.equal(nested.routes[i], sheet.routes[i]);
+    assert.equal(selected(nested).key, entryKey);
+    assert.equal(selected(nested).name, name);
+    assert.deepEqual(selected(nested).params, params);
+    const backToEditor = sheetRouter.getStateForAction(
+      nested,
+      CommonActions.goBack(),
+      sheetOptions,
+    );
+    assert.ok(backToEditor);
+    assert.equal(selected(backToEditor), editor);
+    assert.equal(backToEditor.key, sheet.key);
+    assert.equal(
+      workspaceSharedEntryNavigationAction(next, name, params),
+      null,
+    );
+  }
+});
+
+test("shared entries preserve a linked drawer that has not mounted its nested navigator yet", () => {
+  const caller = fixture();
+  const opened = apply(
+    caller,
+    openWorkspaceSheetAction("Pages", { screen: "AccountSettings" }),
+  );
+  const previousDrawer = selected(opened);
+  assert.equal(previousDrawer.state, undefined);
+  const entry = pushContext(opened, "DeviceLogin", { user_code: "ABCD-EFGH" });
+  const action = workspaceSharedEntryNavigationAction(entry, "DeviceLogin", {
+    user_code: "ABCD-EFGH",
+  });
+  assert.ok(action);
+  const next = apply(entry, action);
+  assert.equal(selected(next).key, previousDrawer.key);
+  const sheet = sheetRouter.getRehydratedState(
+    selected(next).state!,
+    sheetOptions,
+  );
+  assert.deepEqual(
+    sheet.routes.map((route) => route.name),
+    ["Pages", "DeviceLogin"],
+  );
+  assert.equal(selected(sheet).key, selected(entry).key);
+  assert.deepEqual(sheet.routes[0]!.params, { screen: "AccountSettings" });
+});
+
+test("shared-entry redirection ignores signed-out or already-consumed root entries", () => {
+  assert.equal(
+    workspaceSharedEntryNavigationAction(undefined, "DeviceLogin", {}),
+    null,
+  );
+  assert.equal(
+    workspaceSharedEntryNavigationAction(fixture(), "DeviceLogin", {}),
+    null,
+  );
+  const entry = pushContext(fixture(), "DeviceLogin", {});
+  const signedOut = { ...entry, routeNames: ["Auth", "DeviceLogin"] };
+  assert.equal(
+    workspaceSharedEntryNavigationAction(signedOut, "DeviceLogin", {}),
+    null,
+  );
 });

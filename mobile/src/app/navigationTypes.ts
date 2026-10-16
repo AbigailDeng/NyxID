@@ -20,6 +20,7 @@ export type AssistantParams = {
   openLatest?: boolean;
 };
 
+/** Convenience union for existing workspace consumers; only Assistant is a chat. */
 export type WorkspaceParamList = {
   Assistant: AssistantParams | undefined;
   Automations: { agentId?: string; setup?: string } | undefined;
@@ -30,12 +31,22 @@ export type WorkspaceParamList = {
   AccountSettings: undefined;
 };
 
-export type RootStackParamList = {
-  Auth: undefined;
-  Workspace: NavigatorScreenParams<WorkspaceParamList> | undefined;
-  AssistantContext: AssistantParams | undefined;
+export type WorkspaceChatParamList = Pick<WorkspaceParamList, "Assistant">;
+export type WorkspacePanelParamList = Omit<WorkspaceParamList, "Assistant">;
+
+type SharedEntryParamList = {
+  TermsOfService: undefined;
+  PrivacyPolicy: undefined;
+  DeviceLogin: { user_code?: string; start_scanner?: boolean } | undefined;
+  AgentKeyLogin:
+    | { user_code?: string; flow?: "agent-key" | "device"; mint?: boolean }
+    | undefined;
+};
+
+/** All management flows live inside one dismissible drawer above the chat. */
+export type WorkspaceSheetParamList = SharedEntryParamList & {
+  Pages: NavigatorScreenParams<WorkspacePanelParamList> | undefined;
   AgentDetail: { agentId: string };
-  GroupChat: { groupId: string };
   GroupEditor: { groupId?: string } | undefined;
   ServiceSetup: { connectionId?: string; catalogSlug?: string };
   AgentSkills: { agentId: string };
@@ -47,21 +58,43 @@ export type RootStackParamList = {
   AutomationPreferences: undefined;
   ActivityDetail: { challengeId: string };
   AccountSecurity: undefined;
-  TermsOfService: undefined;
-  PrivacyPolicy: undefined;
-  DeviceLogin: { user_code?: string; start_scanner?: boolean } | undefined;
-  AgentKeyLogin:
-    | { user_code?: string; flow?: "agent-key" | "device"; mint?: boolean }
-    | undefined;
 };
 
-export type WorkspaceScreenProps<Name extends keyof WorkspaceParamList> =
+export type RootStackParamList = SharedEntryParamList & {
+  Auth: undefined;
+  Workspace: NavigatorScreenParams<WorkspaceChatParamList> | undefined;
+  AssistantContext: AssistantParams | undefined;
+  GroupChat: { groupId: string };
+  WorkspaceSheet: NavigatorScreenParams<WorkspaceSheetParamList> | undefined;
+};
+
+export type SheetScreenProps<Name extends keyof WorkspaceSheetParamList> =
   CompositeScreenProps<
-    BottomTabScreenProps<WorkspaceParamList, Name>,
+    NativeStackScreenProps<WorkspaceSheetParamList, Name>,
     NativeStackScreenProps<RootStackParamList>
   >;
 
+export type SheetNavigationProp = CompositeNavigationProp<
+  NativeStackNavigationProp<WorkspaceSheetParamList>,
+  NativeStackNavigationProp<RootStackParamList>
+>;
+
+export type WorkspaceScreenProps<Name extends keyof WorkspaceParamList> =
+  Name extends keyof WorkspacePanelParamList
+    ? CompositeScreenProps<
+        BottomTabScreenProps<WorkspacePanelParamList, Name>,
+        SheetScreenProps<"Pages">
+      >
+    : CompositeScreenProps<
+        BottomTabScreenProps<
+          WorkspaceChatParamList,
+          Extract<Name, "Assistant">
+        >,
+        NativeStackScreenProps<RootStackParamList>
+      >;
+
+/** Screens shared between chat and drawer may target either parent navigator. */
 export type WorkspaceNavigationProp = CompositeNavigationProp<
   BottomTabNavigationProp<WorkspaceParamList>,
-  NativeStackNavigationProp<RootStackParamList>
+  SheetNavigationProp
 >;

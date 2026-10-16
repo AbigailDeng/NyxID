@@ -221,7 +221,7 @@ function GroupChat({
     disabled: chat.sending || uploads.session.sending,
     defaultRole: "back",
     onBack,
-    label: "Back to groups",
+    label: "Back to chat",
   });
   useEffect(() => {
     if (!chat.active) {

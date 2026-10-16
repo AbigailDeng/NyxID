@@ -88,6 +88,9 @@ function setup({
   let participantError = false;
   let orgFeatureEnabled = true;
   let identityAvailable = true;
+  let backOptions: {
+    discardOnClose?: { title: string; message: string };
+  } = {};
   const queryClient = {
     invalidateQueries: async () => {},
     removeQueries: () => {},
@@ -198,7 +201,11 @@ function setup({
     },
     "../../lib/auth/authEpoch": { getAuthEpoch: () => 7 },
     "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
-    "../../app/WorkspaceHeader": { useWorkspaceBack: () => {} },
+    "../../app/WorkspaceHeader": {
+      useWorkspaceBack: (options: typeof backOptions) => {
+        backOptions = options;
+      },
+    },
     "./groupContracts": contracts,
     "./groupState": state,
     "./useGroupRuntime": {
@@ -233,6 +240,10 @@ function setup({
   return {
     harness,
     calls,
+    closeGuard: () => {
+      harness.flush();
+      return backOptions.discardOnClose;
+    },
     field: (label: string) => find("WorkspaceSelectionField", label),
     button: (label: string) => find("ActionButton", label),
     name: (value: string) => find("Field", "Group name").onChangeText(value),
@@ -440,4 +451,25 @@ test("offline or failed participant queries disable corresponding sheet changes"
   assert.equal(env.field("Members").disabled, true);
   assert.equal(env.field("Lead agent").disabled, true);
   assert.equal(env.button("Save changes").disabled, true);
+});
+
+test("drawer dismissal asks before dropping a group draft and clears after reverting", () => {
+  const env = setup();
+  assert.equal(env.closeGuard(), undefined);
+  env.name("Unsaved research group");
+  assert.deepEqual(plain(env.closeGuard()), {
+    title: "Discard group changes?",
+    message: "Your changes have not been saved.",
+  });
+  env.name(group.name);
+  assert.equal(env.closeGuard(), undefined);
+});
+
+test("drawer dismissal no longer treats a saved group as an unsaved draft", async () => {
+  const env = setup();
+  env.field("Members").onChange(["org-lead", "org-other"]);
+  assert.ok(env.closeGuard());
+  env.button("Save changes").onPress();
+  await env.harness.settle();
+  assert.equal(env.closeGuard(), undefined);
 });

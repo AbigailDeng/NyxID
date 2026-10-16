@@ -10,7 +10,6 @@ import {
   View,
 } from "react-native";
 import { useIsFocused, useNavigation } from "@react-navigation/native";
-import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
@@ -19,11 +18,11 @@ import {
   RefreshCw,
 } from "lucide-react-native";
 import * as WebBrowser from "expo-web-browser";
-import type {
-  RootStackParamList,
-  WorkspaceNavigationProp,
-} from "../../app/navigationTypes";
-import { useWorkspaceBack } from "../../app/WorkspaceHeader";
+import type { WorkspaceNavigationProp } from "../../app/navigationTypes";
+import {
+  useOpenWorkspaceChat,
+  useWorkspaceBack,
+} from "../../app/WorkspaceHeader";
 import { ServiceIcon } from "../../components/ServiceIcon";
 import {
   ActionButton,
@@ -58,6 +57,7 @@ export function PluginsScreen({
 }: { agentId?: string; initialTab?: Tab } = {}) {
   const { colors } = useTheme();
   const navigation = useNavigation<WorkspaceNavigationProp>();
+  const openChat = useOpenWorkspaceChat();
   const focused = useIsFocused();
   const [foreground, setForeground] = useState(
     AppState.currentState === "active",
@@ -233,10 +233,7 @@ export function PluginsScreen({
         ))}
       </View>
       {tab === "skills" ? (
-        <PluginSkills
-          agentId={agentId}
-          onOpenChat={(params) => navigation.push("AssistantContext", params)}
-        />
+        <PluginSkills agentId={agentId} onOpenChat={openChat} />
       ) : (
         <>
           {loadError && (
@@ -351,14 +348,10 @@ export function PluginsScreen({
 }
 
 export function AgentSkillsScreen({ agentId }: { agentId: string }) {
-  const navigation =
-    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const openChat = useOpenWorkspaceChat();
   return (
     <WorkspacePage title="Agent skills" showHeading={false}>
-      <PluginSkills
-        agentId={agentId}
-        onOpenChat={(params) => navigation.push("AssistantContext", params)}
-      />
+      <PluginSkills agentId={agentId} onOpenChat={openChat} />
     </WorkspacePage>
   );
 }

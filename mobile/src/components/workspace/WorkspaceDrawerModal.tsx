@@ -1,9 +1,16 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   AccessibilityInfo,
   Animated,
   Easing,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   useWindowDimensions,
@@ -13,10 +20,12 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 export function WorkspaceDrawerModal({
   visible,
   onClose,
+  onDismiss,
   children,
 }: {
   visible: boolean;
   onClose: () => void;
+  onDismiss?: () => void;
   children: ReactNode;
 }) {
   const { width } = useWindowDimensions();
@@ -24,9 +33,18 @@ export function WorkspaceDrawerModal({
   const progress = useRef(new Animated.Value(0)).current;
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+  const dismissalPending = useRef(visible);
   const [mounted, setMounted] = useState(visible);
   const [presented, setPresented] = useState(false);
   const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
+
+  const notifyDismissed = useCallback(() => {
+    if (visibleRef.current || !dismissalPending.current) return;
+    dismissalPending.current = false;
+    onDismissRef.current?.();
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -53,8 +71,17 @@ export function WorkspaceDrawerModal({
   }, []);
 
   useEffect(() => {
-    if (visible) setMounted(true);
+    if (visible) {
+      dismissalPending.current = true;
+      setMounted(true);
+    }
   }, [visible]);
+
+  useEffect(() => {
+    // Android has no native onDismiss event. Its Modal is removed in the
+    // mounted=false commit, so wait for that commit before opening another.
+    if (!mounted && Platform.OS !== "ios") notifyDismissed();
+  }, [mounted, notifyDismissed]);
 
   useEffect(() => {
     if (!visible && !presented) {
@@ -101,6 +128,7 @@ export function WorkspaceDrawerModal({
       statusBarTranslucent
       navigationBarTranslucent
       onRequestClose={onClose}
+      onDismiss={Platform.OS === "ios" ? notifyDismissed : undefined}
       onShow={() => {
         // Wait for the native modal to appear before starting the entrance.
         if (visibleRef.current) setPresented(true);

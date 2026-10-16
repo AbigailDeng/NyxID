@@ -261,7 +261,7 @@ test("expiry selectors retain validation and disable all permission pickers duri
   }
 });
 
-function setupLogin() {
+function setupLogin({ inSheet = false } = {}) {
   const apiCalls: string[] = [];
   const key: AgentKeySummary = {
     ...model.newKeySummary(model.defaultNewAgentKey(), options),
@@ -304,6 +304,10 @@ function setupLogin() {
     },
     "./AgentKeyCreateForm": { AgentKeyCreateForm: "AgentKeyCreateForm" },
     "./DeviceCodeScanner": { DeviceCodeScanner: "DeviceCodeScanner" },
+    "../../app/WorkspaceHeader": {
+      useWorkspaceSheet: () => (inSheet ? {} : null),
+      useWorkspaceBack: () => {},
+    },
   });
   const { AgentKeyLoginScreen } = harness.load(
     fileURLToPath(new URL("./AgentKeyLoginScreen.tsx", import.meta.url)),
@@ -414,4 +418,29 @@ test("returning to keys allows reviewing the same sole key again without issuanc
     ),
   );
   assert.deepEqual(apiCalls, ["options"]);
+});
+
+test("signed-in sheet content leaves Back and title to native sheet chrome", () => {
+  const signedOut = setupLogin();
+  assert.ok(
+    elements(signedOut.harness.value()).some(
+      (item) =>
+        item.type === "Pressable" && item.props.accessibilityLabel === "Back",
+    ),
+  );
+  const sheet = setupLogin({ inSheet: true });
+  assert.equal(
+    elements(sheet.harness.value()).some(
+      (item) =>
+        item.type === "Pressable" && item.props.accessibilityLabel === "Back",
+    ),
+    false,
+  );
+  assert.equal(
+    elements(sheet.harness.value()).some(
+      (item) =>
+        item.type === "Text" && item.props.children === "One-time login code",
+    ),
+    false,
+  );
 });
