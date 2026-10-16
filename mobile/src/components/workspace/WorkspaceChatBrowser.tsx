@@ -1,4 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   FlatList,
   Keyboard,
@@ -26,6 +32,9 @@ export function WorkspaceChatBrowser<T extends { id: string }>({
   renderItem,
   onClose,
   onBack,
+  primaryAction,
+  visible = true,
+  onDismiss,
   footer,
   emptyText = "Nothing here yet.",
 }: {
@@ -37,11 +46,45 @@ export function WorkspaceChatBrowser<T extends { id: string }>({
   renderItem: (item: T) => ReactNode;
   onClose: () => void;
   onBack?: () => void;
+  visible?: boolean;
+  onDismiss?: () => void;
+  primaryAction?: {
+    label: string;
+    accessibilityLabel: string;
+    onPress: () => void;
+  };
   footer?: ReactNode;
   emptyText?: string;
 }) {
   const { colors } = useTheme();
   const [query, setQuery] = useState("");
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+  const mountedRef = useRef(true);
+  const dismissalPending = useRef(false);
+  const previousVisibleRef = useRef(visible);
+  if (previousVisibleRef.current !== visible) {
+    dismissalPending.current = !visible;
+    previousVisibleRef.current = visible;
+  }
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const notifyDismissed = useCallback(() => {
+    if (!mountedRef.current || visibleRef.current || !dismissalPending.current)
+      return;
+    dismissalPending.current = false;
+    onDismissRef.current?.();
+  }, []);
+  useEffect(() => {
+    // Android removes its native Modal in this commit and has no onDismiss.
+    if (!visible && Platform.OS !== "ios") notifyDismissed();
+  }, [visible, notifyDismissed]);
   // Switching between agent/group lists and chat history starts a fresh search.
   useEffect(() => setQuery(""), [scopeKey]);
   const filtered = searchDrawerItems(items, query, searchText);
@@ -53,10 +96,11 @@ export function WorkspaceChatBrowser<T extends { id: string }>({
 
   return (
     <Modal
-      visible
+      visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
       onRequestClose={close}
+      onDismiss={Platform.OS === "ios" ? notifyDismissed : undefined}
     >
       <SafeAreaProvider style={styles.fill}>
         <SafeAreaView style={[styles.fill, { backgroundColor: colors.bg }]}>
@@ -102,45 +146,76 @@ export function WorkspaceChatBrowser<T extends { id: string }>({
                   {description}
                 </Text>
               ) : null}
-              <View
-                style={[
-                  styles.searchBox,
-                  {
-                    backgroundColor: colors.card,
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
-                <Search size={18} color={colors.textMuted} />
-                <TextInput
-                  accessibilityLabel={`Search ${title}`}
-                  placeholder={`Search ${title.toLowerCase()}`}
-                  placeholderTextColor={colors.textMuted}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  value={query}
-                  onChangeText={setQuery}
-                  returnKeyType="search"
-                  onSubmitEditing={Keyboard.dismiss}
-                  style={[styles.searchInput, { color: colors.textPrimary }]}
-                />
-                {query ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`Clear ${title} search`}
-                    onPress={() => setQuery("")}
-                    style={styles.iconButton}
+              {primaryAction ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={primaryAction.accessibilityLabel}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    primaryAction.onPress();
+                  }}
+                  style={[
+                    styles.primaryAction,
+                    { backgroundColor: colors.primary },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.primaryActionLabel,
+                      { color: colors.onPrimary },
+                    ]}
                   >
-                    <X size={18} color={colors.textMuted} />
-                  </Pressable>
-                ) : null}
-              </View>
-              <Text
-                accessibilityLiveRegion="polite"
-                style={[styles.count, { color: colors.textMuted }]}
-              >
-                {filtered.length} {filtered.length === 1 ? "result" : "results"}
-              </Text>
+                    {primaryAction.label}
+                  </Text>
+                </Pressable>
+              ) : null}
+              {items.length > 0 || searching ? (
+                <>
+                  <View
+                    style={[
+                      styles.searchBox,
+                      {
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Search size={18} color={colors.textMuted} />
+                    <TextInput
+                      accessibilityLabel={`Search ${title}`}
+                      placeholder={`Search ${title.toLowerCase()}`}
+                      placeholderTextColor={colors.textMuted}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      value={query}
+                      onChangeText={setQuery}
+                      returnKeyType="search"
+                      onSubmitEditing={Keyboard.dismiss}
+                      style={[
+                        styles.searchInput,
+                        { color: colors.textPrimary },
+                      ]}
+                    />
+                    {query ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Clear ${title} search`}
+                        onPress={() => setQuery("")}
+                        style={styles.iconButton}
+                      >
+                        <X size={18} color={colors.textMuted} />
+                      </Pressable>
+                    ) : null}
+                  </View>
+                  <Text
+                    accessibilityLiveRegion="polite"
+                    style={[styles.count, { color: colors.textMuted }]}
+                  >
+                    {filtered.length}{" "}
+                    {filtered.length === 1 ? "result" : "results"}
+                  </Text>
+                </>
+              ) : null}
             </View>
             <FlatList
               key={scopeKey}
@@ -205,6 +280,19 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   toolbar: { paddingHorizontal: 20, paddingTop: 16, gap: 12 },
+  primaryAction: {
+    minHeight: 44,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  primaryActionLabel: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 14,
+    lineHeight: 20,
+  },
   description: {
     fontFamily: fonts.bodyRegular,
     fontSize: 13,

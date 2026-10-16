@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import type { WorkspaceChatTarget } from "../../app/workspaceChatNavigation";
-import { agentSchema } from "../../features/agents/agentContracts";
+import {
+  agentSchema,
+  type AssistantAgent,
+} from "../../features/agents/agentContracts";
 import { conversationSchema } from "../../features/assistant/assistantTypes";
 import { hookHarness } from "../../features/assistant/assistantHookTestHarness";
 import { groupSchema } from "../../features/groups/groupContracts";
@@ -97,9 +100,23 @@ function content(root: Element): string {
     .join("");
 }
 
-function setup(current?: WorkspaceChatTarget) {
+type SetupOptions = {
+  history?: "loaded" | "empty" | "pending" | "error";
+  agent?: Partial<AssistantAgent>;
+};
+
+function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
   const selections: WorkspaceChatTarget[] = [];
   const historyQueries: QueryOptions[] = [];
+  const liveAgents = agents.map((agent) => ({ ...agent }));
+  const targetAgentId = current?.kind === "agent" ? current.agentId : undefined;
+  if (targetAgentId && options.agent) {
+    Object.assign(
+      liveAgents.find((agent) => agent.id === targetAgentId)!,
+      options.agent,
+    );
+  }
+  const historyState = options.history ?? "loaded";
   const props = {
     visible: true,
     current,
@@ -134,7 +151,7 @@ function setup(current?: WorkspaceChatTarget) {
     ),
     "@tanstack/react-query": {
       useQuery: ({ queryKey }: QueryOptions) => ({
-        data: queryKey.includes("agents") ? { agents } : groups,
+        data: queryKey.includes("agents") ? { agents: liveAgents } : groups,
         isSuccess: true,
         isPending: false,
         isError: false,
@@ -145,16 +162,22 @@ function setup(current?: WorkspaceChatTarget) {
         const agentId = options.queryKey.at(-1);
         return {
           data:
-            typeof agentId === "string"
+            typeof agentId === "string" &&
+            historyState !== "pending" &&
+            historyState !== "error"
               ? {
                   pages: [
-                    { conversations: chatsFor(agentId), next_cursor: null },
+                    {
+                      conversations:
+                        historyState === "empty" ? [] : chatsFor(agentId),
+                      next_cursor: null,
+                    },
                   ],
                 }
               : undefined,
-          isSuccess: true,
-          isPending: false,
-          isError: false,
+          isSuccess: historyState === "loaded" || historyState === "empty",
+          isPending: historyState === "pending",
+          isError: historyState === "error",
           hasNextPage: false,
           isFetchingNextPage: false,
           isFetchNextPageError: false,
@@ -228,6 +251,14 @@ function setup(current?: WorkspaceChatTarget) {
     assert.ok(control);
     control.props.onPress();
     harness.render();
+    const closing = all().find(
+      (row) =>
+        row.type === "WorkspaceChatBrowser" && row.props.visible === false,
+    );
+    if (closing) {
+      closing.props.onDismiss();
+      harness.flush();
+    }
   };
   return {
     harness,
@@ -242,6 +273,12 @@ function setup(current?: WorkspaceChatTarget) {
     groupRows,
     historyQuery,
     pressBrowserItem,
+    patchAgent: (id: string, patch: Partial<AssistantAgent>) => {
+      const index = liveAgents.findIndex((row) => row.id === id);
+      assert.ok(index >= 0);
+      liveAgents[index] = { ...liveAgents[index]!, ...patch };
+      harness.render();
+    },
   };
 }
 
@@ -448,5 +485,255 @@ test("a view-only agent keeps history querying disabled and offers no chat actio
     false,
   );
   assert.deepEqual(env.selections, []);
+  env.harness.unmount();
+});
+
+test("usable agents can start a fresh chat regardless of saved-history state", () => {
+  for (const history of ["loaded", "empty", "pending", "error"] as const) {
+    const env = setup({ kind: "agent", agentId: "agent-1" }, { history });
+    env.press("Start a chat with Agent 1");
+    assert.deepEqual(
+      env.selections,
+      [{ kind: "agent", agentId: "agent-1" }],
+      `new conversation must not depend on ${history} history`,
+    );
+    env.harness.unmount();
+  }
+});
+
+test("the agent-history browser keeps New chat separate from its saved history", () => {
+  for (const history of ["loaded", "empty", "pending", "error"] as const) {
+    const env = setup(undefined, { history });
+    env.more("View all agents (9)");
+    env.pressBrowserItem("agent-7");
+    const primary = env.browser().primaryAction;
+    assert.ok(primary, `Missing primary action for ${history} history`);
+    assert.equal(primary.label, "New chat");
+    assert.equal(primary.accessibilityLabel, "Start a chat with Agent 7");
+    primary.onPress();
+    env.harness.flush();
+    assert.deepEqual(env.selections, []);
+    assert.equal(env.browser().visible, false);
+    env.browser().onDismiss();
+    env.harness.flush();
+    assert.deepEqual(env.selections, [{ kind: "agent", agentId: "agent-7" }]);
+    assert.equal(
+      env.all().some((row) => row.type === "WorkspaceChatBrowser"),
+      false,
+      "starting the chat dismisses the history browser",
+    );
+    env.harness.unmount();
+  }
+});
+
+test("past and view-only agents explain chat unavailability and offer another agent", () => {
+  for (const unavailable of [
+    { status: "destroyed" as const },
+    { can_use: false },
+  ]) {
+    const env = setup(
+      { kind: "agent", agentId: "agent-1" },
+      { agent: unavailable, history: "empty" },
+    );
+    env.more("View all agents (9)");
+    env.pressBrowserItem("agent-1");
+    const model = env.browser();
+    assert.match(
+      `${model.description} ${model.emptyText}`,
+      /deleted|destroyed|past agent|read.only|not available|isn.t available|access/i,
+    );
+    assert.equal(model.primaryAction.label, "Choose another agent");
+    assert.equal(
+      model.primaryAction.accessibilityLabel,
+      "Choose another agent",
+    );
+    model.primaryAction.onPress();
+    env.harness.flush();
+    assert.equal(env.browser().title, "All agents");
+    assert.deepEqual(env.selections, []);
+    env.harness.unmount();
+  }
+});
+
+test("a destroyed agent retains readable saved conversations without offering a new one", () => {
+  const env = setup(
+    { kind: "agent", agentId: "agent-1" },
+    { agent: { status: "destroyed" } },
+  );
+  assert.equal(env.historyQuery().enabled, true);
+  assert.equal(
+    env
+      .all()
+      .some(
+        (row) => row.props.accessibilityLabel === "Start a chat with Agent 1",
+      ),
+    false,
+  );
+  env.more("View all agents (9)");
+  env.pressBrowserItem("agent-1");
+  assert.equal(env.browser().primaryAction.label, "Choose another agent");
+  const saved = chatsFor("agent-1")[0]!;
+  env.pressBrowserItem(saved.id);
+  assert.deepEqual(env.selections, [
+    { kind: "agent", agentId: "agent-1", conversationId: saved.id },
+  ]);
+  env.harness.unmount();
+});
+
+test("stale new-chat callbacks cannot bypass an updated agent status or access grant", () => {
+  for (const unavailable of [
+    { status: "destroyed" as const },
+    { can_use: false },
+  ]) {
+    const env = setup();
+    env.more("View all agents (9)");
+    env.pressBrowserItem("agent-7");
+    const start = env.browser().primaryAction.onPress;
+    env.patchAgent("agent-7", unavailable);
+    start();
+    env.harness.flush();
+    assert.deepEqual(env.selections, []);
+    assert.equal(env.browser().primaryAction.label, "Choose another agent");
+    env.harness.unmount();
+  }
+});
+
+test("the child browser completes dismissal before asking the parent to open a chat", () => {
+  const env = setup();
+  env.more("View all agents (9)");
+  env.pressBrowserItem("agent-7");
+  const start = env.browser().primaryAction.onPress;
+  start();
+  env.harness.flush();
+  assert.equal(env.browser().visible, false);
+  assert.deepEqual(env.selections, []);
+  const dismiss = env.browser().onDismiss;
+  start();
+  env.harness.flush();
+  dismiss();
+  env.harness.flush();
+  dismiss();
+  env.harness.flush();
+  assert.deepEqual(env.selections, [{ kind: "agent", agentId: "agent-7" }]);
+  assert.equal(
+    env.all().some((row) => row.type === "WorkspaceChatBrowser"),
+    false,
+  );
+  env.harness.unmount();
+});
+
+test("revoking an agent while its browser closes cancels the queued new conversation", () => {
+  for (const unavailable of [
+    { status: "destroyed" as const },
+    { can_use: false },
+  ]) {
+    const env = setup();
+    env.more("View all agents (9)");
+    env.pressBrowserItem("agent-7");
+    env.browser().primaryAction.onPress();
+    env.harness.flush();
+    assert.equal(env.browser().visible, false);
+    env.patchAgent("agent-7", unavailable);
+    env.browser().onDismiss();
+    env.harness.flush();
+    assert.deepEqual(env.selections, []);
+    env.harness.unmount();
+  }
+});
+
+test("closing the browser without selecting keeps the parent menu and current chat unchanged", () => {
+  const current = {
+    kind: "agent" as const,
+    agentId: "agent-1",
+    conversationId: chatsFor("agent-1")[0]!.id,
+  };
+  const env = setup(current);
+  env.more("View all agents (9)");
+  env.pressBrowserItem("agent-7");
+  env.browser().onClose();
+  env.harness.flush();
+  assert.equal(env.browser().visible, false);
+  assert.deepEqual(env.selections, []);
+  const dismiss = env.browser().onDismiss;
+  dismiss();
+  env.harness.flush();
+  dismiss();
+  env.harness.flush();
+  assert.deepEqual(env.selections, []);
+  assert.equal(
+    env.all().some((row) => row.type === "WorkspaceChatBrowser"),
+    false,
+  );
+  env.harness.unmount();
+});
+
+test("an earlier dismissal callback cannot replay a later browser selection", () => {
+  const env = setup();
+  env.more("View all agents (9)");
+  env.pressBrowserItem("agent-7");
+  env.browser().primaryAction.onPress();
+  env.harness.flush();
+  const firstDismissal = env.browser().onDismiss;
+  firstDismissal();
+  env.harness.flush();
+  assert.deepEqual(env.selections, [{ kind: "agent", agentId: "agent-7" }]);
+  env.more("View all agents (9)");
+  env.pressBrowserItem("agent-1");
+  env.browser().primaryAction.onPress();
+  env.harness.flush();
+  assert.equal(env.browser().visible, false);
+  firstDismissal();
+  env.harness.flush();
+  assert.equal(env.selections.length, 1);
+  assert.equal(env.browser().visible, false);
+  env.browser().onDismiss();
+  env.harness.flush();
+  assert.deepEqual(env.selections, [
+    { kind: "agent", agentId: "agent-7" },
+    { kind: "agent", agentId: "agent-1" },
+  ]);
+  env.harness.unmount();
+});
+
+test("group selection also waits for the child browser dismissal before opening the parent chat", () => {
+  const env = setup();
+  env.press("Expand group chats");
+  env.more("View all groups (8)");
+  const model = env.browser();
+  const selected = model.items[0];
+  const control = elements(model.renderItem(selected)).find(
+    (row) => row.type === "Pressable",
+  );
+  assert.ok(control);
+  control.props.onPress();
+  env.harness.flush();
+  assert.equal(env.browser().visible, false);
+  assert.deepEqual(env.selections, []);
+  env.browser().onDismiss();
+  env.harness.flush();
+  assert.deepEqual(env.selections, [{ kind: "group", groupId: selected.id }]);
+  env.harness.unmount();
+});
+
+test("a saved conversation remains navigable if its agent is deleted while the browser closes", () => {
+  const env = setup();
+  env.more("View all agents (9)");
+  env.pressBrowserItem("agent-7");
+  const model = env.browser();
+  const selected = model.items[0];
+  const control = elements(model.renderItem(selected)).find(
+    (row) => row.type === "Pressable",
+  );
+  assert.ok(control);
+  control.props.onPress();
+  env.harness.flush();
+  env.patchAgent("agent-7", { status: "destroyed" });
+  assert.equal(env.browser().visible, false);
+  assert.deepEqual(env.selections, []);
+  env.browser().onDismiss();
+  env.harness.flush();
+  assert.deepEqual(env.selections, [
+    { kind: "agent", agentId: "agent-7", conversationId: selected.id },
+  ]);
   env.harness.unmount();
 });

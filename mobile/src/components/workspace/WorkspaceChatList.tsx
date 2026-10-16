@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
@@ -63,6 +63,12 @@ export function WorkspaceChatList({ visible, current, onSelect }: Props) {
   // A single disclosure bounds the height even when the account has many agents.
   const [expandedAgent, setExpandedAgent] = useState<string | null>();
   const [browser, setBrowser] = useState<Browser | null>(null);
+  const [browserClosing, setBrowserClosing] = useState(0);
+  const browserDismissalSequence = useRef(0);
+  const browserClosingRef = useRef(false);
+  const pendingBrowserSelection = useRef<(() => void) | undefined>(undefined);
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
   const active = visible && foreground && isConnected;
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) =>
@@ -71,7 +77,12 @@ export function WorkspaceChatList({ visible, current, onSelect }: Props) {
     return () => subscription.remove();
   }, []);
   useEffect(() => {
-    if (!visible) setBrowser(null);
+    if (!visible) {
+      pendingBrowserSelection.current = undefined;
+      browserClosingRef.current = false;
+      setBrowser(null);
+      setBrowserClosing(0);
+    }
   }, [visible]);
   const agents = useQuery({
     queryKey: ["workspace", "agents", "drawer", epoch],
@@ -95,6 +106,10 @@ export function WorkspaceChatList({ visible, current, onSelect }: Props) {
     current?.kind === "agent" ? current.agentId : undefined;
   const openId = expandedAgent !== undefined ? expandedAgent : currentAgentId;
   const agent = allAgents.find((row) => row.id === openId);
+  const agentRef = useRef(agent);
+  agentRef.current = agent;
+  const canStartChat =
+    !!agent && agent.status !== "destroyed" && agent.can_use !== false;
   const history = useInfiniteQuery({
     queryKey: ["workspace", "drawer-chats", epoch, agent?.id],
     initialPageParam: undefined as string | undefined,
@@ -126,14 +141,56 @@ export function WorkspaceChatList({ visible, current, onSelect }: Props) {
     selectedChatId,
     DRAWER_PREVIEW_LIMIT - (missingCurrent ? 1 : 0),
   );
-  const openChat = (conversationId?: string) => {
-    if (!agent || agent.can_use === false) return;
+  const dismissBrowser = (selection?: () => void) => {
+    if (browserClosingRef.current) return;
+    pendingBrowserSelection.current = selection;
+    browserClosingRef.current = true;
+    setBrowserClosing(++browserDismissalSequence.current);
+  };
+  const finishBrowserDismissal = (dismissalId: number) => {
+    if (
+      !browserClosingRef.current ||
+      dismissalId !== browserDismissalSequence.current
+    )
+      return;
+    browserClosingRef.current = false;
+    const select = pendingBrowserSelection.current;
+    pendingBrowserSelection.current = undefined;
     setBrowser(null);
-    onSelect({ kind: "agent", agentId: agent.id, conversationId });
+    setBrowserClosing(0);
+    select?.();
+  };
+  const selectAfterBrowser = (select: () => void) => {
+    if (browserClosingRef.current) return;
+    if (browser) dismissBrowser(select);
+    else select();
+  };
+  const openChat = (conversationId?: string) => {
+    const selectedAgentId = agent?.id;
+    const allowed = () => {
+      const latest = agentRef.current;
+      return (
+        latest &&
+        latest.id === selectedAgentId &&
+        latest.can_use !== false &&
+        (!!conversationId || latest.status !== "destroyed")
+      );
+    };
+    if (!allowed()) return;
+    selectAfterBrowser(() => {
+      // Permissions may change while the native browser animates out.
+      if (allowed())
+        onSelectRef.current({
+          kind: "agent",
+          agentId: selectedAgentId,
+          conversationId,
+        });
+    });
   };
   const openGroup = (group: Group) => {
-    setBrowser(null);
-    onSelect({ kind: "group", groupId: group.id });
+    selectAfterBrowser(() =>
+      onSelectRef.current({ kind: "group", groupId: group.id }),
+    );
   };
   const agentDetail = (row: AssistantAgent) =>
     row.status === "destroyed"
@@ -194,13 +251,9 @@ export function WorkspaceChatList({ visible, current, onSelect }: Props) {
     </>
   );
   const startChat =
-    agent &&
-    agent.status !== "destroyed" &&
-    agent.can_use !== false &&
-    history.isSuccess &&
-    !chats.length ? (
+    canStartChat && agent ? (
       <ChatRow
-        label="Start a chat"
+        label="New chat"
         selected={
           current?.kind === "agent" &&
           current.agentId === agent.id &&
@@ -278,15 +331,21 @@ export function WorkspaceChatList({ visible, current, onSelect }: Props) {
                   <View
                     style={[styles.children, { borderColor: colors.border }]}
                   >
+                    {startChat}
                     {historyStatus}
                     {currentRow}
                     {previewChats.map(chatRow)}
                     {history.isSuccess &&
                     !chats.length &&
                     row.can_use !== false ? (
-                      <DrawerMessage text="No chats yet." />
+                      <DrawerMessage
+                        text={
+                          row.status === "destroyed"
+                            ? "No saved chats for this deleted agent."
+                            : "No chats yet."
+                        }
+                      />
                     ) : null}
-                    {startChat}
                     {row.can_use !== false &&
                     (chats.length > previewChats.length ||
                       history.hasNextPage) ? (
@@ -364,9 +423,15 @@ export function WorkspaceChatList({ visible, current, onSelect }: Props) {
               ? "Choose an agent to browse its chats."
               : browser.kind === "groups"
                 ? "Each group has one shared conversation."
-                : history.hasNextPage
-                  ? "Search loaded chats. Load older chats to search more history."
-                  : "Search this agent’s chat history."
+                : !agent
+                  ? "This agent is no longer available. Choose another agent to start a chat."
+                  : agent.can_use === false
+                    ? "You don’t have permission to chat with this agent. Choose another agent to continue."
+                    : agent.status === "destroyed"
+                      ? "This agent was deleted. You can still view its saved chats, or choose another agent to start a new chat."
+                      : history.hasNextPage
+                        ? "Search loaded chats. Load older chats to search more history."
+                        : "Start a new chat or return to a saved conversation."
           }
           items={
             browser.kind === "agents"
@@ -401,25 +466,51 @@ export function WorkspaceChatList({ visible, current, onSelect }: Props) {
               chatRow(row.chat)
             )
           }
-          onClose={() => setBrowser(null)}
+          visible={!browserClosing}
+          onClose={() => dismissBrowser()}
+          onDismiss={() => finishBrowserDismissal(browserClosing)}
+          primaryAction={
+            browser.kind === "chats"
+              ? canStartChat && agent
+                ? {
+                    label: "New chat",
+                    accessibilityLabel: `Start a chat with ${chatAgentLabel(agent)}`,
+                    onPress: () => openChat(),
+                  }
+                : {
+                    label: "Choose another agent",
+                    accessibilityLabel: "Choose another agent",
+                    onPress: () => setBrowser({ kind: "agents" }),
+                  }
+              : undefined
+          }
           onBack={
             browser.kind === "chats" && browser.fromAgents
               ? () => setBrowser({ kind: "agents" })
               : undefined
           }
           emptyText={
-            browser.kind === "chats" && agent?.can_use === false
-              ? "Chat access isn’t available for this agent."
-              : browser.kind === "chats" && history.isPending
-                ? "Loading chats…"
-                : "No chats yet."
+            browser.kind === "agents"
+              ? "No agents available."
+              : browser.kind === "groups"
+                ? "No groups yet."
+                : !agent
+                  ? "This agent is no longer available."
+                  : agent.can_use === false
+                    ? "Chat access isn’t available for this agent."
+                    : history.isPending
+                      ? "Loading chats…"
+                      : history.isError && !history.data
+                        ? "Couldn’t load chats. You can retry below."
+                        : agent.status === "destroyed"
+                          ? "No saved chats for this deleted agent."
+                          : "No chats yet. Start your first conversation above."
           }
           footer={
             browser.kind === "chats" ? (
               <>
                 {historyStatus}
                 {currentRow}
-                {startChat}
                 {history.hasNextPage ? (
                   <MoreButton
                     label={
