@@ -102,7 +102,7 @@ pub struct EffectiveActor {
 }
 
 impl EffectiveActor {
-    fn from_user_id(user_id: impl Into<String>) -> Self {
+    pub(crate) fn from_user_id(user_id: impl Into<String>) -> Self {
         Self {
             user_id: user_id.into(),
         }
@@ -4047,6 +4047,7 @@ pub async fn forward_request(
 #[derive(Debug)]
 pub(crate) enum ForwardRequestError {
     Application(AppError),
+    PreDispatchRejected(AppError),
     Transport(reqwest::Error),
     OutcomeUnknown,
 }
@@ -4054,7 +4055,7 @@ pub(crate) enum ForwardRequestError {
 impl ForwardRequestError {
     pub(crate) fn into_app_error(self) -> AppError {
         match self {
-            Self::Application(error) => error,
+            Self::Application(error) | Self::PreDispatchRejected(error) => error,
             Self::OutcomeUnknown => AppError::Conflict(
                 "Provider outcome is unknown; check the provider before retrying".into(),
             ),
@@ -4129,7 +4130,80 @@ fn build_target_http_client(builder: reqwest::ClientBuilder) -> Client {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn forward_request_with_extra_outbound_headers(
+pub(crate) fn forward_request_with_extra_outbound_headers<'a>(
+    client: &'a Client,
+    target: &'a ProxyTarget,
+    method: reqwest::Method,
+    path: &'a str,
+    query: Option<&'a str>,
+    headers: reqwest::header::HeaderMap,
+    body: ProxyBody,
+    identity_headers: Vec<(String, String)>,
+    delegated_credentials: Vec<DelegatedCredential>,
+    caller_token: Option<&'a str>,
+    token_exchange_cache: &'a TokenExchangeCache,
+    cloud_response_cache: &'a CloudResponseCache,
+    extra_outbound_headers: Vec<(String, String)>,
+    _billing_egress_permit: crate::services::billing::route_inventory::BillingEgressPermit,
+) -> futures::future::BoxFuture<'a, Result<reqwest::Response, ForwardRequestError>> {
+    forward_request_with_egress_guard(
+        client,
+        target,
+        method,
+        path,
+        query,
+        headers,
+        body,
+        identity_headers,
+        delegated_credentials,
+        caller_token,
+        token_exchange_cache,
+        cloud_response_cache,
+        extra_outbound_headers,
+        _billing_egress_permit,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn forward_request_with_egress_guard<'a>(
+    client: &'a Client,
+    target: &'a ProxyTarget,
+    method: reqwest::Method,
+    path: &'a str,
+    query: Option<&'a str>,
+    headers: reqwest::header::HeaderMap,
+    body: ProxyBody,
+    identity_headers: Vec<(String, String)>,
+    delegated_credentials: Vec<DelegatedCredential>,
+    caller_token: Option<&'a str>,
+    token_exchange_cache: &'a TokenExchangeCache,
+    cloud_response_cache: &'a CloudResponseCache,
+    extra_outbound_headers: Vec<(String, String)>,
+    billing_egress_permit: crate::services::billing::route_inventory::BillingEgressPermit,
+    egress_guard: Option<&'a super::assistant_service_execution::HttpEgressGuard<'a>>,
+) -> futures::future::BoxFuture<'a, Result<reqwest::Response, ForwardRequestError>> {
+    Box::pin(forward_request_with_egress_guard_inner(
+        client,
+        target,
+        method,
+        path,
+        query,
+        headers,
+        body,
+        identity_headers,
+        delegated_credentials,
+        caller_token,
+        token_exchange_cache,
+        cloud_response_cache,
+        extra_outbound_headers,
+        billing_egress_permit,
+        egress_guard,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn forward_request_with_egress_guard_inner(
     client: &Client,
     target: &ProxyTarget,
     method: reqwest::Method,
@@ -4144,6 +4218,7 @@ pub(crate) async fn forward_request_with_extra_outbound_headers(
     cloud_response_cache: &CloudResponseCache,
     extra_outbound_headers: Vec<(String, String)>,
     billing_egress_permit: crate::services::billing::route_inventory::BillingEgressPermit,
+    egress_guard: Option<&super::assistant_service_execution::HttpEgressGuard<'_>>,
 ) -> Result<reqwest::Response, ForwardRequestError> {
     if super::telnyx_platform_service::contract(&target.service).is_some() {
         let proof = billing_egress_permit.managed_proof().ok_or_else(|| {
@@ -4235,6 +4310,11 @@ pub(crate) async fn forward_request_with_extra_outbound_headers(
 
     if target.auth_method == nyxid_service_adapters::ifttt::AUTH_METHOD {
         let body = body.buffered()?;
+        if let Some(guard) = egress_guard {
+            Box::pin(guard.revalidate())
+                .await
+                .map_err(ForwardRequestError::PreDispatchRejected)?;
+        }
         return nyxid_service_adapters::ifttt::client()
             .forward(
                 &target.base_url,
@@ -4255,17 +4335,38 @@ pub(crate) async fn forward_request_with_extra_outbound_headers(
     }
     if target.auth_method == nyxid_service_adapters::ifttt_mcp::AUTH_METHOD {
         let body = body.buffered()?;
+        if let Some(guard) = egress_guard {
+            Box::pin(guard.revalidate())
+                .await
+                .map_err(ForwardRequestError::PreDispatchRejected)?;
+        }
+        let validate =
+            || -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + '_>> {
+                Box::pin(async {
+                    match egress_guard {
+                        Some(guard) => guard.revalidate().await.is_ok(),
+                        None => true,
+                    }
+                })
+            };
         return nyxid_service_adapters::ifttt_mcp::client()
-            .forward(
+            .forward_with_guard(
                 &target.base_url,
                 &method,
                 path,
                 query,
                 &target.credential,
                 body.as_deref(),
+                egress_guard
+                    .map(|_| &validate as &nyxid_service_adapters::ifttt_mcp::DispatchGuard<'_>),
             )
             .await
             .map_err(|error| match error {
+                nyxid_service_adapters::ifttt_mcp::Error::PreDispatchRejected => {
+                    ForwardRequestError::PreDispatchRejected(AppError::Conflict(
+                        "Assistant authority changed before operation dispatch".into(),
+                    ))
+                }
                 nyxid_service_adapters::ifttt_mcp::Error::Transport(error) => {
                     ForwardRequestError::Transport(error)
                 }
@@ -4355,6 +4456,11 @@ pub(crate) async fn forward_request_with_extra_outbound_headers(
                     base_url = %target.base_url,
                     "cloud_response_cache hit"
                 );
+                if let Some(guard) = egress_guard {
+                    Box::pin(guard.revalidate())
+                        .await
+                        .map_err(ForwardRequestError::PreDispatchRejected)?;
+                }
                 return Ok(cached);
             }
             Some(key)
@@ -4512,6 +4618,11 @@ pub(crate) async fn forward_request_with_extra_outbound_headers(
         }
     }
 
+    if let Some(guard) = egress_guard {
+        Box::pin(guard.revalidate())
+            .await
+            .map_err(ForwardRequestError::PreDispatchRejected)?;
+    }
     let response = request.send().await?;
 
     // Cache successful billing-API responses so a follow-up request

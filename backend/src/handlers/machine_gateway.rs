@@ -557,6 +557,7 @@ async fn authorize_and_execute(
         .insert(crate::services::machine_gateway_service::Ingress {
             declared_id: selected.id.clone(),
             git,
+            job: Some((&job).into()),
         });
     let (grant_id, principal_kind) = match &job.binding {
         Some(crate::models::machine_job::MachineJobBinding::External {
@@ -663,3 +664,7 @@ async fn verify(
         .verify(request, node_id, &secret, chrono::Utc::now().timestamp())
         .map_err(|_| AppError::Forbidden("Machine service signature refused".into()))
 }
+
+#[cfg(test)]
+#[path = "machine_service_policy_tests.rs"]
+mod service_policy_tests;
