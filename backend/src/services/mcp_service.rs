@@ -5302,11 +5302,9 @@ fn execute_tool_resolved_boxed<'a>(
 
 // Keep forwarding-only temporaries off the authorization/acknowledgement stack.
 // Invoke the constructor outside the caller's poll frame before boxing.
-fn box_mcp_forwarding<'a, F>(
-    make: impl FnOnce() -> F,
-) -> futures::future::BoxFuture<'a, AppResult<McpToolExecutionOutcome>>
+fn box_mcp_forwarding<'a, F>(make: impl FnOnce() -> F) -> futures::future::BoxFuture<'a, F::Output>
 where
-    F: std::future::Future<Output = AppResult<McpToolExecutionOutcome>> + Send + 'a,
+    F: std::future::Future + Send + 'a,
 {
     Box::pin(make())
 }
@@ -5781,7 +5779,7 @@ async fn execute_tool_resolved_inner(
                 (&billing_ctx, &resource_owner_id, assistant_chat.as_ref()),
             );
             destination_audit.dispatch();
-            let managed = match super::telnyx_platform_service::execute(
+            let managed = match box_mcp_forwarding(|| super::telnyx_platform_service::execute(
                 db,
                 billing.clone(),
                 billing_ctx,
@@ -5792,7 +5790,7 @@ async fn execute_tool_resolved_inner(
                 body.as_deref().unwrap_or_default(),
                 service_lease,
                 managed_guard,
-            )
+            ))
             .await
             {
                 Ok(response) => response,
@@ -5825,8 +5823,7 @@ async fn execute_tool_resolved_inner(
                 origin: ToolResponseOrigin::Downstream,
             }));
         }
-        let metered = billing
-            .open(&billing_ctx)
+        let metered = box_mcp_forwarding(|| billing.open(&billing_ctx))
             .await
             .inspect_err(|error| request_audit.admission_error(error))?;
         let request_len = body.as_ref().map(|body| body.len() as i64).unwrap_or(0);
@@ -5875,7 +5872,7 @@ async fn execute_tool_resolved_inner(
                 method: method_str,
                 path: prepared.path,
                 query: prepared.query,
-                headers: prepared.headers,
+                headers: (prepared.headers),
                 body: body.as_ref().map(|b| b.to_vec()),
             };
 
@@ -5947,8 +5944,7 @@ async fn execute_tool_resolved_inner(
                     .await
                 {
                     Ok(ProxyResponseType::Complete(resp)) => {
-                        billing
-                            .settle(
+                        box_mcp_forwarding(|| billing.settle(
                                 &metered,
                                 mcp_platform_usage_for_path(
                                     &resp.body,
@@ -5959,7 +5955,7 @@ async fn execute_tool_resolved_inner(
                                 ),
                                 None,
                                 None,
-                            )
+                            ))
                             .await?;
                         destination_audit.complete(resp.status);
                         request_audit.response(resp.status);
@@ -5993,8 +5989,7 @@ async fn execute_tool_resolved_inner(
                                 return Ok(McpToolExecutionOutcome::ProviderOutcomeUnknown(error));
                             }
                         };
-                        billing
-                            .settle(
+                        box_mcp_forwarding(|| billing.settle(
                                 &metered,
                                 mcp_platform_usage_for_path(
                                     &body_buf,
@@ -6005,7 +6000,7 @@ async fn execute_tool_resolved_inner(
                                 ),
                                 None,
                                 None,
-                            )
+                            ))
                             .await?;
                         destination_audit.complete(status);
                         request_audit.response(status);
@@ -6202,8 +6197,7 @@ async fn execute_tool_resolved_inner(
                 ));
             }
         };
-        billing
-            .settle(
+        box_mcp_forwarding(|| billing.settle(
                 &metered,
                 mcp_platform_usage_for_path(
                     body_text.as_bytes(),
@@ -6214,7 +6208,7 @@ async fn execute_tool_resolved_inner(
                 ),
                 None,
                 None,
-            )
+            ))
             .await?;
 
         destination_audit.complete(status);
@@ -8163,6 +8157,7 @@ mod tests {
             .unwrap();
         db.collection::<UserServiceConnection>(CONNECTIONS)
             .insert_one(UserServiceConnection {
+                secret_context_versions: Default::default(),
                 id: uuid::Uuid::new_v4().to_string(),
                 user_id: owner.clone(),
                 service_id: catalog.id.clone(),
@@ -9990,6 +9985,7 @@ mod tests {
 
         db.collection::<UserServiceConnection>(CONNECTIONS)
             .insert_one(UserServiceConnection {
+                secret_context_versions: Default::default(),
                 id: uuid::Uuid::new_v4().to_string(),
                 user_id: user_id.clone(),
                 service_id: connected_id.clone(),
@@ -10660,6 +10656,7 @@ mod tests {
 
         db.collection::<UserServiceConnection>(CONNECTIONS)
             .insert_one(UserServiceConnection {
+                secret_context_versions: Default::default(),
                 id: uuid::Uuid::new_v4().to_string(),
                 user_id: user_id.clone(),
                 service_id: auto_disconnected_id.clone(),
@@ -11353,10 +11350,15 @@ mod tests {
             .unwrap();
         assert_eq!(saved.status, "active");
         assert_eq!(
-            encryption
-                .decrypt(saved.access_token_encrypted.as_ref().unwrap())
+            crate::services::credential_record_service::CredentialRecord::key(&saved)
+                .decrypt(
+                    &encryption,
+                    "access_token_encrypted",
+                    saved.access_token_encrypted.as_deref().unwrap()
+                )
                 .await
-                .unwrap(),
+                .unwrap()
+                .as_slice(),
             b"ifttt-access"
         );
         assert_eq!(saved.token_scopes.as_deref(), Some("mcp"));
@@ -11365,10 +11367,15 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(
-            encryption
-                .decrypt(refreshed.refresh_token_encrypted.as_ref().unwrap())
+            crate::services::credential_record_service::CredentialRecord::key(&refreshed)
+                .decrypt(
+                    &encryption,
+                    "refresh_token_encrypted",
+                    refreshed.refresh_token_encrypted.as_deref().unwrap()
+                )
                 .await
-                .unwrap(),
+                .unwrap()
+                .as_slice(),
             b"rotated-refresh"
         );
         assert_eq!(refreshed.credential_epoch, saved.credential_epoch);
@@ -11410,7 +11417,7 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        assert_eq!(resolved.target.credential, "rotated-access");
+        assert_eq!(resolved.target.credential.as_str(), "rotated-access");
         assert_eq!(resolved.target.base_url, ifttt_mcp::BASE_URL);
         assert_eq!(resolved.target.auth_method, ifttt_mcp::AUTH_METHOD);
         for (auth_method, endpoint_url) in [
@@ -11659,7 +11666,11 @@ mod tests {
         let encrypted = stored.credential_encrypted.as_ref().unwrap();
         assert!(!encrypted.windows(key.len()).any(|b| b == key.as_bytes()));
         assert_eq!(
-            encryption.decrypt(encrypted).await.unwrap().as_slice(),
+            crate::services::credential_record_service::CredentialRecord::key(&stored)
+                .decrypt(&encryption, "credential_encrypted", encrypted)
+                .await
+                .unwrap()
+                .as_slice(),
             key.as_bytes()
         );
         for invalid in [
@@ -13881,7 +13892,7 @@ mod tests {
                 base_url: service.base_url.clone(),
                 auth_method: service.auth_method.clone(),
                 auth_key_name: service.auth_key_name.clone(),
-                credential: String::new(),
+                credential: Default::default(),
                 service,
                 catalog_default_headers: Vec::new(),
                 user_service_default_headers: Vec::new(),
@@ -13924,7 +13935,7 @@ mod tests {
             let mut resolution = mcp_billing_resolution("actor", None);
             resolution.credential_source = source.map(str::to_string);
             resolution.target.auth_method = "bearer".into();
-            resolution.target.credential = "test-token".into();
+            resolution.target.credential = "test-token".to_owned().into();
             resolution.target.service.billing =
                 Some(crate::models::service_billing::ServiceBilling {
                     platform_billable: true,
@@ -14247,6 +14258,7 @@ mod tests {
         /// supplied by the caller.
         fn safe_service(slug: &str, rules: Vec<AnonymousEndpointRule>) -> DownstreamService {
             DownstreamService {
+                secret_context_versions: Default::default(),
                 offering_kind: Default::default(),
                 topics: Vec::new(),
                 supplier: None,

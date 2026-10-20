@@ -59,6 +59,8 @@ Strict separation: `handlers/` -> `services/` -> `models/`
 
 - 12600 service concurrency: 12600 `ServiceConcurrencyLimited` (HTTP 429, `Retry-After: 1`); client capacity rejection, never a server fault.
 - 12700 `ToolOperationNotPublished` (HTTP 404): unpublished or unknown operation on a tool offering.
+- 12800-12801: 12800 `ManagedExecutionPending` (HTTP 409), 12801 `ErasurePreparing` (HTTP 409, `erasure_preparing`).
+- 12900 `OAuthAuthorityUnavailable` (HTTP 503, `oauth_authority_unavailable`): a live OAuth authority read could not complete; retry the request without discarding tokens or reauthorizing.
 - 12500-12501 assistant voice: 12500 `VoiceQueueFull` (HTTP 429), 12501 `VoiceProviderUnavailable` (HTTP 503).
 
 ### 4. Frontend Patterns
@@ -102,7 +104,7 @@ Add new entries here when introducing additional vendored URN types.
 
 - `NodeWsManager`: in-memory connection pool shared via `Arc` in `AppState`; `DashMap` for lock-free concurrent access
 - `Node.user_id` is the polymorphic owner field (person or org user, matching `UserService`/`UserApiKey`). Do not add a separate `org_id` to node-related models; ACL via `org_service::resolve_owner_access(actor, node.user_id)`.
-- Registration tokens carry the chosen owner at mint time; admin role is verified at issuance, not redemption -- a revoked admin can still complete registration within the token TTL (default 1h, `NODE_REGISTRATION_TOKEN_TTL_SECS`). When removing org admins, also delete their pending registration tokens.
+- Registration tokens carry the chosen owner and authenticated person issuer separately. Admin role is verified at issuance, not redemption. Mint and redemption transactionally fence the live owner/issuer/org lifecycle; redemption consumes the still-live exact capability. Demotion/removal/personal departure retires the issuer's pending registrations; legacy unattributed org tokens require reissuance and are conservatively cleared on admin departure. Preserve established org-owned nodes and other admins' attributed tokens. TTL defaults to 1h (`NODE_REGISTRATION_TOKEN_TTL_SECS`).
 - Node auth tokens (`nyx_nauth_...`) and registration tokens (`nyx_nreg_...`) are 32 random bytes; only SHA-256 hashes stored. HMAC signing secrets are generated at registration: SHA-256 hash on server, encrypted locally on the node agent.
 - WebSocket handler (`handlers/node_ws.rs`) authenticates in the first message, not via HTTP middleware
 - Catalog master credentials (including legacy internal rows) always use server transport; HTTP/WS and MCP ignore owner-node bindings for these rows. This intentionally hardens legacy behavior: nodes inject only node-owned credentials. Explicit platform connections reject node selection.
