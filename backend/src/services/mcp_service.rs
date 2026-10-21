@@ -4947,6 +4947,7 @@ pub fn execute_tool_response<'a>(
             has_server_credential,
             billing_context_builder,
             catalog_service_slug.as_deref(),
+            None,
         ))
         .await?
         {
@@ -5157,6 +5158,7 @@ pub fn execute_tool_resolved<'a>(
     has_server_credential: bool,
     billing_context_builder: McpBillingRouteContextBuilder,
     catalog_service_slug: Option<&'a str>,
+    attested_delegated_credentials: Option<Vec<super::delegation_service::DelegatedCredential>>,
 ) -> futures::future::BoxFuture<'a, AppResult<McpToolExecutionOutcome>> {
     Box::pin(async move {
         let resource_source = super::resource_adapter::source(
@@ -5218,6 +5220,7 @@ pub fn execute_tool_resolved<'a>(
             has_server_credential,
             billing_context_builder,
             catalog_service_slug,
+            attested_delegated_credentials,
             lease.clone(),
         );
         // Preserve uncertain outcomes so approval redemption cannot replay
@@ -5274,6 +5277,7 @@ fn execute_tool_resolved_boxed<'a>(
     has_server_credential: bool,
     billing_context_builder: McpBillingRouteContextBuilder,
     catalog_service_slug: Option<&'a str>,
+    attested_delegated_credentials: Option<Vec<super::delegation_service::DelegatedCredential>>,
     service_lease: Option<super::service_concurrency_service::Lease>,
 ) -> futures::future::BoxFuture<'a, AppResult<McpToolExecutionOutcome>> {
     Box::pin(execute_tool_resolved_inner(
@@ -5299,6 +5303,7 @@ fn execute_tool_resolved_boxed<'a>(
         has_server_credential,
         billing_context_builder,
         catalog_service_slug,
+        attested_delegated_credentials,
         service_lease,
     ))
 }
@@ -5336,6 +5341,7 @@ async fn execute_tool_resolved_inner(
     has_server_credential: bool,
     billing_context_builder: McpBillingRouteContextBuilder,
     catalog_service_slug: Option<&str>,
+    attested_delegated_credentials: Option<Vec<super::delegation_service::DelegatedCredential>>,
     service_lease: Option<super::service_concurrency_service::Lease>,
 ) -> AppResult<McpToolExecutionOutcome> {
     super::org_agent_service::authorize_service_with_access(
@@ -5665,10 +5671,25 @@ async fn execute_tool_resolved_inner(
 
         identity_headers.extend(parameter_headers);
 
-        // Resolve delegated credentials (only for platform services).
+        // Resolve legacy delegation or the guarded automatic no-auth exception.
         // When a node route exists, swallow errors -- the node agent may inject
         // the credential locally, matching proxy.rs:891 behavior.
-        let delegated = match &service.source {
+        // Exact redemption supplies the same vector whose metadata authority
+        // was checked after materialization. Re-resolving here would reopen it.
+        let delegated = if let Some(credentials) = attested_delegated_credentials {
+            credentials
+        } else { match &service.source {
+            McpToolSource::UserManaged {
+                user_service_id,
+                catalog_service_id: Some(catalog_service_id),
+                effective_owner_id,
+                ..
+            } if node_route.is_none() => {
+                delegation_service::resolve_optional_auto_provision_credentials(
+                    db, encryption_keys, effective_owner_id, user_service_id,
+                    catalog_service_id, &target, Some(connection_expiry_notifier),
+                ).await?
+            }
             McpToolSource::UserManaged { .. } | McpToolSource::Internal => Vec::new(),
             McpToolSource::Platform {
                 downstream_service_id,
@@ -5704,7 +5725,7 @@ async fn execute_tool_resolved_inner(
                     }
                 }
             }
-        };
+        }};
 
         proxy_service::validate_ifttt_delegation(&target, &delegated)?;
 
