@@ -1538,6 +1538,14 @@ pub(crate) fn http_egress(
 
 #[async_trait::async_trait]
 impl crate::services::platform_manager_contract::NyxAgentEgress for HttpNyxAgentEgress {
+    async fn preload_skills(
+        &self,
+        row: &AssistantConversation,
+        agent: &crate::models::assistant_agent::AssistantAgent,
+    ) -> AppResult<String> {
+        super::agent_skills::preload_for_turn(&self.state, row, agent).await
+    }
+
     fn admission_acknowledged(
         &self,
         row: &AssistantConversation,
@@ -1603,7 +1611,7 @@ pub async fn turns(
     let policy = parts.extensions.get::<BillingRoutePolicy>().copied();
     let mut start = engine::TurnStart::from(&input);
     start.org_access = org_access;
-    if start.conversation_id.is_none() && start.model.is_none() {
+    if start.conversation_id.is_none() && start.agent_id.is_none() && start.model.is_none() {
         start.model = Some(
             crate::services::assistant_profile_routing::model_for(
                 &state.db,
@@ -1840,6 +1848,7 @@ pub(crate) async fn run_turn(
         crate::services::assistant_nyxagent_egress::producer(
             state.clone(),
             crate::services::platform_personal_binding_service::producer(state.clone()),
+            super::agent_skills::preload_context(state.clone()),
         )
     } else {
         http_egress(state.clone(), auth.clone())
