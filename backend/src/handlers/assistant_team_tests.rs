@@ -3415,9 +3415,10 @@ async fn agent_model_and_access_mode_override_round_trip_through_patch() {
         )
     };
     let Json(saved) =
-        patch(json!({"model": "nyxagent/research", "access_mode_override": "ask_every_time"}))
+        patch(json!({"model": "nyxagent/research", "access_mode_override": "ask_every_time", "channel_checking_notice": true}))
             .await
             .unwrap();
+    assert_eq!(saved["channel_checking_notice"], true);
     assert_eq!(saved["model"], "nyxagent/research");
     assert_eq!(saved["access_mode_override"], "ask_every_time");
     let Json(listed) = list_agents(
@@ -3434,6 +3435,7 @@ async fn agent_model_and_access_mode_override_round_trip_through_patch() {
         .find(|row| row["id"] == agent.id.as_str())
         .unwrap()
         .clone();
+    assert_eq!(row["channel_checking_notice"], true);
     assert_eq!(row["model"], "nyxagent/research");
     assert_eq!(row["access_mode_override"], "ask_every_time");
     // The override governs this specialist's threads.
@@ -3449,8 +3451,13 @@ async fn agent_model_and_access_mode_override_round_trip_through_patch() {
     let Json(kept) = patch(json!({"description": "Review pull requests"}))
         .await
         .unwrap();
+    assert_eq!(kept["channel_checking_notice"], true);
     assert_eq!(kept["access_mode_override"], "ask_every_time");
-    let Json(cleared) = patch(json!({"access_mode_override": null})).await.unwrap();
+    let Json(cleared) =
+        patch(json!({"access_mode_override": null, "channel_checking_notice": false}))
+            .await
+            .unwrap();
+    assert_eq!(cleared["channel_checking_notice"], false);
     assert!(cleared["access_mode_override"].is_null());
     assert_eq!(cleared["model"], "nyxagent/research");
     assert!(matches!(
@@ -3468,7 +3475,7 @@ async fn agent_model_and_access_mode_override_round_trip_through_patch() {
             Path(agent.id.clone()),
             Json(
                 serde_json::from_value::<UpdateAgentRequest>(
-                    json!({"access_mode_override": "autopilot"})
+                    json!({"access_mode_override": "autopilot", "channel_checking_notice": true})
                 )
                 .unwrap()
             ),
