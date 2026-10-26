@@ -582,6 +582,38 @@ mod tests {
     use crate::test_utils::{connect_test_database, test_app_state, test_auth_user, test_user};
     use uuid::Uuid;
 
+    #[tokio::test]
+    async fn profile_reports_stored_password_independently_of_social_provider() {
+        let db = connect_test_database("profile_password").await.unwrap();
+        crate::services::role_service::seed_system_roles(&db)
+            .await
+            .unwrap();
+        let state = test_app_state(db.clone());
+        for (has_password, provider) in [
+            (false, None),
+            (false, Some("google")),
+            (true, None),
+            (true, Some("google")),
+        ] {
+            let user_id = Uuid::new_v4().to_string();
+            let mut user = test_user(&user_id, UserType::Person);
+            user.password_hash = has_password.then(|| "$argon2id$test-hash".to_string());
+            user.social_provider = provider.map(str::to_owned);
+            db.collection::<User>(USERS)
+                .insert_one(&user)
+                .await
+                .unwrap();
+
+            let Json(profile) = get_me(State(state.clone()), test_auth_user(&user_id))
+                .await
+                .unwrap();
+            let json = serde_json::to_value(profile).unwrap();
+            assert_eq!(json["has_password"], has_password);
+            assert!(json.get("password_hash").is_none());
+        }
+        db.drop().await.unwrap();
+    }
+
     fn service_view_request() -> SaveServiceViewRequest {
         SaveServiceViewRequest {
             organization_ids: vec!["org-selection".into(), "org-second".into()],

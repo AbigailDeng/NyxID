@@ -664,7 +664,7 @@ Consent endpoints use the authenticated user's ID from the `AuthUser` middleware
 - **Algorithm:** Argon2id (recommended by OWASP)
 - **Parameters:** m=64MiB, t=3 iterations, p=4 parallelism
 - **Salt:** Random per-hash via `SaltString::generate(OsRng)`
-- **Max length:** 128 characters (prevents Argon2 DoS)
+- **Max length:** 128 UTF-8 bytes (prevents Argon2 DoS)
 
 ### MFA enforcement and recovery
 
@@ -703,7 +703,27 @@ Requests are authenticated in this order:
 2. `nyx_session` cookie (hashed, looked up in DB)
 3. `X-API-Key` header (hashed, looked up in DB)
 
-All methods verify the user is active before granting access.
+All methods verify the user is active before granting access. The shared session
+authority predicate accepts only authenticated-purpose rows or completed legacy
+rows. Dedicated MFA challenges, explicit pending purposes and legacy
+`user_agent = "mfa_pending"` proofs cannot authenticate as `nyx_session` cookies;
+only the dedicated MFA completion flow can redeem a live challenge.
+
+### Password changes
+
+`POST /api/v1/auth/password/change` requires verified first-party human authority
+and the current stored password. It accepts new passwords of 8–128 UTF-8 bytes,
+including the current password, and cannot create a passwordless credential.
+A transaction compares the verified hash and live active-person/not-deleting
+state, replaces the credential, clears reset tokens, and cancels pending MFA
+challenges and login approval proofs through the shared session-authority helper.
+Password-proof creation and completion fence the same user document, so a stale
+first factor cannot acquire authority after the change. Completed sessions and
+refresh authority remain valid. Reset completion instead checks the live token
+and expiry against MongoDB server time and revokes all session authority in its
+transaction. See [API.md](API.md#post-apiv1authpasswordchange)
+for errors and the [account security guide](site/web/guides/account-security.md)
+for session revocation.
 
 ### Browser CSRF Protection
 
@@ -743,6 +763,12 @@ Dual-layer rate limiting protects against abuse:
 | Per-IP limit             | 30/sec  | `RATE_LIMIT_BURST`           |
 | Global sustained rate    | 10/sec  | `RATE_LIMIT_PER_SECOND`      |
 | Global burst capacity    | 30      | `RATE_LIMIT_BURST`           |
+
+Password changes use
+dedicated `password_change_ip` and `password_change_user` namespaces with limits
+of 20 attempts/IP/minute and 5 attempts/account/minute. The IP comes from the
+trusted-proxy resolver. Successful changes consume attempts and do not reset
+counters; both limits run before password verification.
 
 Production global, per-IP and per-agent enforcement includes MongoDB-backed shared state. Some local guards and in-memory mechanisms remain; inspect each limiter rather than assuming all state is per-instance. Reverse-proxy limits can add another layer.
 
