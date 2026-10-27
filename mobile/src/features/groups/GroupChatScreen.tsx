@@ -1335,10 +1335,8 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   input: {
-    flex: 1,
     fontFamily: fonts.bodyRegular,
     fontSize: 14,
-    maxHeight: 120,
     minHeight: 44,
     paddingTop: 12,
     paddingBottom: 10,

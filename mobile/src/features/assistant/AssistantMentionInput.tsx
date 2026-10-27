@@ -84,6 +84,14 @@ export function AssistantMentionInput({
     scope.current.emitted = undefined;
   }
   const revision = scope.current.revision;
+  const [contentSize, setContentSize] = useState({ revision, height: 44 });
+  const inputHeight = Math.max(
+    44,
+    Math.min(
+      maxHeight,
+      contentSize.revision === revision ? contentSize.height : 44,
+    ),
+  );
   const [cursor, setCursor] = useState<ScopedSelection>({
     revision,
     selection: end,
@@ -234,6 +242,7 @@ export function AssistantMentionInput({
           placeholderTextColor={colors.textMuted}
           selectionColor={colors.primary}
           multiline
+          scrollEnabled
           maxLength={32768}
           autoFocus={focused && editable}
           selection={
@@ -282,9 +291,17 @@ export function AssistantMentionInput({
               setForcedCursor(null);
           }}
           onLayout={(event) => overflow.layout(event.nativeEvent.layout.height)}
-          onContentSizeChange={(event) =>
-            overflow.content(event.nativeEvent.contentSize.height)
-          }
+          onContentSizeChange={(event) => {
+            if (!mounted.current || scope.current.revision !== revision) return;
+            const height = Math.ceil(event.nativeEvent.contentSize.height);
+            if (!Number.isFinite(height) || height < 0) return;
+            setContentSize((previous) =>
+              previous.revision === revision && previous.height === height
+                ? previous
+                : { revision, height },
+            );
+            overflow.content(height);
+          }}
           onScroll={(event) =>
             overflow.scroll(event.nativeEvent.contentOffset.y)
           }
@@ -292,7 +309,7 @@ export function AssistantMentionInput({
             styles.input,
             { color: colors.textPrimary },
             style,
-            { maxHeight },
+            { height: inputHeight, maxHeight },
           ]}
         />
         <ScrollEdgeFades edges={overflow.edges} color={colors.card} />
@@ -345,6 +362,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     paddingTop: 12,
     paddingBottom: 10,
+    textAlignVertical: "top",
   },
   mentionButton: {
     width: 44,

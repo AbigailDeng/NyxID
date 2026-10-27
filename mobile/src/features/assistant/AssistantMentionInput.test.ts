@@ -40,6 +40,7 @@ function elements(root: Element): Element[] {
 }
 
 function setup(initial: Record<string, unknown> = {}) {
+  let maxHeight = 120;
   const writes: string[] = [];
   const props: Record<string, any> = {
     value: "",
@@ -56,7 +57,7 @@ function setup(initial: Record<string, unknown> = {}) {
   };
   const harness = hookHarness<Element>({
     "../display/ChatLayoutContext": {
-      useComposerHeight: () => 120,
+      useComposerHeight: () => maxHeight,
       useChatColumn: () => ({
         width: "100%",
         maxWidth: 758,
@@ -144,6 +145,10 @@ function setup(initial: Record<string, unknown> = {}) {
     harness.render();
   };
   return {
+    setMaxHeight: (height: number) => {
+      maxHeight = height;
+      harness.render();
+    },
     props,
     writes,
     harness,
@@ -278,4 +283,96 @@ test("disabled and unmounted composers ignore retained native callbacks", () => 
   current.props.onChangeText("after unmount");
   current.props.onBlur();
   assert.deepEqual(view.writes, []);
+});
+
+const inputStyle = (element: Element) =>
+  Object.assign({}, ...element.props.style.flat(Infinity));
+
+test("native measured content grows the shared composer to its preference/keyboard cap and keeps scrolling", () => {
+  const view = setup();
+  view.setMaxHeight(140);
+  const key = view.input().key;
+  assert.equal(inputStyle(view.input()).height, 44);
+  view.input().props.onChangeText("1234567890".repeat(20));
+  view.harness.render();
+  view
+    .input()
+    .props.onContentSizeChange({
+      nativeEvent: { contentSize: { width: 256, height: 96.4 } },
+    });
+  view.harness.flush();
+  assert.equal(inputStyle(view.input()).height, 97);
+  view
+    .input()
+    .props.onContentSizeChange({
+      nativeEvent: { contentSize: { width: 256, height: 275 } },
+    });
+  view.harness.flush();
+  assert.equal(inputStyle(view.input()).height, 140);
+  assert.equal(view.input().props.multiline, true);
+  assert.equal(view.input().props.scrollEnabled, true);
+  assert.equal(
+    view.input().key,
+    key,
+    "growing does not remount the focused native input",
+  );
+  view.setMaxHeight(80);
+  assert.equal(
+    inputStyle(view.input()).height,
+    80,
+    "keyboard space can reduce the active cap",
+  );
+  view.setMaxHeight(240);
+  assert.equal(
+    inputStyle(view.input()).height,
+    240,
+    "increasing the cap reuses measured overflow",
+  );
+  view
+    .input()
+    .props.onContentSizeChange({
+      nativeEvent: { contentSize: { width: 300, height: 58 } },
+    });
+  view.harness.flush();
+  assert.equal(
+    inputStyle(view.input()).height,
+    58,
+    "rewrapping or deleting text shrinks the composer",
+  );
+  view.harness.unmount();
+});
+
+test("draft replacement resets measured height and rejects stale size events while readonly drafts still measure", () => {
+  const view = setup({ value: "old draft" });
+  const oldInput = view.input();
+  oldInput.props.onContentSizeChange({
+    nativeEvent: { contentSize: { height: 200 } },
+  });
+  view.harness.flush();
+  assert.equal(inputStyle(view.input()).height, 120);
+  view.props.value = "";
+  view.harness.render();
+  assert.equal(inputStyle(view.input()).height, 44);
+  oldInput.props.onContentSizeChange({
+    nativeEvent: { contentSize: { height: 300 } },
+  });
+  view.harness.flush();
+  assert.equal(inputStyle(view.input()).height, 44);
+  view.props.editable = false;
+  view.harness.render();
+  view
+    .input()
+    .props.onContentSizeChange({
+      nativeEvent: { contentSize: { height: 70 } },
+    });
+  view.harness.flush();
+  assert.equal(inputStyle(view.input()).height, 70);
+  view
+    .input()
+    .props.onContentSizeChange({
+      nativeEvent: { contentSize: { height: NaN } },
+    });
+  view.harness.flush();
+  assert.equal(inputStyle(view.input()).height, 70);
+  view.harness.unmount();
 });
