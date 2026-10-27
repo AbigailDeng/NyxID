@@ -28,10 +28,7 @@ import {
   ChevronDown,
   Check,
   MoreHorizontal,
-  Paperclip,
   SquarePen,
-  ArrowUp,
-  Square,
   X,
   Mic,
 } from "lucide-react-native";
@@ -71,6 +68,12 @@ import { AssistantCopyButton } from "./AssistantCopyButton";
 import { assistantSelectableMarkdown } from "./assistantSelectableMarkdown";
 import { AssistantAttachmentView } from "./AssistantAttachmentView";
 import { AssistantPendingUploads } from "./AssistantPendingUploads";
+import {
+  ChatComposerFrame,
+  ChatComposerRow,
+  ComposerAttachButton,
+  ComposerSubmitButton,
+} from "./ChatComposer";
 import { AssistantMentionInput } from "./AssistantMentionInput";
 import { useAssistantUploads } from "./useAssistantUploads";
 import { describeToolActivity } from "./assistantActivityText";
@@ -1097,13 +1100,7 @@ export function AssistantScreen({
           }}
         />
       ) : null}
-      <View
-        style={[
-          styles.composer,
-          chatColumn,
-          { backgroundColor: colors.card, borderColor: colors.textMuted },
-        ]}
-      >
+      <ChatComposerFrame style={[styles.composer, chatColumn]}>
         <AssistantPendingUploads
           files={uploads.files}
           remove={uploads.remove}
@@ -1119,9 +1116,10 @@ export function AssistantScreen({
             {uploads.error ?? uploads.notice}
           </Label>
         ) : null}
-        <View style={styles.composerActions}>
-          <IconButton
+        <ChatComposerRow>
+          <ComposerAttachButton
             label="Attach files"
+            busy={uploads.picking}
             disabled={
               !canCompose ||
               uploads.picking ||
@@ -1129,13 +1127,7 @@ export function AssistantScreen({
               uploads.files.length >= 10
             }
             onPress={() => void uploads.pick()}
-          >
-            {uploads.picking ? (
-              <ActivityIndicator size="small" color={colors.primary} />
-            ) : (
-              <Paperclip size={20} color={colors.textSecondary} />
-            )}
-          </IconButton>
+          />
           <AssistantMentionInput
             value={draft}
             onChangeText={updateDraft}
@@ -1146,10 +1138,11 @@ export function AssistantScreen({
               !route?.params?.openLatest
             }
             accessibilityLabel="Message to assistant"
-            placeholder={`Message ${agentName}…`}
+            placeholder={`Message ${agentName}`}
           />
           {running && assistant.conversationId ? (
-            <IconButton
+            <ComposerSubmitButton
+              kind="stop"
               label="Stop assistant"
               disabled={
                 stopProtected ||
@@ -1159,9 +1152,7 @@ export function AssistantScreen({
               onPress={() => {
                 if (composerPress.current("stop")) void assistant.stop();
               }}
-            >
-              <Square size={18} color={colors.danger} />
-            </IconButton>
+            />
           ) : voiceAvailable &&
             (!voiceThread || voiceThread !== assistant.conversationId) ? (
             <IconButton
@@ -1179,15 +1170,14 @@ export function AssistantScreen({
               )}
             </IconButton>
           ) : (
-            <IconButton
+            <ComposerSubmitButton
+              kind="send"
               label="Send message"
               disabled={!canSend}
               onPress={() => void sendDraft()}
-            >
-              <ArrowUp size={21} color={colors.bg} />
-            </IconButton>
+            />
           )}
-        </View>
+        </ChatComposerRow>
         {assistant.recoveryRequired || uploads.blocked ? (
           <Label muted style={styles.composerHint}>
             {assistant.recoveryRequired
@@ -1200,7 +1190,7 @@ export function AssistantScreen({
             Keep the message under 32,768 characters.
           </Label>
         ) : null}
-      </View>
+      </ChatComposerFrame>
 
       <Sheet
         visible={!!sheet}
@@ -1522,9 +1512,6 @@ function IconButton({
   onPress: () => void;
   disabled?: boolean;
 }) {
-  const { colors } = useTheme();
-  const send = label === "Send message";
-  const stop = label === "Stop assistant";
   return (
     <Pressable
       accessibilityRole="button"
@@ -1534,12 +1521,6 @@ function IconButton({
       onPress={onPress}
       style={({ pressed }) => [
         styles.iconButton,
-        (send || stop) && {
-          borderRadius: 22,
-          backgroundColor: send ? colors.textPrimary : colors.dangerSoftBg,
-          borderWidth: stop ? 1 : 0,
-          borderColor: colors.danger,
-        },
         { opacity: disabled ? 0.4 : pressed ? 0.65 : 1 },
       ]}
     >
@@ -1657,9 +1638,8 @@ const styles = StyleSheet.create({
   },
   thinking: { alignSelf: "flex-start", marginVertical: 10 },
   cardTitle: { fontFamily: fonts.bodySemi },
-  composer: { borderWidth: 1, borderRadius: 20, padding: 6, gap: 6 },
-  composerActions: { flexDirection: "row", alignItems: "flex-end", gap: 2 },
-  composerHint: { fontSize: 11, lineHeight: 16, paddingHorizontal: 8 },
+  composer: { marginBottom: 8 },
+  composerHint: { fontSize: 11, lineHeight: 16, paddingHorizontal: 12 },
   errorRow: { gap: 8 },
   sheet: { flex: 1, paddingTop: 20 },
   sheetHeader: {

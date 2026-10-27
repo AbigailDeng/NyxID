@@ -46,6 +46,23 @@ function elements(element: Element): Element[] {
   ];
 }
 
+// The shared composer controls are exercised through their accessible button contract.
+function composerButton(props: {
+  label: string;
+  disabled?: boolean;
+  onPress: () => void;
+}): Element {
+  return {
+    type: "Pressable",
+    props: {
+      accessibilityLabel: props.label,
+      disabled: props.disabled,
+      onPress: props.onPress,
+      children: [],
+    },
+  };
+}
+
 // Opt in here to retain coverage of the paused voice flow.
 function setup(conversationId?: string, enableVoiceForTest = true) {
   const draft = deferred<string>();
@@ -261,6 +278,18 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     },
     "./AssistantMentionInput": {
       AssistantMentionInput: "AssistantMentionInput",
+    },
+    "./ChatComposer": {
+      ChatComposerFrame: ({ children }: { children: unknown }) => ({
+        type: "ChatComposerFrame",
+        props: { children },
+      }),
+      ChatComposerRow: ({ children }: { children: unknown }) => ({
+        type: "ChatComposerRow",
+        props: { children },
+      }),
+      ComposerAttachButton: composerButton,
+      ComposerSubmitButton: composerButton,
     },
     "./assistantSelectableMarkdown": { assistantSelectableMarkdown: {} },
     "../plugins/NativeAuthoredSkillReview": {

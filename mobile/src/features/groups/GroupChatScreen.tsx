@@ -25,9 +25,7 @@ import Markdown, {
 import * as WebBrowser from "expo-web-browser";
 import {
   Check,
-  Paperclip,
   Plus,
-  Send,
   Settings2,
   MessageSquare,
   ThumbsDown,
@@ -57,6 +55,12 @@ import {
   AssistantMentionInput,
   type AssistantMentionOption,
 } from "../assistant/AssistantMentionInput";
+import {
+  ChatComposerFrame,
+  ChatComposerRow,
+  ComposerAttachButton,
+  ComposerSubmitButton,
+} from "../assistant/ChatComposer";
 import {
   resolveAttachmentMentions,
   stripAttachmentMention,
@@ -751,59 +755,8 @@ function GroupChat({
           style={[
             styles.composerArea,
             chatColumn,
-            { borderColor: colors.border },
           ]}
         >
-          <OverflowScrollView
-            fadeColor={colors.bg}
-            horizontal
-            style={styles.horizontalStrip}
-            keyboardShouldPersistTaps="handled"
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.recipients}
-          >
-            <Label muted style={styles.small}>
-              To
-            </Label>
-            {recipients.ids.map((id) => {
-              const member = liveMembers.find((row) => row.id === id);
-              return member ? (
-                <Pressable
-                  key={id}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Remove recipient ${title(id, member.name)}`}
-                  disabled={blocked}
-                  onPress={() => editRecipients((old) => withRemoved(old, id))}
-                  style={[
-                    styles.recipient,
-                    {
-                      backgroundColor: colors.cardSoft,
-                      borderColor: colors.border,
-                    },
-                  ]}
-                >
-                  <Label style={styles.small}>{title(id, member.name)}</Label>
-                  <X size={12} color={colors.textSecondary} />
-                </Pressable>
-              ) : null;
-            })}
-            {liveMembers.some(
-              (member) => !recipients.ids.includes(member.id),
-            ) && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Add recipient"
-                disabled={blocked}
-                onPress={() => setPickingRecipients(true)}
-                style={styles.addRecipient}
-              >
-                <Plus size={14} color={colors.primaryOnTint} />
-                <Label style={[styles.small, { color: colors.primaryOnTint }]}>
-                  Add
-                </Label>
-              </Pressable>
-            )}
-          </OverflowScrollView>
           {!recipients.ids.length && (
             <Label style={[styles.small, { color: colors.danger }]}>
               Choose at least one recipient.
@@ -820,56 +773,98 @@ function GroupChat({
               This group is read-only for your current organization role.
             </Label>
           )}
-          <AssistantPendingUploads
-            files={uploads.files}
-            remove={removeAttachment}
-            disabled={chat.sending || uploads.session.sending}
-          />
           {(uploads.error || uploads.notice) && (
             <Label muted>{uploads.error ?? uploads.notice}</Label>
           )}
-          <View
-            style={[
-              styles.composer,
-              { backgroundColor: colors.card, borderColor: colors.textMuted },
-            ]}
-          >
-            <Icon
-              label="Attach a file to group"
-              disabled={
-                blocked ||
-                !liveMembers.length ||
-                uploads.picking ||
-                uploads.session.sending
-              }
-              onPress={() => void uploads.pick()}
+          <ChatComposerFrame>
+            <OverflowScrollView
+              fadeColor={colors.composerBg}
+              horizontal
+              style={styles.horizontalStrip}
+              keyboardShouldPersistTaps="handled"
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.recipients}
             >
-              <Paperclip size={20} color={colors.textMuted} />
-            </Icon>
-            <AssistantMentionInput
-              generation={composerGeneration}
-              accessibilityLabel="Message the group"
-              placeholder="Message the group…"
-              value={draft}
-              mentions={mentions}
-              onChangeText={(value) => {
-                if (currentComposer.current === composerGeneration) edit(value);
-              }}
-              editable={!blocked && !!liveMembers.length}
-              style={[styles.input, { color: colors.textPrimary }]}
-            />
-            <Icon
-              label="Send group message"
-              disabled={!canSend}
-              onPress={() => void send()}
-            >
-              {chat.sending ? (
-                <ActivityIndicator color={colors.primary} />
-              ) : (
-                <Send size={20} color={colors.bg} />
+              <Label muted style={styles.small}>
+                To
+              </Label>
+              {recipients.ids.map((id) => {
+                const member = liveMembers.find((row) => row.id === id);
+                return member ? (
+                  <Pressable
+                    key={id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove recipient ${title(id, member.name)}`}
+                    disabled={blocked}
+                    onPress={() => editRecipients((old) => withRemoved(old, id))}
+                    style={[
+                      styles.recipient,
+                      {
+                        backgroundColor: colors.navActive,
+                        borderColor: colors.composerBorder,
+                      },
+                    ]}
+                  >
+                    <Label style={styles.small}>{title(id, member.name)}</Label>
+                    <X size={12} color={colors.textSecondary} />
+                  </Pressable>
+                ) : null;
+              })}
+              {liveMembers.some(
+                (member) => !recipients.ids.includes(member.id),
+              ) && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Add recipient"
+                  disabled={blocked}
+                  onPress={() => setPickingRecipients(true)}
+                  style={styles.addRecipient}
+                >
+                  <Plus size={14} color={colors.primaryOnTint} />
+                  <Label style={[styles.small, { color: colors.primaryOnTint }]}>
+                    Add
+                  </Label>
+                </Pressable>
               )}
-            </Icon>
-          </View>
+            </OverflowScrollView>
+            <AssistantPendingUploads
+              files={uploads.files}
+              remove={removeAttachment}
+              disabled={chat.sending || uploads.session.sending}
+            />
+            <ChatComposerRow>
+              <ComposerAttachButton
+                label="Attach a file to group"
+                busy={uploads.picking}
+                disabled={
+                  blocked ||
+                  !liveMembers.length ||
+                  uploads.picking ||
+                  uploads.session.sending
+                }
+                onPress={() => void uploads.pick()}
+              />
+              <AssistantMentionInput
+                generation={composerGeneration}
+                accessibilityLabel="Message the group"
+                placeholder="Message the group"
+                value={draft}
+                mentions={mentions}
+                onChangeText={(value) => {
+                  if (currentComposer.current === composerGeneration) edit(value);
+                }}
+                editable={!blocked && !!liveMembers.length}
+                style={[styles.input, { color: colors.textPrimary }]}
+              />
+              <ComposerSubmitButton
+                kind="send"
+                label="Send group message"
+                busy={chat.sending}
+                disabled={!canSend}
+                onPress={() => void send()}
+              />
+            </ChatComposerRow>
+          </ChatComposerFrame>
           {[...resolvedDraft].length > 32768 && (
             <Label style={[styles.small, { color: colors.danger }]}>
               Keep the message within 32,768 characters, including attachment
@@ -1234,8 +1229,6 @@ function Icon({
   onPress: () => void;
   children: React.ReactNode;
 }) {
-  const { colors } = useTheme();
-  const send = label === "Send group message";
   return (
     <Pressable
       accessibilityRole="button"
@@ -1245,7 +1238,6 @@ function Icon({
       onPress={onPress}
       style={[
         styles.icon,
-        send && { backgroundColor: colors.textPrimary, borderRadius: 22 },
         { opacity: disabled ? 0.4 : 1 },
       ]}
     >
@@ -1308,8 +1300,8 @@ const styles = StyleSheet.create({
   pending: { maxHeight: 180 },
   pendingCard: { padding: 12, gap: 8 },
   actions: { flexDirection: "row", gap: 8 },
-  composerArea: { gap: 6, borderTopWidth: 1, paddingTop: 8 },
-  recipients: { gap: 6, alignItems: "center" },
+  composerArea: { gap: 6, paddingTop: 4, paddingBottom: 8 },
+  recipients: { gap: 6, alignItems: "center", paddingHorizontal: 10 },
   recipient: {
     flexDirection: "row",
     alignItems: "center",
@@ -1326,13 +1318,6 @@ const styles = StyleSheet.create({
     gap: 4,
     minHeight: 36,
     paddingHorizontal: 8,
-  },
-  composer: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    borderWidth: 1,
-    borderRadius: 20,
-    paddingVertical: 4,
   },
   input: {
     fontFamily: fonts.bodyRegular,

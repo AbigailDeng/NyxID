@@ -39,7 +39,10 @@ function elements(root: Element): Element[] {
   ];
 }
 
-function setup(initial: Record<string, unknown> = {}) {
+function setup(
+  initial: Record<string, unknown> = {},
+  platform: "android" | "ios" = "android",
+) {
   let maxHeight = 120;
   const writes: string[] = [];
   const props: Record<string, any> = {
@@ -86,6 +89,7 @@ function setup(initial: Record<string, unknown> = {}) {
       }),
     },
     "react-native": {
+      Platform: { OS: platform },
       Pressable: "Pressable",
       ScrollView: "ScrollView",
       Text: "Text",
@@ -339,6 +343,23 @@ test("native measured content grows the shared composer to its preference/keyboa
     58,
     "rewrapping or deleting text shrinks the composer",
   );
+  view.harness.unmount();
+});
+
+test("iOS sizes the multiline composer to its text under the shared cap", () => {
+  const view = setup({}, "ios");
+  view.setMaxHeight(140);
+  view.input().props.onChangeText("1234567890".repeat(20));
+  view.harness.render();
+  view.input().props.onContentSizeChange({
+    nativeEvent: { contentSize: { width: 256, height: 96.4 } },
+  });
+  view.harness.flush();
+  const style = inputStyle(view.input());
+  // A measured height pinned the iOS input at one line; native sizing grows it.
+  assert.equal(style.height, undefined);
+  assert.equal(style.maxHeight, 140);
+  assert.equal(style.minHeight, 44);
   view.harness.unmount();
 });
 

@@ -5,6 +5,7 @@ import {
 } from "../../components/workspace/ScrollEdgeFades";
 import { useEffect, useRef, useState } from "react";
 import {
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -309,10 +310,13 @@ export function AssistantMentionInput({
             styles.input,
             { color: colors.textPrimary },
             style,
-            { height: inputHeight, maxHeight },
+            // iOS sizes a multiline input to its text; a measured height pins it at one line.
+            Platform.OS === "ios"
+              ? { maxHeight }
+              : { height: inputHeight, maxHeight },
           ]}
         />
-        <ScrollEdgeFades edges={overflow.edges} color={colors.card} />
+        <ScrollEdgeFades edges={overflow.edges} color={colors.composerBg} />
       </View>
       {mentions.length ? (
         <Pressable

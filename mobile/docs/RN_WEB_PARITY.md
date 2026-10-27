@@ -54,13 +54,22 @@ The [native route inventory](NATIVE_WORKSPACE_ROUTES.md) enumerates every module
 management stack registration, shared auth/legal entry, cold fallback and
 challenge path. One retained management drawer adopts safe-area-top +10pt,
 24pt corners, a 36×4pt handle in a 44pt drag target, left-aligned 18pt title,
-44pt circular Close, nested Back and a dedicated translucent scrim. Async guards
+44pt circular Close, nested Back and a dedicated translucent scrim. Everything
+inside the drawer uses an elevated drawer palette (surface, cards and quieter
+text tones step up together) with a hairline top edge, so the drawer stays
+distinct from the dimmed chat in dark mode, where the chat background alone
+measured 1.02:1 against it. Async guards
 remain authoritative for dirty/pending dismissal and notification deferral;
 forced sign-out clears the account stack. Retained chat and custom header
 accessibility descendants are hidden while management is open.
 
-Private user bubbles, shared neutral composers and compact group/private headers
-follow the native reference while preserving real speaker attribution. Display
+Private user bubbles and compact group/private headers follow the native
+reference while preserving real speaker attribution. Private, contextual and
+group chats share one ChatGPT-style composer: a filled borderless pill with a
+leading "+" for attachments, a fixed trailing send/stop circle, and group
+recipient chips and pending files inside the pill above the text line. iOS sizes
+the multiline input to its text under the shared cap; Android applies the
+measured height. Display
 preferences use AsyncStorage on this device: default column maximum 758pt,
 wide-window-only width controls and the existing 120pt native composer maximum,
 clamped to keyboard/window space. Reset changes layout only. Shared conditional
