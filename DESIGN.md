@@ -549,13 +549,15 @@ full-screen. See
   inset and corners 12/12/3/12. Private chat omits redundant “You”; group speakers,
   real specialist attribution, orchestration, updates, via and guidance remain.
   Assistant prose stays unboxed. All chat composers share a filled 26pt pill:
-  full-width text sits above a toolbar with Attach, optional mentions and a
-  trailing Send/Stop circle inside a 44pt target. Chat pages use 12pt horizontal
-  padding and 4pt bottom padding in addition to the system safe area. The
-  navigation account footer absorbs its bottom clearance into the safe-area
-  inset rather than adding a second padded strip. The one-row private header
-  stays compact; group name, ownership context and settings share one header,
-  with member details retained.
+  full-width text sits above a toolbar with Attach, optional mentions, dictation
+  and a trailing Send/Stop circle inside a 44pt target. Attach offers Photos and
+  Files through their native pickers. Dictation requires review before text is
+  inserted into the draft and never sends a message automatically. Chat pages
+  use 12pt horizontal padding and 4pt bottom padding in addition to the system
+  safe area. The navigation account footer absorbs its bottom clearance into
+  the safe-area inset rather than adding a second padded strip. The one-row
+  private header stays compact; group name, ownership context and settings
+  share one header, with member details retained.
 - Settings → Display stores chat layout on this device with AsyncStorage. Column
   maximum defaults to 758pt, clamps to actual space, and is adjustable only on
   windows at least 600pt wide (360–1200pt range). Composer maximum defaults to the
@@ -584,8 +586,11 @@ full-screen. See
   base/card/cardSoft surfaces; essential drawer/composer controls meet 3:1.
 
 Native support remains portrait iPhone on iOS and Android phone, with wide
-Android windows as a secondary layout. This change does not enable iPad,
-additional orientations, RN-web, machines, backend capabilities or native voice.
+Android windows as a secondary layout. Eligible private chats expose a separate
+waveform action for voice conversations when the server enables
+`assistant:voice`; group chats support dictation. Dictation requires a build
+containing the speech recognition module. iPad, additional orientations,
+RN-web, machines and new backend capabilities remain outside native support.
 
 ### Assistant sidebar density and creation
 

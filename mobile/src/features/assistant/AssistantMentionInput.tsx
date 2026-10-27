@@ -356,7 +356,13 @@ const styles = StyleSheet.create({
   },
   inputFrame: { flex: 1, minWidth: 0 },
   fullWidth: { flex: 0, flexDirection: "column", alignItems: "stretch" },
-  fullWidthInput: { flex: 0, paddingHorizontal: 12 },
+  fullWidthInput: {
+    flex: 0,
+    paddingHorizontal: 12,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    overflow: "hidden",
+  },
   input: {
     minWidth: 0,
     minHeight: 44,
