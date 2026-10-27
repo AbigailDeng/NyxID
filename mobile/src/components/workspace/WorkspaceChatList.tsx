@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
+  Check,
   ChevronDown,
   ChevronRight,
   MessageSquare,
@@ -47,6 +48,8 @@ import {
 } from "./workspaceChatListModel";
 
 type Props = {
+  mode?: "drawer" | "picker";
+  scrollFooter?: ReactNode;
   scrollHeader?: ReactNode;
   scrollProps?: ScrollViewProps;
   visible: boolean;
@@ -64,6 +67,8 @@ type Browser =
   | { kind: "chats"; fromAgents: boolean };
 
 export function WorkspaceChatList({
+  mode = "drawer",
+  scrollFooter,
   scrollHeader,
   scrollProps,
   visible,
@@ -127,11 +132,15 @@ export function WorkspaceChatList({
   const groups = useQuery({
     queryKey: [...groupKeys(epoch), "list"],
     queryFn: ({ signal }) => groupsApi.list(signal),
-    enabled: active,
+    enabled: active && mode === "drawer",
     refetchInterval: livePollInterval(5000, live),
     retry: false,
   });
-  const allAgents = orderedDrawerAgents(agents.data?.agents ?? []);
+  const allAgents = orderedDrawerAgents(agents.data?.agents ?? []).filter(
+    (agent) =>
+      mode !== "picker" ||
+      (agent.status !== "destroyed" && agent.can_use === true),
+  );
   const allGroups = [...(groups.data ?? [])].sort((a, b) =>
     (b.last_message_at || b.created_at).localeCompare(
       a.last_message_at || a.created_at,
@@ -241,8 +250,19 @@ export function WorkspaceChatList({
         : row.owner_kind === "org"
           ? row.owner_name || "Shared agent"
           : row.kind === "nyxbot"
-            ? "Your personal agent"
-            : undefined;
+            ? "Personal · Your personal agent"
+            : "Personal";
+  const agentRowDetail = (row: AssistantAgent) =>
+    [
+      row.pending_acknowledgements
+        ? "Needs you"
+        : row.status === "running"
+          ? "Running"
+          : undefined,
+      agentDetail(row),
+    ]
+      .filter(Boolean)
+      .join(" · ");
   const chatRow = (row: AssistantConversation) => (
     <ChatRow
       key={row.id}
@@ -307,23 +327,24 @@ export function WorkspaceChatList({
       onPress={() => openChat(selectedChatId)}
     />
   ) : null;
-  const rows: ReactNode[] = [
-    <View key="workspace">{scrollHeader}</View>,
-    <SectionHeading
-      key="agents"
-      label="Agent chats"
-      count={allAgents.length}
-      expanded={sections.agents}
-      createLabel="New agent"
-      onCreate={onCreateAgent}
-      createDisabled={!active}
-      onPress={() =>
-        setSections((value) => ({ ...value, agents: !value.agents }))
-      }
-    />,
-  ];
+  const rows: ReactNode[] = [<View key="workspace">{scrollHeader}</View>];
+  if (mode === "drawer")
+    rows.push(
+      <SectionHeading
+        key="agents"
+        label="Agent chats"
+        count={allAgents.length}
+        expanded={sections.agents}
+        createLabel="New agent"
+        onCreate={onCreateAgent}
+        createDisabled={!active}
+        onPress={() =>
+          setSections((value) => ({ ...value, agents: !value.agents }))
+        }
+      />,
+    );
   let stickyIndex: number | undefined;
-  if (sections.agents) {
+  if (sections.agents || mode === "picker") {
     rows.push(
       <View key="agent-status">
         {current?.kind === "agent" &&
@@ -360,11 +381,6 @@ export function WorkspaceChatList({
     )) {
       const expanded = openId === row.id;
       if (expanded) stickyIndex = rows.length;
-      const status = row.pending_acknowledgements
-        ? "Needs you"
-        : row.status === "running"
-          ? "Running"
-          : undefined;
       rows.push(
         <View
           key={`agent:${row.id}`}
@@ -380,10 +396,7 @@ export function WorkspaceChatList({
           <DisclosureRow
             agent={row}
             label={chatAgentLabel(row)}
-            detail={
-              [status, agentDetail(row)].filter(Boolean).join(" · ") ||
-              undefined
-            }
+            detail={agentRowDetail(row)}
             expanded={expanded}
             selected={
               current?.kind === "agent" &&
@@ -552,21 +565,22 @@ export function WorkspaceChatList({
         />,
       );
   }
-  rows.push(
-    <SectionHeading
-      key="crews"
-      label="Crews"
-      count={allGroups.length}
-      expanded={sections.groups}
-      createLabel="New crew"
-      onCreate={onCreateGroup}
-      createDisabled={!active}
-      onPress={() =>
-        setSections((value) => ({ ...value, groups: !value.groups }))
-      }
-    />,
-  );
-  if (sections.groups)
+  if (mode === "drawer")
+    rows.push(
+      <SectionHeading
+        key="crews"
+        label="Crews"
+        count={allGroups.length}
+        expanded={sections.groups}
+        createLabel="New crew"
+        onCreate={onCreateGroup}
+        createDisabled={!active}
+        onPress={() =>
+          setSections((value) => ({ ...value, groups: !value.groups }))
+        }
+      />,
+    );
+  if (sections.groups && mode === "drawer")
     rows.push(
       <View key="crew-rows">
         {groups.isPending ? (
@@ -611,6 +625,7 @@ export function WorkspaceChatList({
         }}
       >
         {rows}
+        {scrollFooter}
       </ScrollView>
       {browser ? (
         <WorkspaceChatBrowser<BrowseRow>
@@ -660,7 +675,7 @@ export function WorkspaceChatList({
               <DisclosureRow
                 agent={row.agent}
                 label={chatAgentLabel(row.agent)}
-                detail={agentDetail(row.agent)}
+                detail={agentRowDetail(row.agent)}
                 expanded={false}
                 selected={currentAgentId === row.id}
                 onPress={() => {
@@ -927,6 +942,7 @@ function DisclosureRow({
           </Text>
         ) : null}
       </View>
+      {selected ? <Check size={16} color={colors.primaryOnTint} /> : null}
       <Chevron size={16} color={colors.textMuted} />
     </Pressable>
   );

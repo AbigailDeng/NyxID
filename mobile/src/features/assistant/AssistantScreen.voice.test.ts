@@ -68,6 +68,7 @@ function composerButton(props: {
 
 // Exercise enabled and unavailable server/runtime admission separately.
 function setup(conversationId?: string, enableVoiceForTest = true) {
+  let headerOptions: Record<string, any> = {};
   const draft = deferred<string>();
   const events: unknown[][] = [];
   const drafts: { agentId: string; signal: AbortSignal }[] = [];
@@ -91,6 +92,8 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
         model: "nyxagent/chat",
         agent,
         active_turn: null,
+        last_message_at: "2026-10-28T01:00:00Z",
+        message_count: 12,
       } as Record<string, any>,
       messages: [],
       waiting: [],
@@ -177,7 +180,10 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
         scroll: (offset: number) => events.push(["fade-scroll", offset]),
       }),
     },
-    "../../components/AgentAvatar": { AgentAvatar: "AgentAvatar", AgentAvatarStack: "AgentAvatarStack" },
+    "../../components/AgentAvatar": {
+      AgentAvatar: "AgentAvatar",
+      AgentAvatarStack: "AgentAvatarStack",
+    },
     "react/jsx-runtime": {
       Fragment: "Fragment",
       jsx: (type: unknown, props: unknown, key?: unknown) => ({
@@ -244,7 +250,9 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
       ].map((name) => [name, name]),
     ),
     "../../app/WorkspaceHeader": {
-      useWorkspaceBack: () => {},
+      useWorkspaceBack: (input: { options: Record<string, any> }) => {
+        headerOptions = input.options;
+      },
       WorkspaceHeaderVisibility: "WorkspaceHeaderVisibility",
     },
     "../../app/navigationHierarchy": {},
@@ -254,6 +262,12 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
       ),
     ),
     "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
+    "../../components/workspace/WorkspaceChatList": {
+      WorkspaceChatList: (props: Record<string, any>) => ({
+        type: "WorkspaceChatList",
+        props: { ...props, children: [props.scrollHeader, props.scrollFooter] },
+      }),
+    },
     "./NyxBotHome": { NyxBotHome: "NyxBotHome" },
     "./useAssistant": { useAssistant: () => assistant },
     "./useAssistantUploads": { useAssistantUploads: () => uploads },
@@ -362,6 +376,15 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     draft,
     all,
     button,
+    chooseAgent: () => {
+      const header = expand(headerOptions.headerTitle());
+      elements(header)
+        .find((element) =>
+          element.props.accessibilityLabel?.endsWith("Choose agent"),
+        )!
+        .props.onPress();
+      harness.flush();
+    },
     voice,
     input: () =>
       all().find((element) => element.type === "AssistantMentionInput")!,
@@ -941,6 +964,105 @@ test("home roster Chat reuses latest-thread navigation and crew navigation retai
       acknowledgementId: undefined,
       draft: false,
       openLatest: true,
+    },
+  ]);
+  x.harness.unmount();
+});
+
+test("Choose agent uses the shared hierarchy and links the existing thread sheets", () => {
+  const x = setup(A);
+  x.chooseAgent();
+  const hierarchy = x.all().find((node) => node.type === "WorkspaceChatList")!;
+  assert.equal(hierarchy.props.mode, "picker");
+  assert.equal(hierarchy.props.current.agentId, "agent-a");
+  assert.equal(hierarchy.props.current.conversationId, A);
+  const labels = x
+    .all()
+    .filter((node) => node.type === "Label")
+    .flatMap((node) => node.props.children.flat(Infinity));
+  assert.ok(labels.includes("This thread"));
+  assert.ok(labels.includes("Saved chat"));
+  assert.ok(labels.includes(12));
+  x.all()
+    .find(
+      (node) => node.type === "ActionButton" && node.props.label === "History",
+    )!
+    .props.onPress();
+  x.harness.flush();
+  assert.equal(
+    x.all().some((node) => node.type === "WorkspaceChatList"),
+    false,
+  );
+  assert.ok(
+    x
+      .all()
+      .some(
+        (node) =>
+          node.type === "ActionButton" && node.props.label === "New chat",
+      ),
+  );
+  x.chooseAgent();
+  x.all()
+    .find(
+      (node) => node.type === "ActionButton" && node.props.label === "Details",
+    )!
+    .props.onPress();
+  x.harness.flush();
+  assert.ok(
+    x
+      .all()
+      .some(
+        (node) =>
+          node.type === "Label" && node.props.children.includes("Model"),
+      ),
+  );
+  x.harness.unmount();
+});
+
+test("picker keeps the current thread draft and follows existing clearing rules for another thread", () => {
+  const x = setup(A);
+  x.input().props.onChangeText("Unsent review");
+  x.harness.flush();
+  x.chooseAgent();
+  x.all()
+    .find((node) => node.type === "WorkspaceChatList")!
+    .props.onSelect({ kind: "agent", agentId: "agent-a", conversationId: A });
+  x.harness.flush();
+  assert.equal(x.input().props.value, "Unsent review");
+  assert.equal(
+    x.events.some((event) => (event as unknown[])[0] === "open"),
+    false,
+  );
+  x.chooseAgent();
+  x.all()
+    .find((node) => node.type === "WorkspaceChatList")!
+    .props.onSelect({ kind: "agent", agentId: "agent-a", conversationId: B });
+  x.harness.flush();
+  assert.equal(x.input().props.value, "");
+  assert.equal(x.assistant.conversationId, B);
+  assert.deepEqual(x.events.at(-1), [
+    "params",
+    {
+      agentId: "agent-a",
+      conversationId: B,
+      acknowledgementId: undefined,
+      draft: false,
+      openLatest: false,
+    },
+  ]);
+  x.chooseAgent();
+  x.all()
+    .find((node) => node.type === "WorkspaceChatList")!
+    .props.onSelect({ kind: "agent", agentId: "agent-a" });
+  x.harness.flush();
+  assert.deepEqual(x.events.at(-1), [
+    "params",
+    {
+      agentId: "agent-a",
+      conversationId: undefined,
+      acknowledgementId: undefined,
+      draft: true,
+      openLatest: false,
     },
   ]);
   x.harness.unmount();

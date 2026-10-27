@@ -102,6 +102,7 @@ function content(root: Element): string {
 }
 
 type SetupOptions = {
+  mode?: "drawer" | "picker";
   history?: "loaded" | "empty" | "pending" | "error";
   agent?: Partial<AssistantAgent>;
   online?: boolean;
@@ -123,6 +124,7 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
   const threadOverrides = options.chats;
   const historyState = options.history ?? "loaded";
   const props = {
+    mode: options.mode,
     visible: true,
     current,
     onCreateAgent: () => creations.push("agent"),
@@ -133,7 +135,10 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     },
   };
   const harness = hookHarness<Element>({
-    "../AgentAvatar": { AgentAvatar: "AgentAvatar", AgentAvatarStack: "AgentAvatarStack" },
+    "../AgentAvatar": {
+      AgentAvatar: "AgentAvatar",
+      AgentAvatarStack: "AgentAvatarStack",
+    },
     "react/jsx-runtime": {
       jsx: (type: unknown, props: unknown) => ({ type, props }),
       jsxs: (type: unknown, props: unknown) => ({ type, props }),
@@ -154,6 +159,7 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     "lucide-react-native": Object.fromEntries(
       [
         "Bot",
+        "Check",
         "ChevronDown",
         "ChevronRight",
         "MessageSquare",
@@ -370,7 +376,7 @@ test("opening another agent collapses the first and queries only the expanded hi
   assert.equal(expanded.length, 1);
   assert.equal(
     expanded[0]?.props.accessibilityLabel,
-    "Collapse chats for Agent 2",
+    "Collapse chats for Agent 2, Personal",
   );
   assert.equal(env.historyQuery().queryKey.at(-1), "agent-2");
   assert.equal(env.chatRows().length, 5);
@@ -405,7 +411,9 @@ test("the all-agents browser reaches hidden agents and chats while both previews
     env
       .agentRows()
       .some(
-        (row) => row.props.accessibilityLabel === "Collapse chats for Agent 7",
+        (row) =>
+          row.props.accessibilityLabel ===
+          "Collapse chats for Agent 7, Personal",
       ),
   );
   assert.equal(env.chatRows().length, 5);
@@ -785,76 +793,82 @@ test("a saved conversation remains navigable if its agent is deleted while the b
   env.harness.unmount();
 });
 
-test("channel bots form counted sub-thread groups, keep the current child visible, and expand more in place", () => {
-  const source = chatsFor("agent-1");
-  const channels = source.map((thread, index) =>
-    conversationSchema.parse({
-      ...thread,
-      channel: {
-        platform: "telegram",
-        channel_agent_id: "bot-1",
-        bot_label: "Support bot",
-        chat_id: `chat-${index}`,
-        chat_title: `Customer ${index + 1}`,
-        parent_chat_id: "support-room",
-        parent_title: "Support room",
-        thread_id: `topic-${index}`,
-      },
-      pending_acknowledgements: index === 7 ? 1 : 0,
-    }),
-  );
-  const current = {
-    kind: "agent" as const,
-    agentId: "agent-1",
-    conversationId: channels[7]!.id,
-  };
-  const env = setup(current, { chats: channels });
-  const bot = env.label("Collapse chats for Support bot");
-  assert.equal(bot.props.accessibilityState.expanded, true);
-  assert.match(bot.props.accessibilityLabel, /Telegram · 8 chats · Needs you/);
-  assert.equal(
-    env.chatRows().length,
-    6,
-    "the current channel child stays visible beyond the first five",
-  );
-  const selected = env.label(
-    "Open chat Customer 8 with Agent 1, Needs you, current thread",
-  );
-  assert.equal(selected.props.accessibilityState.selected, true);
-  assert.ok(content(env.harness.flush()).includes("Support room"));
-  assert.ok(
-    env
-      .all()
-      .some((row) => row.type === "Text" && content(row).includes("Needs you")),
-  );
-  env.more("Show 2 more");
-  assert.equal(env.chatRows().length, 8);
-  const rows = env.all();
-  assert.ok(
-    rows.findIndex(
-      (row) => row.props.accessibilityLabel === "New chat with Agent 1",
-    ) >
-      rows
-        .map((row) =>
-          Boolean(row.props.accessibilityLabel?.startsWith("Open chat ")),
-        )
-        .lastIndexOf(true),
-  );
-  env.press("Collapse chats for Support bot");
-  assert.equal(env.chatRows().length, 0);
-  env.setCurrent({ ...current, conversationId: channels[6]!.id });
-  assert.equal(
-    env.label("Collapse chats for Support bot").props.accessibilityState
-      .expanded,
-    true,
-    "opening another child unfolds its bot again",
-  );
-  env.press("Open chat Customer 7 with Agent 1, current thread");
-  assert.deepEqual(env.selections, [
-    { ...current, conversationId: channels[6]!.id },
-  ]);
-  env.harness.unmount();
-});
+for (const mode of ["drawer", "picker"] as const)
+  test(`${mode}: channel bots form counted sub-thread groups, keep the current child visible, and expand more in place`, () => {
+    const source = chatsFor("agent-1");
+    const channels = source.map((thread, index) =>
+      conversationSchema.parse({
+        ...thread,
+        channel: {
+          platform: "telegram",
+          channel_agent_id: "bot-1",
+          bot_label: "Support bot",
+          chat_id: `chat-${index}`,
+          chat_title: `Customer ${index + 1}`,
+          parent_chat_id: "support-room",
+          parent_title: "Support room",
+          thread_id: `topic-${index}`,
+        },
+        pending_acknowledgements: index === 7 ? 1 : 0,
+      }),
+    );
+    const current = {
+      kind: "agent" as const,
+      agentId: "agent-1",
+      conversationId: channels[7]!.id,
+    };
+    const env = setup(current, { chats: channels, mode });
+    const bot = env.label("Collapse chats for Support bot");
+    assert.equal(bot.props.accessibilityState.expanded, true);
+    assert.match(
+      bot.props.accessibilityLabel,
+      /Telegram · 8 chats · Needs you/,
+    );
+    assert.equal(
+      env.chatRows().length,
+      6,
+      "the current channel child stays visible beyond the first five",
+    );
+    const selected = env.label(
+      "Open chat Customer 8 with Agent 1, Needs you, current thread",
+    );
+    assert.equal(selected.props.accessibilityState.selected, true);
+    assert.ok(content(env.harness.flush()).includes("Support room"));
+    assert.ok(
+      env
+        .all()
+        .some(
+          (row) => row.type === "Text" && content(row).includes("Needs you"),
+        ),
+    );
+    env.more("Show 2 more");
+    assert.equal(env.chatRows().length, 8);
+    const rows = env.all();
+    assert.ok(
+      rows.findIndex(
+        (row) => row.props.accessibilityLabel === "New chat with Agent 1",
+      ) >
+        rows
+          .map((row) =>
+            Boolean(row.props.accessibilityLabel?.startsWith("Open chat ")),
+          )
+          .lastIndexOf(true),
+    );
+    env.press("Collapse chats for Support bot");
+    assert.equal(env.chatRows().length, 0);
+    env.setCurrent({ ...current, conversationId: channels[6]!.id });
+    assert.equal(
+      env.label("Collapse chats for Support bot").props.accessibilityState
+        .expanded,
+      true,
+      "opening another child unfolds its bot again",
+    );
+    env.press("Open chat Customer 7 with Agent 1, current thread");
+    assert.deepEqual(env.selections, [
+      { ...current, conversationId: channels[6]!.id },
+    ]);
+    env.harness.unmount();
+  });
 
 test("thread rows show newest first, relative times, running and needs-you states, and fold with their agent", () => {
   const source = chatsFor("agent-1");
@@ -912,5 +926,43 @@ test("expanded agent is a native sticky header only while its threads remain in 
   assert.deepEqual(plain(scroll().props.stickyHeaderIndices), [index]);
   env.press("Collapse chats for Agent 1");
   assert.deepEqual(plain(scroll().props.stickyHeaderIndices), []);
+  env.harness.unmount();
+});
+
+test("agent picker reuses the thread hierarchy without crew or creation sections", () => {
+  const env = setup(
+    { kind: "agent", agentId: "agent-1", conversationId: conversationId(101) },
+    { mode: "picker" },
+  );
+  assert.equal(env.groupRows().length, 0);
+  assert.equal(
+    env.all().some((row) => row.props.accessibilityLabel === "New crew"),
+    false,
+  );
+  assert.ok(
+    env.chatRows().some((row) => row.props.accessibilityState?.selected),
+  );
+  assert.ok(
+    env
+      .all()
+      .some(
+        (row) => row.type === "AgentAvatar" && row.props.agent.id === "agent-1",
+      ),
+  );
+  assert.ok(
+    env.label("Collapse chats for Agent 1").props.accessibilityState.selected,
+  );
+  env.press("Expand chats for Agent 2");
+  assert.equal(env.selections.length, 0);
+  assert.equal(env.historyQuery().queryKey.at(-1), "agent-2");
+  assert.ok(env.chatRows().length > 0);
+  env.press("Collapse chats for Agent 2");
+  assert.equal(env.chatRows().length, 0);
+  env.press("Expand chats for Agent 2");
+  env.press("New chat with Agent 2");
+  assert.deepEqual(env.selections.at(-1), {
+    kind: "agent",
+    agentId: "agent-2",
+  });
   env.harness.unmount();
 });

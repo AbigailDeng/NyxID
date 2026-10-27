@@ -88,3 +88,11 @@ existing latest-thread selection; away Review includes its exact conversation
 and acknowledgement IDs, and finished-work Open uses the agent's home thread.
 Crew Open pushes the existing GroupChat route, preserving the primary draft;
 New agent and New crew open their existing guarded drawer editors.
+
+The private chat header's Choose agent sheet shares the side-menu hierarchy;
+expansion adds no route. Thread selection updates the existing Assistant or
+contextual chat route with its exact agent/conversation ID. New chat sets draft
+mode, without opening the latest saved chat. This thread links to the existing
+local Details and History sheet states; Manage agents opens the existing drawer.
+Current-thread reselect preserves unsent text, while a different thread follows
+the existing draft-clearing rule.

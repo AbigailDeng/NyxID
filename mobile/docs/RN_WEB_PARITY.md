@@ -146,3 +146,14 @@ retain source parity and do not carry an action, name or status alone. The full
 adjacent name/status uses the tested accessible theme tokens. Fixed web vectors
 and the explicit contrast exceptions are covered by `agentAvatarModel.test.ts`;
 these measurements do not claim that every decorative initial meets text AA.
+
+The header's Choose agent sheet reuses the side-menu hierarchy and live reads:
+agent avatars, explicit Personal/organization owner, current checkmark, running
+or Needs you status, recent threads and channel sub-thread groups. Tapping an
+agent discloses its threads; New chat with the agent follows them. The sheet's
+This thread card shows available title/agent/model/activity/message-count data
+and opens the existing Details/History sheets. Manage agents remains available.
+Selecting the current thread retains its unsent draft; changing thread follows
+the existing History behavior and clears the old draft. A new chat starts a
+fresh draft for the selected agent. The hierarchy owns one scroll host, retaining
+pinned headers and the bounded previews/all-items browser.

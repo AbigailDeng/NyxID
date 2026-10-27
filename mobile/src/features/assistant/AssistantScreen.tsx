@@ -1,3 +1,4 @@
+import { WorkspaceChatList } from "../../components/workspace/WorkspaceChatList";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { useChatColumn } from "../display/ChatLayoutContext";
 import { MachineToolCard } from "../machines/MachineToolCard";
@@ -1338,6 +1339,7 @@ export function AssistantScreen({
 
       <Sheet
         visible={!!sheet}
+        scroll={sheet !== "agents"}
         title={
           sheet === "agents"
             ? "Choose agent"
@@ -1350,64 +1352,96 @@ export function AssistantScreen({
         onClose={() => setSheet(undefined)}
       >
         {sheet === "agents" ? (
-          <>
-            {assistant.agentsLoading ? (
-              <ActivityIndicator color={colors.primary} />
-            ) : null}
-            {assistant.agentsError ? (
-              <Notice message={assistant.agentsError} tone="error" />
-            ) : null}
-            {assistant.agents
-              .filter(
-                (agent) =>
-                  agent.status !== "destroyed" && agent.can_use === true,
+          <WorkspaceChatList
+            key={getAuthEpoch()}
+            mode="picker"
+            visible
+            current={{
+              kind: "agent",
+              agentId: currentAgent?.id ?? assistant.agentId,
+              conversationId: assistant.conversationId,
+            }}
+            onCreateAgent={() => {}}
+            onCreateGroup={() => {}}
+            scrollProps={{
+              contentContainerStyle: styles.sheetContent,
+              keyboardShouldPersistTaps: "handled",
+            }}
+            scrollHeader={
+              <Card>
+                <Label style={styles.sheetSection}>This thread</Label>
+                <Label>{conversation?.title || chatTitle}</Label>
+                <Label muted>
+                  {agentName} · {currentModelLabel}
+                </Label>
+                {conversation ? (
+                  <Label muted>
+                    {formatDate(conversation.last_message_at)} ·{" "}
+                    {conversation.message_count} messages
+                  </Label>
+                ) : null}
+                <View style={styles.row}>
+                  <ActionButton
+                    compact
+                    label="Details"
+                    variant="secondary"
+                    onPress={() => {
+                      setTitle(conversation?.title ?? "");
+                      setSheet("details");
+                    }}
+                  />
+                  <ActionButton
+                    compact
+                    label="History"
+                    variant="secondary"
+                    onPress={() => setSheet("history")}
+                  />
+                </View>
+              </Card>
+            }
+            scrollFooter={
+              <ActionButton
+                label="Manage agents"
+                variant="secondary"
+                onPress={() => {
+                  setSheet(undefined);
+                  navigation.dispatch(workspaceNavigateAction("Agents"));
+                }}
+              />
+            }
+            onSelect={(target) => {
+              if (target.kind !== "agent" || newChatDisabled) return;
+              const agent = assistant.agents.find(
+                (row) => row.id === target.agentId,
+              );
+              if (
+                !agent ||
+                agent.can_use !== true ||
+                agent.status === "destroyed"
               )
-              .map((agent) => (
-                <Pressable
-                  key={agent.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Chat with ${chatAgentLabel(agent)}`}
-                  onPress={() => {
-                    setComposerGeneration((value) => value + 1);
-                    assistant.openConversation();
-                    assistant.setModel(agent.model ?? "nyxagent/chat");
-                    navigation.setParams({
-                      agentId: agent.id,
-                      conversationId: undefined,
-                      acknowledgementId: undefined,
-                      draft: false,
-                      openLatest: true,
-                    });
-                    updateDraft("");
-                    setSheet(undefined);
-                  }}
-                >
-                  <Card>
-                    <View style={styles.row}>
-                      <AgentAvatar agent={agent} size="lg" />
-                      <Label>
-                        {chatAgentLabel(agent)}
-                        {assistant.agentId === agent.id ? " · Selected" : ""}
-                      </Label>
-                    </View>
-                    <Label muted>
-                      {agent.owner_kind === "org"
-                        ? (agent.owner_name ?? "Organization")
-                        : "Personal"}{" "}
-                      · @{agent.name}
-                    </Label>
-                  </Card>
-                </Pressable>
-              ))}
-            <ActionButton
-              label="Manage agents"
-              variant="secondary"
-              onPress={() => {
-                setSheet(undefined);
-                navigation.dispatch(workspaceNavigateAction("Agents"));
-              }}
-            />
-          </>
+                return;
+              const sameThread =
+                !!target.conversationId &&
+                target.conversationId === assistant.conversationId &&
+                (target.agentId === currentAgent?.id ||
+                  target.agentId === assistant.agentId);
+              if (!sameThread) {
+                setComposerGeneration((value) => value + 1);
+                assistant.openConversation(target.conversationId);
+                if (!target.conversationId)
+                  assistant.setModel(agent.model ?? "nyxagent/chat");
+                navigation.setParams({
+                  agentId: agent.id,
+                  conversationId: target.conversationId,
+                  acknowledgementId: undefined,
+                  draft: !target.conversationId,
+                  openLatest: false,
+                });
+                updateDraft("");
+              }
+              setSheet(undefined);
+            }}
+          />
         ) : null}
         {sheet === "history" ? (
           <>
@@ -1681,7 +1715,9 @@ function Sheet({
   title,
   onClose,
   children,
+  scroll = true,
 }: {
+  scroll?: boolean;
   visible: boolean;
   title: string;
   onClose: () => void;
@@ -1707,12 +1743,16 @@ function Sheet({
             <X size={22} color={colors.textSecondary} />
           </IconButton>
         </View>
-        <ScrollView
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={styles.sheetContent}
-        >
-          {children}
-        </ScrollView>
+        {scroll ? (
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.sheetContent}
+          >
+            {children}
+          </ScrollView>
+        ) : (
+          <View style={styles.fill}>{children}</View>
+        )}
       </View>
     </Modal>
   );
@@ -1807,6 +1847,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     gap: 16,
   },
+  sheetSection: { fontFamily: fonts.bodySemi, fontSize: 13 },
   sheetTitle: { fontFamily: fonts.displaySemi, fontSize: 22, lineHeight: 30 },
   sheetContent: { padding: 20, paddingBottom: 40, gap: 14 },
 });
