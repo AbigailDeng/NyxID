@@ -6,9 +6,15 @@ import { createWorkspaceFocusState } from "../../lib/accessibility/workspaceFocu
 
 type Element = { type: unknown; props: Record<string, any>; key?: unknown };
 
-async function setup(platform: "ios" | "android", initiallyVisible = false) {
+async function setup(
+  platform: "ios" | "android",
+  initiallyVisible = false,
+  reduceMotion = false,
+) {
   let visible = initiallyVisible;
   let dismissed = 0;
+  let target: number | null = 90;
+  let authEpoch = 0;
   let onDismiss: () => void = () => {
     dismissed++;
   };
@@ -17,6 +23,7 @@ async function setup(platform: "ios" | "android", initiallyVisible = false) {
   const focus = createWorkspaceFocusState(
     (tag) => focused.push(tag),
     (callback) => scheduledFocus.push(callback),
+    () => authEpoch,
   );
   const animations: {
     stopped: boolean;
@@ -50,7 +57,7 @@ async function setup(platform: "ios" | "android", initiallyVisible = false) {
       useWindowDimensions: () => ({ width: 400 }),
       AccessibilityInfo: {
         addEventListener: () => ({ remove() {} }),
-        isReduceMotionEnabled: async () => false,
+        isReduceMotionEnabled: async () => reduceMotion,
       },
       Animated: {
         Value,
@@ -83,15 +90,26 @@ async function setup(platform: "ios" | "android", initiallyVisible = false) {
     visible: boolean;
     onClose: () => void;
     onDismiss: () => void;
+    initialFocusTarget: () => number | null;
     children: null;
   }) => Element;
   harness.mount(() =>
-    component({ visible, onClose() {}, onDismiss, children: null }),
+    component({
+      visible,
+      onClose() {},
+      onDismiss,
+      initialFocusTarget: () => target,
+      children: null,
+    }),
   );
   await harness.settle();
   return {
     focus,
     focused,
+    changeAuth: () => authEpoch++,
+    setFocusTarget: (next: number | null) => {
+      target = next;
+    },
     flushFocus: () => {
       while (scheduledFocus.length) scheduledFocus.shift()!();
     },
@@ -303,4 +321,68 @@ test("each completed iOS menu cycle gets a fresh Modal owner with no nested moda
     );
   }
   env.harness.unmount();
+});
+
+test("menu Close receives live focus once after native presentation and entrance, including reduced motion", async () => {
+  for (const platform of ["ios", "android"] as const) {
+    for (const reduced of [false, true]) {
+      const env = await setup(platform, false, reduced);
+      env.setVisible(true);
+      env.flushFocus();
+      assert.deepEqual(env.focused, [], "wait for native presentation");
+      env.show();
+      if (!reduced) {
+        env.flushFocus();
+        assert.deepEqual(env.focused, [], "wait for entrance completion");
+        env.finishAnimation();
+      }
+      env.setFocusTarget(100);
+      env.flushFocus();
+      assert.deepEqual(
+        env.focused,
+        [100],
+        "resolve the current mounted handle",
+      );
+      env.harness.render();
+      env.flushFocus();
+      assert.deepEqual(env.focused, [100], "rerender cannot steal focus");
+      env.setVisible(false);
+      if (!reduced) env.finishAnimation();
+      if (platform === "ios") {
+        env.modal().onDismiss();
+        env.harness.flush();
+      }
+      env.setFocusTarget(110);
+      env.setVisible(true);
+      env.show();
+      if (!reduced) env.finishAnimation();
+      env.flushFocus();
+      assert.deepEqual(
+        env.focused,
+        [100, 110],
+        "a later presentation focuses its own control",
+      );
+      env.harness.unmount();
+    }
+  }
+});
+
+test("closing, unmounting or changing auth cancels queued menu presentation focus", async () => {
+  for (const cancel of [
+    "close",
+    "unmount",
+    "auth",
+    "auth-before-entrance",
+  ] as const) {
+    const env = await setup("ios", true);
+    env.show();
+    if (cancel === "auth-before-entrance") env.changeAuth();
+    env.finishAnimation();
+    if (cancel === "close") env.setVisible(false);
+    if (cancel === "unmount") env.harness.unmount();
+    if (cancel === "auth") env.changeAuth();
+    env.flushFocus();
+    assert.deepEqual(env.focused, [], cancel);
+    if (cancel !== "unmount") env.harness.unmount();
+  }
 });

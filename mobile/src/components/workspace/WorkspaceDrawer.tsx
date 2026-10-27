@@ -1,4 +1,12 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useRef } from "react";
+import {
+  findNodeHandle,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   Bot,
@@ -62,6 +70,7 @@ export function WorkspaceDrawer({
   onCreateGroup: () => void;
 }) {
   const { colors } = useTheme();
+  const closeButton = useRef<View>(null);
   const profile = useQuery({
     queryKey: ["account", "profile"],
     queryFn: ({ signal }) => getCurrentUserProfileRequest(signal),
@@ -74,6 +83,7 @@ export function WorkspaceDrawer({
       visible={visible}
       onClose={onClose}
       onDismiss={onDismiss}
+      initialFocusTarget={() => findNodeHandle(closeButton.current)}
     >
       <SafeAreaView
         style={[
@@ -86,6 +96,7 @@ export function WorkspaceDrawer({
             NyxID
           </Text>
           <Pressable
+            ref={closeButton}
             accessibilityRole="button"
             accessibilityLabel="Close navigation"
             onPress={onClose}

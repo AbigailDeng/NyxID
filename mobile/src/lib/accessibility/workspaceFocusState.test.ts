@@ -209,3 +209,45 @@ test("a complete menu presentation cancels queued focus even before the schedule
   flush();
   assert.deepEqual(focused, [30]);
 });
+
+test("native modal focus requires current ownership and resolves a live target only once", () => {
+  const { state, focused, flush } = setup();
+  const owner = Symbol("menu");
+  state.focusModalOnce(owner, () => 10);
+  flush();
+  assert.deepEqual(focused, [], "an unpresented menu cannot request focus");
+  state.setModalActive(owner, true);
+  let target: number | null = null;
+  state.focusModalOnce(owner, () => target);
+  flush();
+  assert.deepEqual(
+    focused,
+    [],
+    "a missing/unmounted control cannot receive focus",
+  );
+  state.focusModalOnce(owner, () => target);
+  target = 20;
+  flush();
+  assert.deepEqual(focused, [20]);
+  state.focusModalOnce(owner, () => 30);
+  flush();
+  assert.deepEqual(
+    focused,
+    [20],
+    "focus is requested once per native presentation",
+  );
+  state.setModalActive(owner, false);
+  state.setModalActive(owner, true);
+  state.focusModalOnce(owner, () => 40);
+  state.setModalActive(owner, false);
+  state.setModalActive(owner, true);
+  flush();
+  assert.deepEqual(
+    focused,
+    [20],
+    "a new presentation rejects the old queued request",
+  );
+  state.focusModalOnce(owner, () => 50);
+  flush();
+  assert.deepEqual(focused, [20, 50]);
+});

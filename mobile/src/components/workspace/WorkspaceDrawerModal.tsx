@@ -23,11 +23,13 @@ export function WorkspaceDrawerModal({
   visible,
   onClose,
   onDismiss,
+  initialFocusTarget,
   children,
 }: {
   visible: boolean;
   onClose: () => void;
   onDismiss?: () => void;
+  initialFocusTarget: () => number | null;
   children: ReactNode;
 }) {
   const { width } = useWindowDimensions();
@@ -43,8 +45,12 @@ export function WorkspaceDrawerModal({
   const [presentationId, setPresentationId] = useState(0);
   const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
   const focusOwner = useRef(Symbol("navigation-modal")).current;
+  const focusRevision = useRef(0);
+  const focusTargetRef = useRef(initialFocusTarget);
+  focusTargetRef.current = initialFocusTarget;
 
   useLayoutEffect(() => {
+    focusRevision.current++;
     if (visible) workspaceFocus.setModalActive(focusOwner, true);
   }, [focusOwner, visible]);
   useLayoutEffect(
@@ -107,15 +113,23 @@ export function WorkspaceDrawerModal({
     if (!mounted || !presented || reduceMotion === null) return;
 
     let active = true;
-    const finishClose = () => {
-      if (active && !visibleRef.current) {
+    const finishTransition = () => {
+      if (!active) return;
+      if (visibleRef.current) {
+        const admittedRevision = focusRevision.current;
+        workspaceFocus.focusModalOnce(focusOwner, () =>
+          visibleRef.current && focusRevision.current === admittedRevision
+            ? focusTargetRef.current()
+            : null,
+        );
+      } else {
         setPresented(false);
         setMounted(false);
       }
     };
     if (reduceMotion) {
       progress.setValue(visible ? 1 : 0);
-      finishClose();
+      finishTransition();
       return;
     }
 
@@ -126,14 +140,14 @@ export function WorkspaceDrawerModal({
       useNativeDriver: true,
     });
     animation.start(({ finished }) => {
-      if (finished) finishClose();
+      if (finished) finishTransition();
     });
     return () => {
       // A new visibility value may reverse a still-running native animation.
       active = false;
       animation.stop();
     };
-  }, [mounted, presented, progress, reduceMotion, visible]);
+  }, [focusOwner, mounted, presented, progress, reduceMotion, visible]);
 
   return (
     <Modal

@@ -7,7 +7,10 @@ export function createWorkspaceFocusState(
   authority: () => number = () => 0,
 ) {
   const controls = new Map<symbol, Control>();
-  const modalOwners = new Set<symbol>();
+  const modalOwners = new Map<
+    symbol,
+    { authority: number; focused: boolean; target?: () => number | null }
+  >();
   const drawers = new Map<
     string,
     { target: () => number | null; focused: boolean }
@@ -23,6 +26,7 @@ export function createWorkspaceFocusState(
     admittedAuthority = authority();
     controls.clear();
     drawers.clear();
+    for (const modal of modalOwners.values()) modal.target = undefined;
     preferred = undefined;
     pending = undefined;
     revision++;
@@ -60,12 +64,38 @@ export function createWorkspaceFocusState(
     setModalActive(owner: symbol, active: boolean) {
       syncAuthority();
       if (active) {
-        modalOwners.add(owner);
+        if (!modalOwners.has(owner))
+          modalOwners.set(owner, {
+            authority: admittedAuthority,
+            focused: false,
+          });
         pending = undefined;
         revision++;
       } else {
         modalOwners.delete(owner);
       }
+    },
+    focusModalOnce(owner: symbol, target: () => number | null) {
+      syncAuthority();
+      const modal = modalOwners.get(owner);
+      if (!modal || modal.focused || modal.authority !== admittedAuthority)
+        return;
+      modal.target = target;
+      const scheduledRevision = revision;
+      schedule(() => {
+        syncAuthority();
+        if (
+          scheduledRevision !== revision ||
+          modalOwners.get(owner) !== modal ||
+          modal.focused
+        )
+          return;
+        const current = modal.target?.();
+        if (current) {
+          modal.focused = true;
+          focus(current);
+        }
+      });
     },
     context(nextScope: string | undefined, nextObscured: boolean) {
       syncAuthority();
