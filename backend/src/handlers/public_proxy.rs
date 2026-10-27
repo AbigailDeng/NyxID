@@ -169,7 +169,7 @@ fn public_proxy_target(mut service: DownstreamService) -> proxy_service::ProxyTa
         base_url: service.base_url.clone(),
         auth_method: "none".to_string(),
         auth_key_name: String::new(),
-        credential: String::new(),
+        credential: Default::default(),
         catalog_default_headers: Vec::new(),
         user_service_default_headers: Vec::new(),
         ws_frame_injections: Vec::new(),
@@ -292,6 +292,7 @@ mod tests {
 
     fn service() -> DownstreamService {
         DownstreamService {
+            secret_context_versions: Default::default(),
             offering_kind: Default::default(),
             topics: Vec::new(),
             supplier: None,
@@ -312,6 +313,7 @@ mod tests {
             credential_encrypted: vec![1, 2, 3],
             platform_key: None,
             auth_type: None,
+            auth_scheme: None,
             openapi_spec_url: None,
             asyncapi_spec_url: None,
             streaming_supported: false,
@@ -322,6 +324,9 @@ mod tests {
             is_active: true,
             created_by: "admin".to_string(),
             catalog_manager_created: false,
+            tools_manager_created: false,
+            icon_url: None,
+            tools_credential_frozen: false,
             identity_propagation_mode: "headers".to_string(),
             identity_include_user_id: true,
             identity_include_email: true,
@@ -349,6 +354,7 @@ mod tests {
             default_request_headers: None,
             ws_frame_injections: Vec::new(),
             developer_app_ids: None,
+            introspection_client_ids: None,
             token_exchange_config: None,
             anonymous_endpoints: vec![AnonymousEndpointRule {
                 id: "rule".to_string(),
@@ -368,7 +374,7 @@ mod tests {
         let target = public_proxy_target(service());
         assert_eq!(target.auth_method, "none");
         assert_eq!(target.auth_key_name, "");
-        assert_eq!(target.credential, "");
+        assert_eq!(target.credential.as_str(), "");
         assert!(target.catalog_default_headers.is_empty());
         assert_eq!(target.service.identity_propagation_mode, "none");
         assert!(!target.service.forward_access_token);
@@ -436,6 +442,7 @@ mod tests {
         /// single enabled `GET /public/**` anonymous rule with `daily_quota`.
         fn public_service(slug: &str, base_url: &str, daily_quota: u32) -> DownstreamService {
             DownstreamService {
+                secret_context_versions: Default::default(),
                 offering_kind: Default::default(),
                 topics: Vec::new(),
                 supplier: None,
@@ -456,6 +463,7 @@ mod tests {
                 credential_encrypted: vec![],
                 platform_key: None,
                 auth_type: None,
+                auth_scheme: None,
                 openapi_spec_url: None,
                 asyncapi_spec_url: None,
                 streaming_supported: false,
@@ -466,6 +474,9 @@ mod tests {
                 is_active: true,
                 created_by: "admin".to_string(),
                 catalog_manager_created: false,
+                tools_manager_created: false,
+                icon_url: None,
+                tools_credential_frozen: false,
                 identity_propagation_mode: "none".to_string(),
                 identity_include_user_id: false,
                 identity_include_email: false,
@@ -493,6 +504,7 @@ mod tests {
                 default_request_headers: None,
                 ws_frame_injections: Vec::new(),
                 developer_app_ids: None,
+                introspection_client_ids: None,
                 token_exchange_config: None,
                 anonymous_endpoints: vec![AnonymousEndpointRule {
                     id: Uuid::new_v4().to_string(),
@@ -874,6 +886,7 @@ mod tests {
             };
             let mut service = public_service("pub", "https://example.test", 100);
             service.billing = Some(ServiceBilling {
+                managed_execution: None,
                 platform_billable: false,
                 platform_charge_nyxid_credentials_only: false,
                 platform_metric: None,

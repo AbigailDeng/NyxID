@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { deferred, hookHarness } from "../assistant/assistantHookTestHarness";
 import { grantSignature } from "./agentContracts";
@@ -126,7 +126,7 @@ function setup(
   });
   const exports = harness.load(
     fileURLToPath(new URL("./AgentPermissionsField.tsx", import.meta.url)),
-  ) as Record<string, (props: SheetProps) => Element>;
+  ) as { AgentPermissionsField: (props: SheetProps) => Element; AgentPermissionsSheet: (props: SheetProps) => Element };
   harness.mount(() =>
     component === "field"
       ? exports.AgentPermissionsField(props)
@@ -136,6 +136,7 @@ function setup(
   const one = (predicate: (element: Element) => boolean) => {
     const result = all().filter(predicate);
     assert.equal(result.length, 1, "Expected exactly one matching element");
+    assert.ok(result[0]);
     return result[0];
   };
   const label = (text: string) =>

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import { deferred, hookHarness } from "../assistantHookTestHarness";
 import type { AssistantVoiceClientOptions } from "./AssistantVoiceClient";
 import type {

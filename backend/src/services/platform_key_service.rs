@@ -24,11 +24,14 @@ pub async fn credential_configured(
     keys: &crate::crypto::aes::EncryptionKeys,
     service: &DownstreamService,
 ) -> Option<bool> {
+    if super::catalog_credential_record_service::validate(service).is_err() {
+        return None;
+    }
     if service.credential_encrypted.is_empty() {
         return Some(false);
     }
-    match keys.decrypt(&service.credential_encrypted).await {
-        Ok(material) => Some(!zeroize::Zeroizing::new(material).is_empty()),
+    match super::catalog_credential_record_service::bytes(keys, service).await {
+        Ok(material) => Some(!material.is_empty()),
         Err(_) => None,
     }
 }
@@ -57,6 +60,12 @@ pub fn legacy_public_master(service: &DownstreamService) -> bool {
 
 pub fn has_platform_key(service: &DownstreamService) -> bool {
     PlatformKeyView::from(service).has_platform_key()
+}
+
+/// Linked catalog rows can declare `none` while their provider requirement
+/// supplies credential injection. Only provider-less rows are truly no-auth.
+pub fn no_auth_platform_service(service: &DownstreamService) -> bool {
+    service.auth_method == "none" && service.provider_config_id.is_none()
 }
 
 /// The exact fields needed for metadata-only platform ACL checks. Listings can
@@ -224,7 +233,18 @@ impl OwnerGrants {
             .await?
             .try_collect()
             .await?;
-        let actor_active = owners.iter().any(|u| u.id == owner_id);
+        let actor = owners.iter().find(|u| u.id == owner_id);
+        let actor_active = actor.is_some();
+        let primary_org_id = actor.and_then(|user| user.primary_org_id.as_deref());
+        let mut ordered_memberships = memberships.to_vec();
+        ordered_memberships.sort_by(|left, right| {
+            let left_is_primary = primary_org_id == Some(left.org_user_id.as_str());
+            let right_is_primary = primary_org_id == Some(right.org_user_id.as_str());
+            right_is_primary
+                .cmp(&left_is_primary)
+                .then_with(|| left.created_at.cmp(&right.created_at))
+                .then_with(|| left.org_user_id.cmp(&right.org_user_id))
+        });
         let org_owner_ids = owners
             .iter()
             .filter(|u| u.user_type.is_org())
@@ -253,7 +273,7 @@ impl OwnerGrants {
             active_owner_ids,
             readable_owner_ids,
             org_owner_ids,
-            memberships: memberships.to_vec(),
+            memberships: ordered_memberships,
         })
     }
 
@@ -402,7 +422,12 @@ pub async fn require(
     service: &DownstreamService,
     owner_id: &str,
 ) -> AppResult<()> {
-    if available(db, service, owner_id).await? {
+    let allowed = if no_auth_platform_service(service) && service.platform_key.is_some() {
+        no_auth_available_with_grants(service, owner_id, &OwnerGrants::load(db, owner_id).await?)
+    } else {
+        available(db, service, owner_id).await?
+    };
+    if allowed {
         Ok(())
     } else {
         Err(AppError::NotFound(
@@ -475,7 +500,7 @@ pub fn no_auth_available_with_grants(
     grants: &OwnerGrants,
 ) -> bool {
     service.is_active
-        && service.auth_method == "none"
+        && no_auth_platform_service(service)
         && service.service_type == "http"
         && service.service_category == "internal"
         && service

@@ -82,6 +82,7 @@ pub async fn require_current_bot(db: &Database, bot: &ChannelBot) -> AppResult<(
 #[derive(Clone, Debug)]
 pub struct TransferPreview {
     pub kind: ResourceKind,
+    pub tool_transfer: bool,
     pub resource_id: String,
     pub name: String,
     pub previous_owner_user_id: String,
@@ -511,6 +512,8 @@ async fn inspect(
         "person"
     };
     Ok(TransferPreview {
+        tool_transfer: kind == ResourceKind::Service
+            && raw.get_str("offering_kind").ok() == Some("tool"),
         kind,
         resource_id: resource_id.into(),
         name,
@@ -544,22 +547,48 @@ pub async fn preview(
     destination: &str,
     capacity: u32,
 ) -> AppResult<TransferPreview> {
-    preview_with_agent(db, actor, None, kind, resource_id, destination, capacity).await
+    preview_with_agent(
+        db,
+        actor,
+        None,
+        true,
+        kind,
+        resource_id,
+        destination,
+        capacity,
+    )
+    .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn preview_with_agent(
     db: &Database,
     actor: &str,
     api_key_id: Option<&str>,
+    first_party_human: bool,
     kind: ResourceKind,
     resource_id: &str,
     destination: &str,
     capacity: u32,
 ) -> AppResult<TransferPreview> {
+    if kind == ResourceKind::ChannelBot {
+        super::platform_bot_authority::refuse_platform_bot(db, resource_id).await?;
+    }
     let mut session = db.client().start_session().await?;
     session.start_transaction().await?;
     let owner = access::resource_owner(db, &mut session, kind, resource_id).await?;
-    access::authorize(db, &mut session, actor, api_key_id, &owner, false).await?;
+    access::authorize_resource(
+        db,
+        &mut session,
+        actor,
+        api_key_id,
+        first_party_human,
+        kind,
+        resource_id,
+        &owner,
+        false,
+    )
+    .await?;
     let result = inspect(
         db,
         &mut session,
@@ -577,6 +606,7 @@ pub async fn preview_with_agent(
 pub struct TransferCommand<'a> {
     pub actor: &'a str,
     pub api_key_id: Option<&'a str>,
+    pub first_party_human: bool,
     pub kind: ResourceKind,
     pub resource_id: &'a str,
     pub destination: &'a str,
@@ -585,10 +615,15 @@ pub struct TransferCommand<'a> {
     pub capacity: u32,
 }
 
-pub async fn transfer(db: &Database, command: TransferCommand<'_>) -> AppResult<OwnershipTransfer> {
+pub async fn transfer_with_keys(
+    db: &Database,
+    keys: Option<&crate::crypto::aes::EncryptionKeys>,
+    command: TransferCommand<'_>,
+) -> AppResult<OwnershipTransfer> {
     let TransferCommand {
         actor,
         api_key_id,
+        first_party_human,
         kind,
         resource_id,
         destination,
@@ -596,6 +631,9 @@ pub async fn transfer(db: &Database, command: TransferCommand<'_>) -> AppResult<
         expected_version,
         capacity,
     } = command;
+    if kind == ResourceKind::ChannelBot {
+        super::platform_bot_authority::refuse_platform_bot(db, resource_id).await?;
+    }
     valid_id(request_id)?;
     if Uuid::parse_str(request_id).is_ok_and(|id| id.get_version_num() != 4) {
         return Err(AppError::ValidationError(
@@ -638,15 +676,9 @@ pub async fn transfer(db: &Database, command: TransferCommand<'_>) -> AppResult<
     {
         return if receipt_matches(&receipt) {
             let mut session = db.client().start_session().await?;
-            access::authorize(
-                &db,
-                &mut session,
-                &actor,
-                api_key_id.as_deref(),
-                &receipt.previous_owner_user_id,
-                false,
-            )
-            .await?;
+            session.start_transaction().await?;
+            access::authorize_replay(&db, &mut session, &receipt, first_party_human).await?;
+            session.commit_transaction().await?;
             Ok(receipt)
         } else {
             Err(AppError::Conflict(
@@ -655,7 +687,85 @@ pub async fn transfer(db: &Database, command: TransferCommand<'_>) -> AppResult<
         };
     }
 
-    access::require_resource_access(&db, &actor, api_key_id.as_deref(), kind, &resource_id).await?;
+    access::require_resource_access(
+        &db,
+        &actor,
+        api_key_id.as_deref(),
+        first_party_human,
+        kind,
+        &resource_id,
+    )
+    .await?;
+    // Authenticate captured material after ACL admission and before the retrying
+    // transaction. The exact raw source predicate fences ownership, ciphertext,
+    // markers, headers and formerly absent fields together at commit.
+    let catalog_rebind = if kind == ResourceKind::Service {
+        let source = db
+            .collection::<Document>(SERVICES)
+            .find_one(doc! {"_id":&resource_id,"is_active":true})
+            .await?
+            .ok_or_else(|| AppError::Conflict("Transfer source changed".into()))?;
+        let service: DownstreamService = bson::from_document(source.clone())
+            .map_err(|_| AppError::Internal("Invalid catalog transfer storage".into()))?;
+        let owner = super::catalog_credential_record_service::owner(&service)?;
+        let rebound = super::default_header_service::rebind(
+            keys,
+            SERVICES,
+            &resource_id,
+            owner,
+            &destination,
+            service.default_request_headers.as_deref(),
+        )
+        .await?;
+        let mut set = Document::new();
+        if service.default_request_headers.is_some() {
+            set.insert(
+                "default_request_headers",
+                bson::to_bson(&rebound)
+                    .map_err(|_| AppError::Internal("Header transfer encoding failed".into()))?,
+            );
+        }
+        if !service.credential_encrypted.is_empty() {
+            let keys = keys.ok_or_else(|| {
+                AppError::Conflict("Credential encryption is required for this transfer".into())
+            })?;
+            let plaintext = super::catalog_credential_record_service::bytes(keys, &service).await?;
+            // Historical encrypted-empty placeholders carry no live credential.
+            let encrypted = if plaintext.is_empty() {
+                Vec::new()
+            } else {
+                super::catalog_credential_record_service::encrypt(
+                    keys,
+                    &service.id,
+                    &destination,
+                    &plaintext,
+                )
+                .await?
+            };
+            set.insert(
+                "secret_context_versions",
+                super::catalog_credential_record_service::version_update(
+                    keys,
+                    !encrypted.is_empty(),
+                )?,
+            );
+            set.insert(
+                "credential_encrypted",
+                bson::Binary {
+                    subtype: bson::spec::BinarySubtype::Generic,
+                    bytes: encrypted,
+                },
+            );
+        } else if !service.secret_context_versions.is_empty() {
+            return Err(AppError::Internal(
+                "Invalid catalog transfer storage".into(),
+            ));
+        }
+        // SSH CA authority is platform/service-bound and does not change owner.
+        Some((source, set))
+    } else {
+        None
+    };
     let refresh_key_id = if kind == ResourceKind::ChannelBot {
         db.collection::<Document>(BOTS)
             .find_one(doc! { "_id": &resource_id, "platform": "x", "is_active": true })
@@ -683,10 +793,25 @@ pub async fn transfer(db: &Database, command: TransferCommand<'_>) -> AppResult<
         let request_id = request_id.clone();
         let receipt_matches = receipt_matches.clone();
         let refresh_lease = refresh_lease.clone();
-        crate::services::service_history::transaction::run(
+        crate::services::service_history::transaction::run_send(
             &transaction_db,
-            async move |transaction| {
-                let result: AppResult<OwnershipTransfer> = async {
+            &keys,
+            move |transaction, keys| {
+                let keys = *keys;
+                let db = db.clone();
+                let request_id = request_id.clone();
+                let receipt_matches = receipt_matches.clone();
+                let refresh_lease = refresh_lease.clone();
+                let actor = actor.clone();
+                let api_key_id = api_key_id.clone();
+                let resource_id = resource_id.clone();
+                let destination = destination.clone();
+                let expected_version = expected_version.clone();
+                let refresh_key_id = refresh_key_id.clone();
+                let catalog_rebind = catalog_rebind.clone();
+                let fresh_oauth_handle = fresh_oauth_handle.clone();
+                Box::pin(async move {
+                    let result: AppResult<OwnershipTransfer> = async {
             if let Some(receipt) = db
                 .collection::<OwnershipTransfer>(TRANSFERS)
                 .find_one(doc! { "_id": &request_id })
@@ -698,11 +823,11 @@ pub async fn transfer(db: &Database, command: TransferCommand<'_>) -> AppResult<
                         "Transfer request ID was already used for another operation".into(),
                     ));
                 }
-                access::authorize(&db, transaction, &actor, api_key_id.as_deref(), &receipt.previous_owner_user_id, false).await?;
+                access::authorize_replay(&db, transaction, &receipt, first_party_human).await?;
                 return Ok(receipt);
             }
             let owner = access::resource_owner(&db, transaction, kind, &resource_id).await?;
-            access::authorize(&db, transaction, &actor, api_key_id.as_deref(), &owner, true).await?;
+            access::authorize_resource(&db, transaction, &actor, api_key_id.as_deref(), first_party_human, kind, &resource_id, &owner, true).await?;
             let reviewed = inspect(
                 &db,
                 transaction,
@@ -717,6 +842,11 @@ pub async fn transfer(db: &Database, command: TransferCommand<'_>) -> AppResult<
                 return Err(AppError::Conflict(
                     "The resource changed. Review a fresh transfer preview".into(),
                 ));
+            }
+            // The fence bumps the bot's route revision, so it must follow the
+            // version check that hashes the bot document.
+            if kind == ResourceKind::ChannelBot {
+                super::platform_bot_authority::fence_personal_routes(&db, &resource_id, &owner, transaction).await?;
             }
             if reviewed.moves_oauth_credential
                 && reviewed.oauth_credential_id.as_deref() != refresh_key_id.as_deref()
@@ -755,27 +885,34 @@ pub async fn transfer(db: &Database, command: TransferCommand<'_>) -> AppResult<
                         "The X OAuth credential changed. Review a fresh transfer preview".into(),
                     )
                 })?;
+                let raw_key = db.collection::<Document>(USER_API_KEYS)
+                    .find_one(doc! {"_id":key_id,"user_id":&reviewed.previous_owner_user_id})
+                    .session(&mut **transaction).await?
+                    .ok_or_else(||AppError::Conflict("The X OAuth credential changed".into()))?;
+                let key: UserApiKey = bson::from_document(raw_key.clone())
+                    .map_err(|_|AppError::Internal("Invalid X OAuth credential storage".into()))?;
+                let mut key_set = if let Some(keys) = keys {
+                    super::credential_record_service::rebind_key_owner(keys, &key, &destination).await?
+                } else if key.secret_context_versions.is_empty() && !matches!(key.credential_type.as_str(), "oauth2" | "device_code") {
+                    Document::new()
+                } else {
+                    return Err(AppError::Conflict("Credential encryption is required for this transfer".into()));
+                };
+                key_set.extend(doc! {"user_id":&destination,"connection_id":&fresh_oauth_handle,
+                    "source_id":&fresh_oauth_handle,"updated_at":now});
+                let mut key_filter = super::credential_record_service::exact_source_filter(USER_API_KEYS, &raw_key)?;
+                key_filter.extend(doc! {"_id":key_id,"user_id":&reviewed.previous_owner_user_id,
+                    "source":"channel_onboarding","source_id":old_connection_id,
+                    "connection_id":old_connection_id,"status":"active"});
                 let key_update = crate::services::service_history::collection::<UserApiKey>(
                     &db,
                     USER_API_KEYS,
                 )
                 .update_one(
-                    doc! {
-                        "_id": key_id,
-                        "user_id": &reviewed.previous_owner_user_id,
-                        "source": "channel_onboarding",
-                        "source_id": old_connection_id,
-                        "connection_id": old_connection_id,
-                        "status": "active",
-                    },
-                    doc! { "$set": {
-                        "user_id": &destination,
-                        "connection_id": &fresh_oauth_handle,
-                        "source_id": &fresh_oauth_handle,
-                        "updated_at": now,
-                    } },
-                )
-                .session(&mut *transaction)
+                    key_filter,
+                    doc! { "$set": key_set },
+                );
+                let key_update = key_update.session(&mut *transaction)
                 .await?;
                 if key_update.matched_count != 1 {
                     return Err(AppError::Conflict(
@@ -816,6 +953,9 @@ pub async fn transfer(db: &Database, command: TransferCommand<'_>) -> AppResult<
             };
             let mut set = doc! { "updated_at": now };
             set.insert(owner_field, &destination);
+            if let Some((_, rebound)) = &catalog_rebind {
+                set.extend(rebound.clone());
+            }
             let mut update = doc! { "$set": set };
             if kind == ResourceKind::ChannelBot {
                 update.insert("$inc", doc! { "ownership_version": 1_i64 });
@@ -832,6 +972,10 @@ pub async fn transfer(db: &Database, command: TransferCommand<'_>) -> AppResult<
                     resource_filter.insert("user_id", &reviewed.previous_owner_user_id);
                 }
             }
+            if let Some((source, _)) = &catalog_rebind {
+                let mut exact = super::record_storage::exact_document_predicate(source);
+                resource_filter.insert("$expr", exact.remove("$expr").ok_or_else(||AppError::Internal("Catalog transfer source is invalid".into()))?);
+            }
             let resource_update = db
                 .collection::<Document>(kind.collection())
                 .update_one(resource_filter, update)
@@ -843,6 +987,7 @@ pub async fn transfer(db: &Database, command: TransferCommand<'_>) -> AppResult<
                 ));
             }
             let receipt = OwnershipTransfer {
+                tool_transfer: reviewed.tool_transfer,
                 id: request_id.clone(),
                 actor_user_id: actor.clone(),
                 actor_api_key_id: api_key_id.clone(),
@@ -861,7 +1006,8 @@ pub async fn transfer(db: &Database, command: TransferCommand<'_>) -> AppResult<
             Ok(receipt)
         }
         .await;
-                transaction_result(result)
+                    transaction_result(result)
+                })
             },
         )
     };
@@ -886,7 +1032,14 @@ pub async fn transfer(db: &Database, command: TransferCommand<'_>) -> AppResult<
                 .find_one(doc! { "_id": &request_id })
                 .await?;
             match receipt {
-                Some(receipt) if receipt_matches(&receipt) => Ok(receipt),
+                Some(receipt) if receipt_matches(&receipt) => {
+                    let mut session = db.client().start_session().await?;
+                    session.start_transaction().await?;
+                    access::authorize_replay(&db, &mut session, &receipt, first_party_human)
+                        .await?;
+                    session.commit_transaction().await?;
+                    Ok(receipt)
+                }
                 Some(_) => Err(AppError::Conflict(
                     "Transfer request ID was already used for another operation".into(),
                 )),

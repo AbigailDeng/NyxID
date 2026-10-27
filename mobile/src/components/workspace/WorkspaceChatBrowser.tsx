@@ -21,7 +21,7 @@ import { ChevronLeft, Search, X } from "lucide-react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { fonts } from "../../theme/designTokens";
 import { useTheme } from "../../theme/ThemeContext";
-import { searchDrawerItems } from "./workspaceChatList";
+import { searchDrawerItems } from "./workspaceChatListModel";
 
 export function WorkspaceChatBrowser<T extends { id: string }>({
   title,

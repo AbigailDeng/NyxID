@@ -1,6 +1,7 @@
 import { ProviderServices } from "@/components/providers/provider-services";
 import { useState } from "react";
-import type { ProviderConfig } from "@/types/api";
+import { canAdminWrite, type ProviderConfig } from "@/types/api";
+import { useAuthStore } from "@/stores/auth-store";
 import { changedFields, describeChanges, sameValue } from "@/lib/form-changes";
 import {
   useChangeReview,
@@ -71,6 +72,7 @@ function ProviderEditForm({ source }: { readonly source: ProviderConfig }) {
   const isMounted = useEditorMounted();
   const navigate = useNavigate();
   const updateMutation = useUpdateProvider(providerId);
+  const isAdmin = canAdminWrite(useAuthStore((state) => state.user));
 
   const form = useAppForm<UpdateProviderFormData>({
     resolver: zodResolver(updateProviderSchema),
@@ -118,6 +120,8 @@ function ProviderEditForm({ source }: { readonly source: ProviderConfig }) {
       payload.revocation = {
         ...provider.revocation,
         url: patch.revocation_url,
+        // Endpoint edits require a new privileged review of effect semantics.
+        effect_scope: null,
       };
     }
     if (patch.revocation_url === "") {
@@ -432,6 +436,16 @@ function ProviderEditForm({ source }: { readonly source: ProviderConfig }) {
                       <p className="text-xs text-muted-foreground">
                         Only fill in if you want to change the client secret.
                       </p>
+                      {!isAdmin && provider.has_client_secret && (
+                        <p className="text-xs text-muted-foreground">
+                          Catalog Managers: on a provider someone else
+                          created, URLs, credential mode and token settings
+                          can change only before anyone has connected, and
+                          only with the current client ID and secret
+                          re-entered here. Replacing the client requires an
+                          Admin.
+                        </p>
+                      )}
                       <FormMessage />
                     </FormItem>
                   )}
@@ -451,6 +465,29 @@ function ProviderEditForm({ source }: { readonly source: ProviderConfig }) {
                       <FormControl>
                         <Switch
                           checked={field.value ?? true}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="authorization_nonce_required"
+                  render={({ field }) => (
+                    <FormItem className="flex items-center justify-between rounded-lg border p-3">
+                      <div className="space-y-0.5">
+                        <FormLabel>Authorization nonce required</FormLabel>
+                        <p className="text-xs text-muted-foreground">
+                          Generate a fresh nonce for each hosted OAuth
+                          authorization attempt.
+                          Enable only when the provider requires it, after
+                          upgrading all backend replicas.
+                        </p>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          checked={field.value ?? false}
                           onCheckedChange={field.onChange}
                         />
                       </FormControl>
@@ -724,7 +761,8 @@ function ProviderEditForm({ source }: { readonly source: ProviderConfig }) {
                     Revocation: {provider.revocation.style},{" "}
                     {provider.revocation.url}; authentication:{" "}
                     {provider.revocation.auth}; revokes grant:{" "}
-                    {provider.revocation.revokes_grant ? "Yes" : "No"}
+                    {provider.revocation.revokes_grant ? "Yes" : "No"}; reviewed effect scope:{" "}
+                    {provider.revocation.effect_scope ?? "Unknown (remote token revocation withheld)"}
                   </p>
                 )}
               </div>

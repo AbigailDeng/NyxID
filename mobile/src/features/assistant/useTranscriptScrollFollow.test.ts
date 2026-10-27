@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import * as scrollFollower from "./assistantTranscriptScroll";
 import { hookHarness } from "./assistantHookTestHarness";
 import type { useTranscriptScrollFollow } from "./useTranscriptScrollFollow";

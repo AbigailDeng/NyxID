@@ -24,7 +24,7 @@ use crate::models::downstream_service::{
     COLLECTION_NAME as DOWNSTREAM_SERVICES, DownstreamService,
 };
 use crate::services::service_endpoint_service::{
-    EndpointInput, upsert_endpoints_additive, validate_request_content_type,
+    EndpointInput, Mutation, commit_mutation, validate_request_content_type,
     validate_response_contract,
 };
 use crate::services::{catalog_spec_registry, openapi_parser};
@@ -55,7 +55,9 @@ pub async fn sync_seeded_service_endpoints(db: &mongodb::Database) -> AppResult<
         let Some(service) = service_col.find_one(filter).await? else {
             continue; // Service not seeded on this deployment
         };
-        if crate::services::retired_service_service::is_retired(&service) {
+        if service.tools_manager_created
+            || crate::services::retired_service_service::is_retired(&service)
+        {
             continue;
         }
 
@@ -71,7 +73,13 @@ pub async fn sync_seeded_service_endpoints(db: &mongodb::Database) -> AppResult<
         };
 
         let count = inputs.len();
-        upsert_endpoints_additive(db, &service.id, inputs).await?;
+        commit_spec_inputs(
+            db,
+            &service,
+            inputs,
+            super::audit_service::audit_chain_hmac_key(),
+        )
+        .await?;
         tracing::debug!(
             slug,
             service_id = %service.id,
@@ -211,7 +219,14 @@ async fn sync_service_endpoints_from_spec_url(db: &mongodb::Database, service: &
     };
 
     let count = inputs.len();
-    match upsert_endpoints_additive(db, &service.id, inputs).await {
+    match commit_spec_inputs(
+        db,
+        service,
+        inputs,
+        super::audit_service::audit_chain_hmac_key(),
+    )
+    .await
+    {
         Ok(_) => {
             tracing::info!(
                 slug = %service.slug,
@@ -227,7 +242,8 @@ async fn sync_service_endpoints_from_spec_url(db: &mongodb::Database, service: &
 }
 
 pub fn should_auto_sync_service_endpoints(service: &DownstreamService) -> bool {
-    !crate::services::retired_service_service::is_retired(service)
+    !service.tools_manager_created
+        && !crate::services::retired_service_service::is_retired(service)
         && service.is_active
         && service.service_type == "http"
         && (service.service_category != "internal"
@@ -238,7 +254,32 @@ pub fn should_auto_sync_service_endpoints(service: &DownstreamService) -> bool {
             .is_some_and(|url| !url.is_empty())
 }
 
-/// Parse and validate the hosted overlay for a slug into endpoint inputs.
+/// Background mutations require the same initialized audit key as user writes.
+async fn commit_spec_inputs(
+    db: &mongodb::Database,
+    observed: &DownstreamService,
+    inputs: Vec<EndpointInput>,
+    audit_key: Option<&[u8]>,
+) -> AppResult<()> {
+    let key = audit_key.filter(|key| key.len() == 32).ok_or_else(|| {
+        crate::errors::AppError::Internal(
+            "Catalog spec sync requires the initialized audit-chain key".into(),
+        )
+    })?;
+    commit_mutation(
+        db,
+        observed,
+        None,
+        Mutation::Reconcile {
+            inputs,
+            authoritative: false,
+        },
+        key,
+    )
+    .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 fn seeded_endpoint_inputs(slug: &str) -> AppResult<Vec<EndpointInput>> {
     let spec = catalog_spec_registry::spec_for_slug(slug).ok_or_else(|| {
@@ -451,6 +492,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn tools_manager_spec_discovery_requires_an_explicit_authorized_write() {
+        let mut service = crate::models::downstream_service::test_helpers::dummy_service();
+        service.service_category = "internal".into();
+        service.offering_kind = crate::models::downstream_service::OfferingKind::Tool;
+        service.openapi_spec_url = Some("https://vendor.example/openapi.json".into());
+        assert!(should_auto_sync_service_endpoints(&service));
+        service.tools_manager_created = true;
+        assert!(!should_auto_sync_service_endpoints(&service));
+    }
+
+    #[test]
     fn internal_services_are_never_auto_materialized_as_tools() {
         let mut service = crate::models::downstream_service::test_helpers::dummy_service();
         service.slug = "platform-elevenlabs".to_string();
@@ -655,6 +707,235 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn lark_attachment_sync_four_slugs_adds_upload_without_changing_existing_contracts_or_generations()
+     {
+        use super::super::service_endpoint_service::endpoint_from_input;
+        use crate::models::service_endpoint::{COLLECTION_NAME, PublicationState, ServiceEndpoint};
+        let db =
+            crate::test_utils::connect_transaction_test_database("lark_attachment_catalog_sync")
+                .await;
+        super::super::audit_service::init_audit_chain_hmac_key(zeroize::Zeroizing::new([2; 32]));
+        let mut snapshots = Vec::new();
+        for slug in ["api-lark", "api-lark-bot", "api-feishu", "api-feishu-bot"] {
+            let mut service = crate::models::downstream_service::test_helpers::dummy_service();
+            service.id = uuid::Uuid::new_v4().to_string();
+            service.slug = slug.into();
+            service.created_by = "system".into();
+            db.collection::<DownstreamService>(DOWNSTREAM_SERVICES)
+                .insert_one(&service)
+                .await
+                .unwrap();
+            for input in hosted_endpoint_inputs(&service)
+                .unwrap()
+                .into_iter()
+                .filter(|input| input.name != super::super::lark_attachment_tool::UPLOAD_OPERATION)
+            {
+                let row = endpoint_from_input(&service.id, input, PublicationState::Published);
+                db.collection::<ServiceEndpoint>(COLLECTION_NAME)
+                    .insert_one(&row)
+                    .await
+                    .unwrap();
+                snapshots.push(row);
+            }
+        }
+        sync_seeded_service_endpoints(&db).await.unwrap();
+        for before in &snapshots {
+            let after = db
+                .collection::<ServiceEndpoint>(COLLECTION_NAME)
+                .find_one(doc! {"_id":&before.id})
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(after.operation_generation, before.operation_generation);
+            assert_eq!(after.name, before.name);
+            // Timestamps can advance during sync; all execution and publication fields must match.
+            let mut before = mongodb::bson::to_document(before).unwrap();
+            let mut after = mongodb::bson::to_document(&after).unwrap();
+            before.remove("updated_at");
+            after.remove("updated_at");
+            assert_eq!(after, before);
+        }
+        let uploads: Vec<ServiceEndpoint> = db
+            .collection::<ServiceEndpoint>(COLLECTION_NAME)
+            .find(doc! {"name":super::super::lark_attachment_tool::UPLOAD_OPERATION})
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(uploads.len(), 4);
+        assert!(
+            uploads
+                .iter()
+                .all(|row| row.publication == PublicationState::Published
+                    && row.operation_generation == 1
+                    && row.path == "/drive/v1/medias/upload_all")
+        );
+        sync_seeded_service_endpoints(&db).await.unwrap();
+        assert_eq!(
+            db.collection::<ServiceEndpoint>(COLLECTION_NAME)
+                .count_documents(doc! {})
+                .await
+                .unwrap(),
+            snapshots.len() as u64 + 4
+        );
+        db.drop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn lark_base_write_sync_four_slugs_adds_fields_and_composite_without_changing_existing_contracts_or_generations()
+     {
+        use super::super::service_endpoint_service::endpoint_from_input;
+        use crate::models::service_endpoint::{COLLECTION_NAME, PublicationState, ServiceEndpoint};
+        let db =
+            crate::test_utils::connect_transaction_test_database("lark_base_write_catalog_sync")
+                .await;
+        super::super::audit_service::init_audit_chain_hmac_key(zeroize::Zeroizing::new([2; 32]));
+        let mut snapshots = Vec::new();
+        for slug in ["api-lark", "api-lark-bot", "api-feishu", "api-feishu-bot"] {
+            let mut service = crate::models::downstream_service::test_helpers::dummy_service();
+            service.id = uuid::Uuid::new_v4().to_string();
+            service.slug = slug.into();
+            service.created_by = "system".into();
+            db.collection::<DownstreamService>(DOWNSTREAM_SERVICES)
+                .insert_one(&service)
+                .await
+                .unwrap();
+            for input in hosted_endpoint_inputs(&service)
+                .unwrap()
+                .into_iter()
+                .filter(|input| {
+                    !matches!(
+                        input.name.as_str(),
+                        "bitable_fields_list" | "bitable_record_create_with_attachments"
+                    )
+                })
+            {
+                let row = endpoint_from_input(&service.id, input, PublicationState::Published);
+                db.collection::<ServiceEndpoint>(COLLECTION_NAME)
+                    .insert_one(&row)
+                    .await
+                    .unwrap();
+                snapshots.push(row);
+            }
+        }
+        sync_seeded_service_endpoints(&db).await.unwrap();
+        for before in &snapshots {
+            let after = db
+                .collection::<ServiceEndpoint>(COLLECTION_NAME)
+                .find_one(doc! {"_id":&before.id})
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(after.operation_generation, before.operation_generation);
+            assert_eq!(after.name, before.name);
+            // Timestamps can advance during sync; all execution and publication fields must match.
+            let mut before = mongodb::bson::to_document(before).unwrap();
+            let mut after = mongodb::bson::to_document(&after).unwrap();
+            before.remove("updated_at");
+            after.remove("updated_at");
+            assert_eq!(after, before);
+        }
+        let uploads: Vec<ServiceEndpoint> = db
+            .collection::<ServiceEndpoint>(COLLECTION_NAME)
+            .find(doc! {"name":{"$in":["bitable_fields_list","bitable_record_create_with_attachments"]}})
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(uploads.len(), 8);
+        assert!(
+            uploads
+                .iter()
+                .all(|row| row.publication == PublicationState::Published
+                    && row.operation_generation == 1
+                    && matches!(
+                        row.name.as_str(),
+                        "bitable_fields_list" | "bitable_record_create_with_attachments"
+                    ))
+        );
+        sync_seeded_service_endpoints(&db).await.unwrap();
+        assert_eq!(
+            db.collection::<ServiceEndpoint>(COLLECTION_NAME)
+                .count_documents(doc! {})
+                .await
+                .unwrap(),
+            snapshots.len() as u64 + 8
+        );
+        db.drop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn spec_sync_missing_audit_key_preserves_tool_and_appends_no_entry() {
+        let db = crate::test_utils::connect_test_database("spec_sync_key_missing")
+            .await
+            .unwrap();
+        let mut service = crate::models::downstream_service::test_helpers::dummy_service();
+        service.id = uuid::Uuid::new_v4().to_string();
+        service.slug = "api-lark-bot".into();
+        service.offering_kind = crate::models::downstream_service::OfferingKind::Tool;
+        service.service_category = "internal".into();
+        db.collection::<DownstreamService>(DOWNSTREAM_SERVICES)
+            .insert_one(&service)
+            .await
+            .unwrap();
+        let mut inputs = hosted_endpoint_inputs(&service).unwrap();
+        let before = super::super::service_endpoint_service::endpoint_from_input(
+            &service.id,
+            inputs[0].clone(),
+            crate::models::service_endpoint::PublicationState::Published,
+        );
+        db.collection::<crate::models::service_endpoint::ServiceEndpoint>(
+            crate::models::service_endpoint::COLLECTION_NAME,
+        )
+        .insert_one(&before)
+        .await
+        .unwrap();
+        inputs[0].description = Some("changed contract".into());
+        assert!(matches!(
+            commit_spec_inputs(&db, &service, inputs, None).await,
+            Err(crate::errors::AppError::Internal(_))
+        ));
+        assert_eq!(
+            db.collection::<mongodb::bson::Document>(
+                crate::models::service_endpoint::COLLECTION_NAME
+            )
+            .count_documents(doc! {})
+            .await
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.collection::<mongodb::bson::Document>(crate::models::audit_log::COLLECTION_NAME)
+                .count_documents(doc! {})
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(
+            db.collection::<mongodb::bson::Document>(DOWNSTREAM_SERVICES)
+                .find_one(doc! {"_id":service.id})
+                .await
+                .unwrap()
+                .unwrap()
+                .get("authority_fence")
+                .is_none()
+        );
+        let after = db
+            .collection::<crate::models::service_endpoint::ServiceEndpoint>(
+                crate::models::service_endpoint::COLLECTION_NAME,
+            )
+            .find_one(doc! {"_id":&before.id})
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.publication, before.publication);
+        assert_eq!(after.operation_generation, before.operation_generation);
+        db.drop().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn spec_backed_sweep_preserves_legacy_rows_and_additively_syncs_tools() {
         let Some(db) = crate::test_utils::connect_test_database("catalog_spec_url_sweep").await
         else {
@@ -662,6 +943,8 @@ mod tests {
             return;
         };
         let _cache_guard = crate::services::api_docs_service::SpecCacheTestGuard::acquire();
+
+        crate::services::audit_service::init_audit_chain_hmac_key(zeroize::Zeroizing::new([2; 32]));
 
         const SPEC_URL: &str = "https://example.com/admin-service-openapi.json";
         let mut service = crate::models::downstream_service::test_helpers::dummy_service();
@@ -799,6 +1082,7 @@ mod tests {
             .await
             .expect("seed services");
 
+        super::super::audit_service::init_audit_chain_hmac_key(zeroize::Zeroizing::new([2; 32]));
         sync_seeded_service_endpoints(&db)
             .await
             .expect("sync endpoints");
@@ -904,6 +1188,7 @@ mod tests {
         }
 
         // Re-running must stay idempotent (same rows, no duplicates).
+        super::super::audit_service::init_audit_chain_hmac_key(zeroize::Zeroizing::new([2; 32]));
         sync_seeded_service_endpoints(&db)
             .await
             .expect("second sync");
@@ -929,6 +1214,7 @@ mod tests {
             .await
             .expect("seed services");
 
+        super::super::audit_service::init_audit_chain_hmac_key(zeroize::Zeroizing::new([2; 32]));
         sync_seeded_service_endpoints(&db)
             .await
             .expect("initial endpoint sync");
@@ -967,6 +1253,7 @@ mod tests {
         .await
         .expect("deactivate endpoint");
 
+        super::super::audit_service::init_audit_chain_hmac_key(zeroize::Zeroizing::new([2; 32]));
         sync_seeded_service_endpoints(&db)
             .await
             .expect("second endpoint sync");

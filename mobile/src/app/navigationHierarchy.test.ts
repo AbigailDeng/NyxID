@@ -1,3 +1,4 @@
+import { hydratedTestRouter } from "./routerTestHarness";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { getPathFromState, getStateFromPath } from "@react-navigation/core";
@@ -21,19 +22,19 @@ import {
   workspaceSharedEntryNavigationAction,
 } from "./navigationHierarchy";
 
-const rootRouter = StackRouter({ initialRouteName: "Workspace" });
+const rootRouter = hydratedTestRouter(StackRouter({ initialRouteName: "Workspace" }));
 const rootOptions = {
   routeNames: Object.keys(navigationLinkingConfig.screens ?? {}),
   routeParamList: {},
   routeGetIdList: {},
 };
-const chatRouter = TabRouter(workspaceRouterOptions);
+const chatRouter = hydratedTestRouter(TabRouter(workspaceRouterOptions));
 const chatOptions = {
   routeNames: ["Assistant"],
   routeParamList: {},
   routeGetIdList: {},
 };
-const panelRouter = TabRouter(workspacePanelRouterOptions);
+const panelRouter = hydratedTestRouter(TabRouter(workspacePanelRouterOptions));
 const panelOptions = {
   routeNames: [
     "Agents",
@@ -46,7 +47,7 @@ const panelOptions = {
   routeParamList: {},
   routeGetIdList: {},
 };
-const sheetRouter = StackRouter({ initialRouteName: "Pages" });
+const sheetRouter = hydratedTestRouter(StackRouter({ initialRouteName: "Pages" }));
 const sheetOptions = {
   routeNames: [
     "Pages",
@@ -394,6 +395,7 @@ test("panel selections merge filters and preserve mounted module route keys", ()
     const action = workspaceNavigateAction(name, params);
     assert.ok(action?.type === "NAVIGATE");
     const nested = action.payload.params.params;
+    assert.ok(nested?.screen);
     const next = panelRouter.getStateForAction(
       state,
       CommonActions.navigate({

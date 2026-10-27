@@ -161,6 +161,7 @@ export function DevicesBindPage() {
             <CardTitle>Device request</CardTitle>
             <CardDescription>
               Codes are case-insensitive and may include dashes or spaces.
+              The new device key expires in 90 days.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -290,7 +291,7 @@ export function DevicesBindPage() {
                           allowed to proxy through. You can add more later from
                           the API Keys page.
                         </FormDescription>
-                        <div className="max-h-56 space-y-1 overflow-y-auto rounded-lg border border-border bg-muted/25 p-2">
+                        <div className="relative max-h-56 space-y-1 overflow-y-auto rounded-lg border border-border bg-muted/25 p-2">
                           {isServicesLoading ? (
                             <p className="px-2 py-3 text-12 text-muted-foreground">
                               Loading services...
@@ -394,6 +395,8 @@ function ApprovalSuccess({ device }: { readonly device: ApproveDeviceResponse })
           <DetailRow label="HW ID" value={device.hw_id} />
           <DetailRow label="API key" value={maskIdentifier(device.api_key_id)} />
           <DetailRow label="Node" value={maskIdentifier(device.node_id)} />
+          <DetailRow label="Key expires" value={device.api_key_expires_at === undefined
+            ? "Not reported; refresh key details" : device.api_key_expires_at ?? "No expiry"} />
         </dl>
       </CardContent>
     </Card>

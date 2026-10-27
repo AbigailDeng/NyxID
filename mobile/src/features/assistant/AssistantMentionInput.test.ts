@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { hookHarness } from "./assistantHookTestHarness";
 import type { AssistantMentionOption } from "./AssistantMentionInput";
@@ -252,7 +252,7 @@ test("disabled and unmounted composers ignore retained native callbacks", () => 
   assert.equal(view.button().props.disabled, true);
   assert.equal(view.candidates().length, 0);
   prior.props.onChangeText("blocked");
-  suggestion.props.onPress();
+  suggestion!.props.onPress();
   assert.deepEqual(view.writes, []);
   view.props.editable = true;
   view.harness.render();

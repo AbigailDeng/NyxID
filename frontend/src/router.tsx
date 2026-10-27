@@ -1,3 +1,6 @@
+import "@/lib/platform-personal-handoff";
+import { PersonalLinkPage } from "@/pages/platform-personal-link";
+import { onboardingSearch } from "@/schemas/platform-onboarding";
 import { ToolsPage } from "@/pages/tools";
 import { AdminToolsPage } from "@/pages/admin-tools";
 import { parseAutomationSearch } from "@/lib/automation-search";
@@ -12,6 +15,7 @@ import { AdminOwnershipPage } from "@/pages/admin-ownership";
 import { normalizeAdminUsageSearch } from "@/schemas/admin-usage";
 import { preserveTelegramClaimForLogin } from "@/lib/telegram-claim-handoff";
 import { Suspense } from "react";
+import { captureUnexpectedNyxbotError } from "@/lib/assistant/error-telemetry";
 import { managedConnectPlatform } from "@/lib/channel-platforms";
 import {
   channelBotSetupRewrite,
@@ -35,7 +39,14 @@ import { BillingRouteGuard } from "@/components/billing-route-guard";
 import { CreditsDeniedHost } from "@/components/billing/credits-denied-host";
 import { billingSearchSchema } from "@/schemas/billing";
 import { useAuthStore } from "@/stores/auth-store";
-import { canAdminWrite, canManageCatalog, canReadAdminUsage, hasAdminRead } from "@/types/api";
+import {
+  canAdminWrite,
+  canManageCatalog,
+  canManageTools,
+  canReadAdminUsage,
+  canReadFeatureFlags,
+  hasAdminRead,
+} from "@/types/api";
 import { shouldRedirectFromBilling } from "@/lib/billing-availability";
 import { normalizeAdminAuditLogSearch } from "@/lib/admin-audit-log";
 import { normalizeAdminOAuthClientSearch } from "@/lib/admin-oauth-clients";
@@ -52,6 +63,11 @@ import {
 } from "@/lib/url-tabs";
 
 import {
+  PlatformOnboardingPage,
+  PlatformBindingReviewPage,
+  PlatformSetupsPage,
+  PlatformSetupDetailPage,
+  AdminPlatformBotsPage,
   LandingPage,
   NyxbotOnboardingPage,
   AiSetupPage,
@@ -167,7 +183,7 @@ const authLayout = createRoute({
         window.location.assign(trusted);
         return;
       }
-      throw redirect({ to: "/dashboard" });
+      throw redirect({ to: "/assistant" });
     }
   },
   component: AuthLayout,
@@ -402,6 +418,8 @@ const standaloneAuthBeforeLoad = async ({
 
 const assistantRoute = createRoute({
   path: "/assistant",
+  onError: (error) => captureUnexpectedNyxbotError(error, "/assistant"),
+  onCatch: (error) => captureUnexpectedNyxbotError(error, "/assistant"),
   getParentRoute: () => rootRoute,
   // Shared with AssistantPage so the router and the page agree on what
   // `?draft` means; a param dropped here makes the optimistic "New chat"
@@ -413,6 +431,8 @@ const assistantRoute = createRoute({
 
 const assistantPluginsRoute = createRoute({
   path: "/assistant/plugins",
+  onError: (error) => captureUnexpectedNyxbotError(error, "/assistant/plugins"),
+  onCatch: (error) => captureUnexpectedNyxbotError(error, "/assistant/plugins"),
   getParentRoute: () => rootRoute,
   validateSearch: withAccountPanelSearch(() => ({})),
   beforeLoad: standaloneAuthBeforeLoad,
@@ -421,6 +441,8 @@ const assistantPluginsRoute = createRoute({
 
 const assistantApprovalsRoute = createRoute({
   path: "/assistant/approvals",
+  onError: (error) => captureUnexpectedNyxbotError(error, "/assistant/approvals"),
+  onCatch: (error) => captureUnexpectedNyxbotError(error, "/assistant/approvals"),
   getParentRoute: () => rootRoute,
   validateSearch: withAccountPanelSearch(() => ({})),
   beforeLoad: standaloneAuthBeforeLoad,
@@ -443,14 +465,13 @@ const dashboardLayout = createRoute({
     }
     const { isAuthenticated, isLoading } = useAuthStore.getState();
     if (!isAuthenticated && !isLoading) {
-      // Preserve the deep link (e.g. `/orgs/join/<nonce>`) so sign-in can
+      // Preserve the requested route (e.g. `/dashboard` or `/orgs/join/<nonce>`) so sign-in can
       // resume it. `onLoginSubmit` in auth-flow.tsx and the backend
       // social-login `return_to` cookie both accept an absolute URL on
-      // this origin. For plain `/dashboard` there's nothing useful to
-      // preserve, so fall through to the bare redirect.
+      // this origin. Only the root uses the default post-login destination.
       preserveTelegramClaimForLogin();
       const returnPath = `${location.pathname}${location.searchStr}`;
-      if (returnPath !== "/" && returnPath !== "/dashboard") {
+      if (returnPath !== "/") {
         const returnTo = `${window.location.origin}${returnPath}`;
         window.location.assign(
           `/login?return_to=${encodeURIComponent(returnTo)}`,
@@ -475,7 +496,7 @@ const landingRoute = createRoute({
     }
     const { isAuthenticated, isLoading } = useAuthStore.getState();
     if (isAuthenticated && !isLoading) {
-      throw redirect({ to: "/dashboard" });
+      throw redirect({ to: "/assistant" });
     }
   },
   component: LandingPage,
@@ -503,11 +524,11 @@ const toolsRoute = createRoute({
   getParentRoute: () => dashboardLayout,
   component: ToolsPage,
 });
-const adminToolsRoute = createRoute({
+export const adminToolsRoute = createRoute({
   path: "/admin/tools",
   getParentRoute: () => dashboardLayout,
   beforeLoad: () => {
-    if (!useAuthStore.getState().user?.is_admin)
+    if (!canManageTools(useAuthStore.getState().user))
       throw redirect({ to: "/tools" });
   },
   component: AdminToolsPage,
@@ -518,7 +539,11 @@ export const servicesRedirectRoute = createRoute({
   getParentRoute: () => dashboardLayout,
   beforeLoad: async () => {
     const { user } = useAuthStore.getState();
-    if (canManageCatalog(user)) {
+    if (
+      canManageCatalog(user) ||
+      canManageTools(user) ||
+      hasAdminRead(user)
+    ) {
       return;
     }
     throw redirect({ to: "/keys", search: {} });
@@ -698,6 +723,8 @@ const automationsRoute = createRoute({
 
 const assistantAutomationsRoute = createRoute({
   path: "/assistant/automations",
+  onError: (error) => captureUnexpectedNyxbotError(error, "/assistant/automations"),
+  onCatch: (error) => captureUnexpectedNyxbotError(error, "/assistant/automations"),
   getParentRoute: () => rootRoute,
   beforeLoad: standaloneAuthBeforeLoad,
   validateSearch: withAccountPanelSearch(parseAutomationSearch),
@@ -706,6 +733,8 @@ const assistantAutomationsRoute = createRoute({
 
 const assistantMachinesRoute = createRoute({
   path: "/assistant/machines",
+  onError: (error) => captureUnexpectedNyxbotError(error, "/assistant/machines"),
+  onCatch: (error) => captureUnexpectedNyxbotError(error, "/assistant/machines"),
   getParentRoute: () => rootRoute,
   beforeLoad: standaloneAuthBeforeLoad,
   validateSearch: withAccountPanelSearch(parseMachinesSearch),
@@ -771,6 +800,8 @@ const nodesRoute = createRoute({
 
 const machineDesktopRoute = createRoute({
   path: "/assistant/machines/$nodeId/desktop",
+  onError: (error) => captureUnexpectedNyxbotError(error, "/assistant/machines/$nodeId/desktop"),
+  onCatch: (error) => captureUnexpectedNyxbotError(error, "/assistant/machines/$nodeId/desktop"),
   getParentRoute: () => rootRoute,
   beforeLoad: standaloneAuthBeforeLoad,
   component: MachineDesktopPage,
@@ -779,6 +810,8 @@ const machineDesktopRoute = createRoute({
 
 const machineSetupRoute = createRoute({
   path: "/assistant/machines/new",
+  onError: (error) => captureUnexpectedNyxbotError(error, "/assistant/machines/new"),
+  onCatch: (error) => captureUnexpectedNyxbotError(error, "/assistant/machines/new"),
   getParentRoute: () => rootRoute,
   beforeLoad: standaloneAuthBeforeLoad,
   component: () => <AssistantPage view="machine-setup" />,
@@ -786,6 +819,8 @@ const machineSetupRoute = createRoute({
 });
 const machinePairRoute = createRoute({
   path: "/assistant/machines/pair",
+  onError: (error) => captureUnexpectedNyxbotError(error, "/assistant/machines/pair"),
+  onCatch: (error) => captureUnexpectedNyxbotError(error, "/assistant/machines/pair"),
   getParentRoute: () => rootRoute,
   beforeLoad: standaloneAuthBeforeLoad,
   component: () => <AssistantPage view="machine-pair" />,
@@ -880,6 +915,12 @@ const apiKeyDetailRoute = createRoute({
   component: ApiKeyDetailPage,
 });
 
+export const platformOnboardingRoute = createRoute({path: "/onboarding", getParentRoute: () => rootRoute, validateSearch: onboardingSearch, component: PlatformOnboardingPage});
+export const platformBindingReviewRoute = createRoute({path: "/onboarding/link", getParentRoute: () => rootRoute, validateSearch: onboardingSearch, component: PlatformBindingReviewPage});
+export const platformPersonalLinkRoute = createRoute({path: "/nyxbot/link", getParentRoute: () => rootRoute, validateSearch: () => ({}), component: PersonalLinkPage});
+export const platformSetupsRoute = createRoute({path: "/onboarding/setups", getParentRoute: () => dashboardLayout, validateSearch: onboardingSearch, component: PlatformSetupsPage});
+export const platformSetupDetailRoute = createRoute({path: "/onboarding/setups/$setupId", getParentRoute: () => dashboardLayout, component: PlatformSetupDetailPage});
+
 const channelBotsRoute = createRoute({
   path: "/channel-bots",
   validateSearch: (
@@ -969,23 +1010,28 @@ const adminLayout = createRoute({
     if (!isAuthenticated && !isLoading) {
       throw redirect({ to: "/login" });
     }
-    // Admin layout is reachable by both `admin` (read+write) and `operator`
-    // (read-only). Per-action write controls inside admin pages are gated
-    // separately so operators see admin data but cannot mutate it. Holders of
-    // the usage-read role permission reach only the Usage page.
     if (isLoading || hasAdminRead(user)) return;
     const usagePath =
       location.pathname === "/admin/usage" ||
       location.pathname === "/admin/analytics";
-    if (!canReadAdminUsage(user)) {
-      throw redirect({ to: "/dashboard" });
-    }
-    if (!usagePath) {
-      throw redirect({ to: "/admin/usage" });
-    }
+    const flagsPath = location.pathname === "/admin/feature-flags";
+    if (
+      (usagePath && canReadAdminUsage(user)) ||
+      (flagsPath && canReadFeatureFlags(user))
+    )
+      return;
+    if (canReadFeatureFlags(user))
+      throw redirect({ to: "/admin/feature-flags" });
+    if (canReadAdminUsage(user)) throw redirect({ to: "/admin/usage" });
+    throw redirect({ to: "/dashboard" });
   },
   component: () => <Outlet />,
 });
+
+export const adminPlatformBotsRoute = createRoute({path: "platform-bots", getParentRoute: () => adminLayout, beforeLoad: () => {
+  const {user, isLoading} = useAuthStore.getState();
+  if (!isLoading && !canAdminWrite(user)) throw redirect({to: "/dashboard"});
+}, component: AdminPlatformBotsPage});
 
 const adminUsersRoute = createRoute({
   path: "users",
@@ -1080,7 +1126,7 @@ function usagePageSearch(search: Record<string, unknown>): Partial<
     "sort" | "metric" | "page" | "per_page"
   >
 > & {
-  tab?: "dashboard" | "list";
+  tab?: "dashboard" | "list" | "nyxbot";
   sample?: "overview" | "operations" | "explorer";
   mock?: string;
 } {
@@ -1090,7 +1136,9 @@ function usagePageSearch(search: Record<string, unknown>): Partial<
     metric,
     page,
     per_page,
-    tab: search.tab === "list" ? ("list" as const) : ("dashboard" as const),
+    tab: search.tab === "nyxbot"
+      ? ("nyxbot" as const)
+      : search.tab === "list" ? ("list" as const) : ("dashboard" as const),
     sample:
       import.meta.env.DEV &&
       import.meta.env.MODE === "test" &&
@@ -1106,6 +1154,10 @@ const adminUsageRoute = createRoute({
   component: AdminUsagePage,
   validateSearch: usagePageSearch,
   beforeLoad: ({ search, location }) => {
+    const { user, isLoading } = useAuthStore.getState();
+    if (!isLoading && search.tab === "nyxbot" && !canReadAdminUsage(user)) {
+      throw redirect({ to: "/admin/usage", search: { ...search, tab: "dashboard" }, replace: true });
+    }
     const params = new URLSearchParams(location.searchStr);
     if (
       ["period", "from", "to", "user", "service"].some((key) => params.has(key))
@@ -1182,6 +1234,9 @@ const adminFeatureFlagsRoute = createRoute({
 });
 
 const routeTree = rootRoute.addChildren([
+  platformOnboardingRoute,
+  platformBindingReviewRoute,
+  platformPersonalLinkRoute,
   landingRoute,
   nyxbotOnboardingRoute,
   authLayout.addChildren([loginRoute, registerRoute]),
@@ -1257,6 +1312,8 @@ const routeTree = rootRoute.addChildren([
     apiKeyDetailRoute,
     nodesRoute,
     nodeDetailRoute,
+    platformSetupsRoute,
+    platformSetupDetailRoute,
     channelBotsRoute,
     channelBotSetupLinksRoute,
     channelBotDetailRoute,
@@ -1287,6 +1344,7 @@ const routeTree = rootRoute.addChildren([
       adminInviteCodesRoute,
       adminFeatureFlagsRoute,
       adminUploadRetentionRoute,
+      adminPlatformBotsRoute,
       adminPlatformCredentialsRoute,
     ]),
   ]),

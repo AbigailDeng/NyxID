@@ -36,6 +36,7 @@ pub struct CatalogEntry {
     pub provider_config_id: Option<String>,
     pub provider_type: Option<String>,
     pub revokes_grant: Option<bool>,
+    pub revocation_effect_scope: Option<String>,
     pub requires_gateway_url: bool,
     pub api_key_instructions: Option<String>,
     pub api_key_url: Option<String>,
@@ -171,6 +172,8 @@ fn build_catalog_entry(
         .as_ref()
         .and_then(|b| b.byok_pricing.as_ref())
         .map(Into::into);
+    // Computed before the literal moves fields out of `svc`.
+    let icon_url = catalog_icon_url(&svc, provider);
     CatalogEntry {
         offering_kind: svc.offering_kind,
         topics: svc.topics.clone(),
@@ -213,11 +216,15 @@ fn build_catalog_entry(
         provider_type: provider.map(|p| p.provider_type.clone()),
         revokes_grant: provider
             .and_then(crate::services::oauth_revocation::effective_revocation)
-            .map(|config| config.revokes_grant),
+            .map(|config| crate::services::oauth_revocation::grant_capable(&config)),
+        revocation_effect_scope: provider
+            .and_then(crate::services::oauth_revocation::effective_revocation)
+            .and_then(|config| crate::services::oauth_revocation::effect_scope_name(&config))
+            .map(str::to_owned),
         requires_gateway_url: provider.is_some_and(|p| p.requires_gateway_url),
         api_key_instructions: provider.and_then(|p| p.api_key_instructions.clone()),
         api_key_url: provider.and_then(|p| p.api_key_url.clone()),
-        icon_url: provider.and_then(|p| p.icon_url.clone()),
+        icon_url,
         documentation_url: provider.and_then(|p| p.documentation_url.clone()),
         credential_mode: provider.map(|p| p.credential_mode.clone()),
         // OAuth config
@@ -287,7 +294,23 @@ fn build_catalog_entry(
         skills_revision: svc.skills_revision,
         skills_manifest_digest,
         token_exchange_credential_fields: svc.token_exchange_config.map(|c| c.credential_fields),
-        default_request_headers: svc.default_request_headers,
+        default_request_headers: crate::models::default_request_header::stored_list_for_response(
+            svc.default_request_headers,
+        ),
+    }
+}
+
+/// The icon a catalog service displays: a Tool offering's own icon, otherwise
+/// its provider's icon. Connection views reuse it as the fallback below a
+/// per-connection override.
+pub(crate) fn catalog_icon_url(
+    svc: &DownstreamService,
+    provider: Option<&ProviderConfig>,
+) -> Option<String> {
+    if svc.offering_kind == crate::models::downstream_service::OfferingKind::Tool {
+        svc.icon_url.clone()
+    } else {
+        provider.and_then(|p| p.icon_url.clone())
     }
 }
 
@@ -299,15 +322,17 @@ async fn decrypt_provider_client_id(
         return Ok(None);
     };
 
-    let decrypted = encryption_keys.decrypt(encrypted).await?;
-    let client_id = String::from_utf8(decrypted)
+    let decrypted = super::credential_record_service::CredentialRecord::provider(provider)
+        .decrypt(encryption_keys, "client_id_encrypted", encrypted)
+        .await?;
+    let client_id = std::str::from_utf8(&decrypted)
         .map_err(|_| AppError::Internal("Failed to decode provider client_id".to_string()))?;
     // Whitespace-only counts as absent so a malformed legacy row never
     // advertises a one-click app or builds a broken authorize URL.
     if client_id.trim().is_empty() {
         Ok(None)
     } else {
-        Ok(Some(client_id))
+        Ok(Some(client_id.to_owned()))
     }
 }
 
@@ -323,8 +348,10 @@ async fn provider_platform_secret_nonempty(
     let Some(encrypted) = provider.client_secret_encrypted.as_ref() else {
         return Ok(false);
     };
-    let decrypted = encryption_keys.decrypt(encrypted).await?;
-    let secret = String::from_utf8(decrypted)
+    let decrypted = super::credential_record_service::CredentialRecord::provider(provider)
+        .decrypt(encryption_keys, "client_secret_encrypted", encrypted)
+        .await?;
+    let secret = std::str::from_utf8(&decrypted)
         .map_err(|_| AppError::Internal("Failed to decode provider client_secret".to_string()))?;
     Ok(!secret.trim().is_empty())
 }
@@ -514,8 +541,17 @@ async fn list_catalog_filtered(
         }
         let inference =
             super::inference_service::view(&svc, provider.map(|p| p.slug.as_str()), available);
+        let headers = super::default_header_service::management(
+            Some(encryption_keys),
+            crate::models::downstream_service::COLLECTION_NAME,
+            &svc.id,
+            super::ownership_transfer_service::catalog_owner(&svc),
+            svc.default_request_headers.as_deref(),
+        )
+        .await?;
         let mut entry =
             build_catalog_entry(svc, provider, spr, oauth_client_id, platform_secret_present);
+        entry.default_request_headers = headers;
         entry.platform_key.available = available;
         entry.inference = inference;
         resolved_entries.push(entry);
@@ -717,6 +753,14 @@ pub async fn get_catalog_entry(
     let available = super::platform_key_service::available(db, &svc, user_id).await?;
     let inference =
         super::inference_service::view(&svc, provider.as_ref().map(|p| p.slug.as_str()), available);
+    let headers = super::default_header_service::management(
+        Some(encryption_keys),
+        crate::models::downstream_service::COLLECTION_NAME,
+        &svc.id,
+        super::ownership_transfer_service::catalog_owner(&svc),
+        svc.default_request_headers.as_deref(),
+    )
+    .await?;
     let mut entry = build_catalog_entry(
         svc,
         provider.as_ref(),
@@ -724,6 +768,7 @@ pub async fn get_catalog_entry(
         oauth_client_id,
         platform_secret_present,
     );
+    entry.default_request_headers = headers;
     entry.platform_key.available = available;
     entry.inference = inference;
     Ok(entry)
@@ -1037,6 +1082,9 @@ mod tests {
             visibility: "public".to_string(),
             created_by: user_id.to_string(),
             catalog_manager_created: false,
+            tools_manager_created: false,
+            icon_url: None,
+            tools_credential_frozen: false,
             ..dummy_service()
         }
     }
@@ -1436,5 +1484,51 @@ mod tests {
             .unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].slug, "internal-svc");
+    }
+}
+
+#[cfg(test)]
+mod catalog_icon_tests {
+    use super::catalog_icon_url;
+    use crate::models::downstream_service::OfferingKind;
+    use crate::models::downstream_service::test_helpers::dummy_service;
+    use crate::models::provider_config::ProviderConfig;
+    use mongodb::bson::{self, doc};
+
+    fn provider_with_icon(icon_url: &str) -> ProviderConfig {
+        bson::from_document(doc! {
+            "_id": "provider-1",
+            "slug": "zoho-mail",
+            "name": "Zoho Mail",
+            "provider_type": "oauth2",
+            "is_active": true,
+            "credential_mode": "admin",
+            "created_by": "system",
+            "icon_url": icon_url,
+            "created_at": bson::DateTime::now(),
+            "updated_at": bson::DateTime::now(),
+        })
+        .expect("provider document")
+    }
+
+    #[test]
+    fn services_show_their_provider_icon_and_tools_their_own() {
+        let provider = provider_with_icon("https://nyx.example/catalog-icons/zoho");
+        let mut service = dummy_service();
+        service.icon_url = Some("https://nyx.example/catalog-icons/tool".to_string());
+
+        assert_eq!(
+            catalog_icon_url(&service, Some(&provider)).as_deref(),
+            Some("https://nyx.example/catalog-icons/zoho"),
+            "AI services inherit the provider icon"
+        );
+        assert_eq!(catalog_icon_url(&service, None), None);
+
+        service.offering_kind = OfferingKind::Tool;
+        assert_eq!(
+            catalog_icon_url(&service, Some(&provider)).as_deref(),
+            Some("https://nyx.example/catalog-icons/tool"),
+            "Tool offerings keep their own icon"
+        );
     }
 }

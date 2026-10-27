@@ -21,6 +21,9 @@ impl Drop for AsyncFixture {
 }
 impl AsyncFixture {
     async fn new() -> Self {
+        Self::build(false).await
+    }
+    async fn build(distinct_operations: bool) -> Self {
         let f = orchestrator_fixture("async_service").await;
         let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
         let captured = calls.clone();
@@ -40,15 +43,35 @@ impl AsyncFixture {
                 let result_body = result_body.lock().unwrap().clone();
                 let status_phase = status_phase.lock().unwrap().clone();
                 async move {
-                    let _permit = if uri.path() == "/executions/op-1" {
+                    let _permit = if uri
+                        .path()
+                        .strip_prefix("/executions/")
+                        .is_some_and(|id| !id.contains('/'))
+                    {
                         Some(gate.acquire().await.unwrap())
                     } else {
                         None
                     };
                     Json(match uri.path() {
-                        "/executions" => json!({"operation_id":"op-1","status":"queued"}),
-                        "/executions/op-1" => json!({"status":status_phase}),
-                        "/executions/op-1/result" => result_body,
+                        "/api/v1/agents" => json!({"id":"lifecycle-1","status":"queued"}),
+                        "/api/v1/agent-lifecycle/lifecycle-1" => json!({"id":"lifecycle-1","status":status_phase,"agent_id":"agt_coffee","phase":"agent_startup"}),
+                        "/api/v1/agents/agt_coffee/input" => json!({"queued":true}),
+                        "/api/v1/agents/agt_coffee" => json!({"id":"agt_coffee","status":status_phase}),
+                        "/executions" => json!({
+                            "operation_id": if distinct_operations {
+                                format!("op-{}", uuid::Uuid::new_v4())
+                            } else {
+                                "op-1".to_owned()
+                            },
+                            "status":"queued",
+                        }),
+                        path if path.ends_with("/result") => result_body,
+                        path if path
+                            .strip_prefix("/executions/")
+                            .is_some_and(|id| !id.contains('/')) =>
+                        {
+                            json!({"status":status_phase})
+                        }
                         _ => json!({"status":"cancelled"}),
                     })
                 }
@@ -80,6 +103,7 @@ impl AsyncFixture {
             .insert_one(&catalog)
             .await
             .unwrap();
+        crate::test_utils::init_test_audit_chain_hmac_key();
         crate::services::catalog_spec_sync::sync_seeded_service_endpoints(&f.state.db)
             .await
             .unwrap();
@@ -151,6 +175,321 @@ impl AsyncFixture {
     }
 }
 
+async fn cma_fixture() -> AsyncFixture {
+    let a = AsyncFixture::new().await;
+    let db = &a.f.state.db;
+    let instance = db
+        .collection::<crate::models::user_service::UserService>(
+            crate::models::user_service::COLLECTION_NAME,
+        )
+        .find_one(doc! {"_id":&a.service})
+        .await
+        .unwrap()
+        .unwrap();
+    let catalog_id = instance.catalog_service_id.unwrap();
+    db.collection::<bson::Document>(crate::models::downstream_service::COLLECTION_NAME)
+        .update_one(doc! {"_id":&catalog_id}, doc! {"$set":{"slug":"cma"}})
+        .await
+        .unwrap();
+    let endpoints = db.collection::<crate::models::service_endpoint::ServiceEndpoint>(
+        crate::models::service_endpoint::COLLECTION_NAME,
+    );
+    let template = endpoints
+        .find_one(doc! {"service_id":&catalog_id})
+        .await
+        .unwrap()
+        .unwrap();
+    for (name, method, path, parameters, body) in [
+        (
+            "post_api_v1_agents",
+            "POST",
+            "/api/v1/agents",
+            json!([{"name":"Idempotency-Key","in":"header","required":true,"schema":{"type":"string"}}]),
+            Some(
+                json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}),
+            ),
+        ),
+        (
+            "get_api_v1_agent_lifecycle_by_id",
+            "GET",
+            "/api/v1/agent-lifecycle/{id}",
+            json!([{"name":"id","in":"path","required":true,"schema":{"type":"string"}}]),
+            None,
+        ),
+        (
+            "post_agent_input",
+            "POST",
+            "/api/v1/agents/{id}/input",
+            json!([
+                {"name":"id","in":"path","required":true,"schema":{"type":"string"}},
+                {"name":"Idempotency-Key","in":"header","required":true,"schema":{"type":"string"}},
+            ]),
+            Some(
+                json!({"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}),
+            ),
+        ),
+        (
+            "get_agent",
+            "GET",
+            "/api/v1/agents/{id}",
+            json!([{"name":"id","in":"path","required":true,"schema":{"type":"string"}}]),
+            None,
+        ),
+    ] {
+        let mut endpoint = template.clone();
+        endpoint.id = uuid::Uuid::new_v4().to_string();
+        endpoint.name = name.into();
+        endpoint.method = method.into();
+        endpoint.path = path.into();
+        endpoint.parameters = Some(parameters);
+        endpoint.request_body_schema = body;
+        endpoint.request_body_required = method == "POST";
+        endpoint.request_content_type = (method == "POST").then(|| "application/json".into());
+        endpoint.async_operation = None;
+        endpoints.insert_one(&endpoint).await.unwrap();
+    }
+    a
+}
+
+#[tokio::test]
+async fn cma_submission_tracks_status_after_turn_settlement_and_projects_only_metadata() {
+    let a = cma_fixture().await;
+    let db = &a.f.state.db;
+    *a.phase.lock().unwrap() = "running".into();
+    let auth = authenticate(&a.f).await;
+    // Exercise the universal MCP dispatch path, including its inner arguments.
+    let response = call(&a.f, &auth, "sandbox__post_api_v1_agents", json!({"Idempotency-Key":"coffee-site-20261022","name":"Coffee","profile":{"system_prompt":"private prompt"}})).await;
+    let bytes = axum::body::to_bytes(response.into_body(), 100_000)
+        .await
+        .unwrap();
+    let result: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(result["result"]["isError"], false, "{result}");
+    let watch = a.watch().await;
+    assert_eq!(
+        watch.cma.as_ref().unwrap().idempotency_key.as_deref(),
+        Some("coffee-site-20261022")
+    );
+    assert_eq!(watch.operation_id.as_deref(), Some("lifecycle-1"));
+    assert!(watch.expires_at - watch.created_at >= chrono::Duration::days(30));
+    engine::finish_turn(
+        db,
+        &a.f.row,
+        &a.f.row.credential_api_key_id,
+        &uuid::Uuid::new_v4().to_string(),
+        &engine::TurnResult {
+            text: "CMA request submitted".into(),
+            session_id: None,
+            response_id: None,
+            error: None,
+        },
+    )
+    .await
+    .unwrap();
+    a.due().await;
+    async_operations::sweep(&a.f.state).await.unwrap();
+    let running = a.watch().await;
+    assert_eq!(running.state, "waiting");
+    assert_eq!(
+        running.cma.as_ref().unwrap().status.as_deref(),
+        Some("running")
+    );
+    assert!(running.cma.as_ref().unwrap().checked_at.is_some());
+    *a.phase.lock().unwrap() = "succeeded".into();
+    a.due().await;
+    async_operations::sweep(&a.f.state).await.unwrap();
+    let finished = a.watch().await;
+    assert_eq!(finished.reason.as_deref(), Some("completed"));
+    assert_eq!(
+        finished.cma.as_ref().unwrap().agent_id.as_deref(),
+        Some("agt_coffee")
+    );
+    let cards = crate::services::cma_operation::cards(db, &a.f.owner, &a.f.row.id)
+        .await
+        .unwrap();
+    assert_eq!(cards.len(), 1);
+    assert!(cards[0].result_encrypted.is_none());
+    assert!(
+        !bson::to_document(&cards[0])
+            .unwrap()
+            .to_string()
+            .contains("private prompt")
+    );
+    assert!(
+        crate::services::cma_operation::cards(db, "another-owner", &a.f.row.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn cma_agent_input_receipts_deduplicate_by_idempotency_key() {
+    let a = cma_fixture().await;
+    *a.phase.lock().unwrap() = "ready".into();
+    let auth = authenticate(&a.f).await;
+    for key in ["input-1", "input-1", "input-2"] {
+        let response = direct_call(
+            &a.f,
+            &auth,
+            "sandbox__post_agent_input",
+            json!({"id":"agt_coffee","text":"private task","Idempotency-Key":key}),
+        )
+        .await;
+        let bytes = axum::body::to_bytes(response.into_body(), 100_000)
+            .await
+            .unwrap();
+        let result: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(result["result"]["isError"], false, "{result}");
+    }
+    let watches = a.f.state.db.collection::<bson::Document>(WATCHES);
+    assert_eq!(watches.count_documents(doc! {}).await.unwrap(), 2);
+    for key in ["input-1", "input-2"] {
+        assert_eq!(
+            watches
+                .count_documents(doc! {"cma.idempotency_key":key})
+                .await
+                .unwrap(),
+            1
+        );
+    }
+}
+
+#[tokio::test]
+async fn cma_agent_input_waits_for_activity_before_settling_ready() {
+    use futures::TryStreamExt;
+
+    let a = cma_fixture().await;
+    *a.phase.lock().unwrap() = "ready".into();
+    let auth = authenticate(&a.f).await;
+    // Concrete MCP dispatch captures the path ID even though the queued receipt
+    // has no operation ID. The lifecycle test exercises universal dispatch.
+    let response = direct_call(
+        &a.f,
+        &auth,
+        "sandbox__post_agent_input",
+        json!({"id":"agt_coffee","text":"private task","Idempotency-Key":"input-1"}),
+    )
+    .await;
+    let bytes = axum::body::to_bytes(response.into_body(), 100_000)
+        .await
+        .unwrap();
+    let result: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(result["result"]["isError"], false, "{result}");
+    let watch = a.watch().await;
+    assert!(watch.operation_id.is_none());
+    assert_eq!(
+        watch.cma.as_ref().unwrap().agent_id.as_deref(),
+        Some("agt_coffee")
+    );
+
+    // Main keeps receipt deduplication in its own test. This lifecycle fixture
+    // still needs two distinct watches to exercise deferred capacity polling.
+    let response = direct_call(
+        &a.f,
+        &auth,
+        "sandbox__post_agent_input",
+        json!({"id":"agt_coffee","text":"private task","Idempotency-Key":"input-2"}),
+    )
+    .await;
+    let bytes = axum::body::to_bytes(response.into_body(), 100_000)
+        .await
+        .unwrap();
+    let result: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(result["result"]["isError"], false, "{result}");
+
+    let watches = a.f.state.db.collection::<AsyncServiceOperation>(WATCHES);
+    let initial: Vec<AsyncServiceOperation> = watches
+        .find(doc! {})
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
+    let ids: Vec<String> = ["input-1", "input-2"]
+        .into_iter()
+        .map(|key| {
+            initial
+                .iter()
+                .find(|watch| watch.cma.as_ref().unwrap().idempotency_key.as_deref() == Some(key))
+                .unwrap()
+                .id
+                .clone()
+        })
+        .collect();
+    for (phase, seen_working, reason) in [
+        ("ready", false, None),
+        ("working", true, None),
+        ("ready", true, Some("completed")),
+    ] {
+        *a.phase.lock().unwrap() = phase.into();
+        let mut observed = Vec::new();
+        // Both watches share one service slot. A sweep may legitimately defer
+        // either watch (including between its status and result calls), so wait
+        // for each stable ID to observe this phase before changing upstream.
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let rows: Vec<AsyncServiceOperation> = watches
+                    .find(doc! {"_id":{"$in":&ids}})
+                    .await
+                    .unwrap()
+                    .try_collect()
+                    .await
+                    .unwrap();
+                assert_eq!(rows.len(), 2);
+                observed = rows
+                    .iter()
+                    .map(|watch| {
+                        let cma = watch.cma.as_ref().unwrap();
+                        (
+                            watch.id.clone(),
+                            watch.state.clone(),
+                            cma.status.clone(),
+                            watch.reason.clone(),
+                        )
+                    })
+                    .collect();
+                for watch in &rows {
+                    if reason.is_none() {
+                        assert_eq!(watch.state, "waiting", "{observed:?}");
+                        assert!(watch.reason.is_none(), "{observed:?}");
+                    } else if let Some(actual) = &watch.reason {
+                        assert_eq!(actual, "completed", "{observed:?}");
+                    }
+                }
+                let pending: Vec<&str> = rows
+                    .iter()
+                    .filter(|watch| {
+                        let cma = watch.cma.as_ref().unwrap();
+                        cma.status.as_deref() != Some(phase)
+                            || cma.checked_at.is_none()
+                            || cma.seen_working != seen_working
+                            || watch.reason.as_deref() != reason
+                    })
+                    .map(|watch| watch.id.as_str())
+                    .collect();
+                if pending.is_empty() {
+                    break;
+                }
+                a.f.state
+                    .db
+                    .collection::<bson::Document>(WATCHES)
+                    .update_many(
+                        doc! {"_id":{"$in":pending}},
+                        doc! {"$set":{"poll_at":bson::DateTime::from_millis(0)}},
+                    )
+                    .await
+                    .unwrap();
+                async_operations::sweep(&a.f.state).await.unwrap();
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!("both watches must observe {phase} with reason {reason:?}: {observed:?}")
+        });
+    }
+}
+
 #[tokio::test]
 async fn async_submit_mcp_polls_once_across_replicas_and_quotes_encrypted_result() {
     let a = AsyncFixture::new().await;
@@ -209,6 +548,7 @@ async fn async_submit_mcp_polls_once_across_replicas_and_quotes_encrypted_result
     .await
     .unwrap();
     let mut start = engine::TurnStart::from(&engine::TurnRequest {
+        acknowledgement_id: None,
         retry_of: None,
         attachment_ids: vec![],
         conversation_id: Some(row.id.clone()),
@@ -615,6 +955,7 @@ async fn admit_event(
     a: &AsyncFixture,
 ) -> crate::models::assistant_conversation::AssistantConversation {
     let mut start = engine::TurnStart::from(&engine::TurnRequest {
+        acknowledgement_id: None,
         retry_of: None,
         attachment_ids: vec![],
         conversation_id: Some(a.f.row.id.clone()),
@@ -802,6 +1143,8 @@ async fn attach_voice(
     .await;
     let now = chrono::Utc::now();
     let request = VoiceRequest {
+        started_at: None,
+        terminal_error_code: None,
         async_operation_pending: false,
         id: uuid::Uuid::new_v4().to_string(),
         user_id: a.f.owner.clone(),
@@ -949,7 +1292,27 @@ async fn async_automation_rebinds_run_to_result_turn_and_preserves_confirmation(
     a.due().await;
     Box::pin(async_operations::sweep(&a.f.state)).await.unwrap();
     finish(&a, &a.f.row, "submitted").await;
+    // A stale legacy marker never gives the automation's result turn a target.
+    a.f.state
+        .db
+        .collection::<bson::Document>(CONVERSATIONS)
+        .update_one(
+            doc! {"_id": &a.f.row.id},
+            doc! {"$set": {"report_to": "nyxa-stale"}},
+        )
+        .await
+        .unwrap();
     let row = admit_event(&a).await;
+    let result_turn = row.active_turn.as_ref().unwrap();
+    assert_eq!(result_turn.trigger_run_id.as_deref(), Some(id.as_str()));
+    assert_eq!(result_turn.report_to, None);
+    assert!(!result_turn.with_nyxbot);
+    assert!(
+        result_turn
+            .events
+            .iter()
+            .all(|event| event.bound && event.report_to.is_none())
+    );
     let run =
         a.f.state
             .db
@@ -1143,3 +1506,338 @@ async fn async_channel_event_validates_original_source_after_newer_message() {
     watches::apply_delivery(&mut row, &watch);
     assert_eq!(row.channel, Some(original));
 }
+
+/// Finish the conversation's live turn with a completed reply.
+async fn finish_live(
+    a: &AsyncFixture,
+    row: &crate::models::assistant_conversation::AssistantConversation,
+) {
+    engine::finish_turn(
+        &a.f.state.db,
+        row,
+        &row.credential_api_key_id,
+        &uuid::Uuid::new_v4().to_string(),
+        &engine::TurnResult {
+            text: "done".into(),
+            session_id: None,
+            response_id: None,
+            error: None,
+        },
+    )
+    .await
+    .unwrap();
+}
+
+fn user_start(id: &str, text: &str) -> engine::TurnStart {
+    engine::TurnStart::from(&engine::TurnRequest {
+        acknowledgement_id: None,
+        retry_of: None,
+        attachment_ids: vec![],
+        conversation_id: Some(id.to_owned()),
+        text: text.into(),
+        agent_id: None,
+        model: None,
+        access_mode: None,
+    })
+}
+
+/// Terminal watches are swept by TTL in production; the upstream stand-in
+/// answers every submission with the same operation id, so clear them first.
+async fn clear_terminal_watches(a: &AsyncFixture) {
+    a.f.state
+        .db
+        .collection::<bson::Document>(WATCHES)
+        .delete_many(doc! {"state": {"$in": ["delivered", "cancelled"]}})
+        .await
+        .unwrap();
+}
+
+/// Submit from the live turn `turn_id` and return its watch.
+async fn submit_from(a: &AsyncFixture, turn_id: &str) -> AsyncServiceOperation {
+    clear_terminal_watches(a).await;
+    a.submit().await;
+    a.f.state
+        .db
+        .collection::<AsyncServiceOperation>(WATCHES)
+        .find_one(doc! {"turn_id": turn_id})
+        .await
+        .unwrap()
+        .expect("the submitted watch")
+}
+
+/// Poll the upstream to completion and queue the result event.
+async fn complete(a: &AsyncFixture) -> crate::models::assistant_conversation::AgentEvent {
+    a.due().await;
+    Box::pin(async_operations::sweep(&a.f.state)).await.unwrap();
+    engine::get(&a.f.state.db, &a.f.owner, &a.f.row.id)
+        .await
+        .unwrap()
+        .pending_events
+        .into_iter()
+        .find(|e| e.kind == watches::EVENT_KIND)
+        .expect("the queued result event")
+}
+
+/// Admit the queued result as an event turn.
+async fn event_turn(
+    a: &AsyncFixture,
+) -> crate::models::assistant_conversation::AssistantConversation {
+    let mut start = user_start(&a.f.row.id, "");
+    start.origin = TurnOrigin::Event;
+    engine::begin_turn(
+        &a.f.state.db,
+        &a.f.owner,
+        &start,
+        &a.f.state.encryption_keys,
+    )
+    .await
+    .unwrap()
+}
+
+fn snapshot(row: &crate::models::assistant_conversation::AssistantConversation) -> Option<String> {
+    row.active_turn.as_ref().unwrap().report_to.clone()
+}
+
+/// Plan v7 §2.2 / §2.7 lifecycle (R4-10): an async carrier proves its report
+/// target from the admitted live turn's snapshot only, with validated
+/// provenance; legacy, unknown-version or disagreeing carriers, and the
+/// conversation's stale marker, never create NyxBot involvement.
+#[tokio::test]
+async fn async_carriers_prove_report_targets_from_the_live_turn_snapshot_only() {
+    let a = AsyncFixture::build(true).await;
+    check_async_carrier_report_targets(a).await;
+}
+
+// Finish setup and each lifecycle case before polling the next case. Boxed
+// constructors keep their debug construction temporaries out of the shared
+// driver, without moving execution or the retained pool permits to another task.
+fn check_async_carrier_report_targets(a: AsyncFixture) -> futures::future::BoxFuture<'static, ()> {
+    Box::pin(async move {
+        // Admission is exercised explicitly below; park automatic wake-ups so the
+        // sweep cannot consume the result event before its provenance is checked.
+        let limit =
+            crate::handlers::assistant_team::team_pool_limit(&a.f.state, &a.f.owner).await + 1;
+        let mut permits = Vec::new();
+        for _ in 0..limit {
+            permits.push(
+                a.f.state
+                    .direct_chat_limiter
+                    .try_acquire_pool("assistant_team", &a.f.owner, limit)
+                    .await
+                    .unwrap()
+                    .unwrap(),
+            );
+        }
+        check_direct_carrier(&a).await;
+        check_assigned_carrier(&a).await;
+        for provenance in [0_i32, 7] {
+            check_unproven_carrier(&a, provenance).await;
+        }
+        check_disagreeing_carrier(&a).await;
+    })
+}
+
+// Construct begin_turn outside the case's poll frame as well: its transaction
+// future is large in debug builds, and every case subsequently performs deep MCP
+// calls on the same 1.5 MiB test thread.
+fn carrier_turn<'a>(
+    a: &'a AsyncFixture,
+    text: &'a str,
+) -> futures::future::BoxFuture<'a, crate::models::assistant_conversation::AssistantConversation> {
+    Box::pin(async move {
+        engine::begin_turn(
+            &a.f.state.db,
+            &a.f.owner,
+            &user_start(&a.f.row.id, text),
+            &a.f.state.encryption_keys,
+        )
+        .await
+        .unwrap()
+    })
+}
+
+fn check_direct_carrier(a: &AsyncFixture) -> futures::future::BoxFuture<'_, ()> {
+    Box::pin(async move {
+        use crate::models::assistant_conversation::REPORT_PROVENANCE_V1;
+        let db = a.f.state.db.clone();
+        let owner = a.f.owner.clone();
+        let id = a.f.row.id.clone();
+        let nb = "nyxa-0123456789abcdef0123456789abcdef";
+        let live_turn = a.f.row.active_turn.as_ref().unwrap().turn_id.clone();
+
+        // (a) A direct turn's operation carries a validated None: its result never
+        // involves NyxBot, even beside a stale legacy marker on the conversation.
+        let w = submit_from(a, &live_turn).await;
+        assert_eq!(w.delivery.report_provenance, REPORT_PROVENANCE_V1);
+        assert_eq!(w.delivery.report_to, None);
+        db.collection::<bson::Document>(CONVERSATIONS)
+            .update_one(doc! {"_id": &id}, doc! {"$set": {"report_to": nb}})
+            .await
+            .unwrap();
+        finish_live(a, &a.f.row).await;
+        let event = complete(a).await;
+        assert!(event.bound && event.report_to.is_none());
+        let claimed = event_turn(a).await;
+        assert_eq!(snapshot(&claimed), None);
+        // apply_delivery restores transport context only, never the target.
+        let mut tampered = w.clone();
+        tampered.delivery.report_to = Some(nb.into());
+        let mut restored = claimed.clone();
+        restored.report_to = None;
+        watches::apply_delivery(&mut restored, &tampered);
+        assert_eq!(snapshot(&restored), None);
+        assert_eq!(restored.report_to, None);
+        finish_live(a, &claimed).await;
+        assert_eq!(
+            engine::messages(&db, &owner, &id, 100, None)
+                .await
+                .unwrap()
+                .into_iter()
+                .rev()
+                .find(|m| m.role == "assistant")
+                .unwrap()
+                .report_to,
+            None
+        );
+    })
+}
+
+fn check_assigned_carrier(a: &AsyncFixture) -> futures::future::BoxFuture<'_, ()> {
+    Box::pin(async move {
+        use crate::models::assistant_conversation::REPORT_PROVENANCE_V1;
+        let db = a.f.state.db.clone();
+        let owner = a.f.owner.clone();
+        let id = a.f.row.id.clone();
+        let nb = "nyxa-0123456789abcdef0123456789abcdef";
+
+        // (b) A proven assigned operation keeps its target through intervening
+        // direct work; a child submitted from its continuation derives the target
+        // from the admitted live turn, not from the parent's stored field.
+        let row = carrier_turn(a, "assigned").await;
+        let turn_id = row.active_turn.as_ref().unwrap().turn_id.clone();
+        db.collection::<bson::Document>(CONVERSATIONS)
+            .update_one(
+                doc! {"_id": &id, "active_turn.turn_id": &turn_id},
+                doc! {"$set": {"active_turn.report_to": nb}},
+            )
+            .await
+            .unwrap();
+        let assigned = submit_from(a, &turn_id).await;
+        assert_eq!(assigned.delivery.report_to.as_deref(), Some(nb));
+        assert_eq!(assigned.delivery.report_provenance, REPORT_PROVENANCE_V1);
+        finish_live(a, &row).await;
+        let direct = carrier_turn(a, "unrelated").await;
+        assert_eq!(snapshot(&direct), None);
+        assert_eq!(direct.report_to, None);
+        finish_live(a, &direct).await;
+        let event = complete(a).await;
+        assert!(event.bound && event.report_to.as_deref() == Some(nb));
+        let claimed = event_turn(a).await;
+        assert_eq!(snapshot(&claimed).as_deref(), Some(nb));
+        // The parent's stored field is not what a child inherits.
+        db.collection::<bson::Document>(WATCHES)
+            .update_one(
+                doc! {"_id": &assigned.id},
+                doc! {"$set": {"delivery.report_to": "nyxa-other"}},
+            )
+            .await
+            .unwrap();
+        let child = submit_from(a, &claimed.active_turn.as_ref().unwrap().turn_id).await;
+        assert_eq!(child.delivery.report_to.as_deref(), Some(nb));
+        assert_eq!(child.delivery.report_provenance, REPORT_PROVENANCE_V1);
+        assert_eq!(child.delivery.origin, assigned.delivery.origin);
+        finish_live(a, &claimed).await;
+        assert_eq!(
+            engine::messages(&db, &owner, &id, 100, None)
+                .await
+                .unwrap()
+                .into_iter()
+                .rev()
+                .find(|m| m.role == "assistant")
+                .unwrap()
+                .report_to
+                .as_deref(),
+            Some(nb)
+        );
+        watches::cancel(&db, &owner, &id).await.unwrap();
+        db.collection::<bson::Document>(WATCHES)
+            .delete_many(doc! {"_id": &child.id})
+            .await
+            .unwrap();
+    })
+}
+
+fn check_unproven_carrier(a: &AsyncFixture, provenance: i32) -> futures::future::BoxFuture<'_, ()> {
+    Box::pin(async move {
+        use crate::models::assistant_conversation::REPORT_PROVENANCE_V1;
+        let db = a.f.state.db.clone();
+        let owner = a.f.owner.clone();
+        let id = a.f.row.id.clone();
+        let nb = "nyxa-0123456789abcdef0123456789abcdef";
+
+        // (c) Legacy and unknown-version carriers prove nothing; a bound event
+        // whose carrier disagrees resolves to None; an old legacy parent gives a
+        // new child nothing either.
+        let row = carrier_turn(a, "legacy").await;
+        let w = submit_from(a, &row.active_turn.as_ref().unwrap().turn_id).await;
+        db.collection::<bson::Document>(WATCHES)
+            .update_one(
+                doc! {"_id": &w.id},
+                doc! {"$set": {"delivery.report_to": nb, "delivery.report_provenance": provenance}},
+            )
+            .await
+            .unwrap();
+        finish_live(a, &row).await;
+        let event = complete(a).await;
+        assert!(!event.bound && event.report_to.is_none(), "{provenance}");
+        let claimed = event_turn(a).await;
+        assert_eq!(snapshot(&claimed), None, "{provenance}");
+        let child = submit_from(a, &claimed.active_turn.as_ref().unwrap().turn_id).await;
+        assert_eq!(child.delivery.report_to, None);
+        assert_eq!(child.delivery.report_provenance, REPORT_PROVENANCE_V1);
+        finish_live(a, &claimed).await;
+        watches::cancel(&db, &owner, &id).await.unwrap();
+        db.collection::<bson::Document>(WATCHES)
+            .delete_many(doc! {"_id": &child.id})
+            .await
+            .unwrap();
+    })
+}
+
+fn check_disagreeing_carrier(a: &AsyncFixture) -> futures::future::BoxFuture<'_, ()> {
+    Box::pin(async move {
+        let db = a.f.state.db.clone();
+        let id = a.f.row.id.clone();
+        let nb = "nyxa-0123456789abcdef0123456789abcdef";
+
+        let row = carrier_turn(a, "assigned again").await;
+        let turn_id = row.active_turn.as_ref().unwrap().turn_id.clone();
+        db.collection::<bson::Document>(CONVERSATIONS)
+            .update_one(
+                doc! {"_id": &id, "active_turn.turn_id": &turn_id},
+                doc! {"$set": {"active_turn.report_to": nb}},
+            )
+            .await
+            .unwrap();
+        let w = submit_from(a, &turn_id).await;
+        finish_live(a, &row).await;
+        let event = complete(a).await;
+        assert!(event.bound && event.report_to.as_deref() == Some(nb));
+        db.collection::<bson::Document>(WATCHES)
+            .update_one(
+                doc! {"_id": &w.id},
+                doc! {"$set": {"delivery.report_to": "nyxa-other"}},
+            )
+            .await
+            .unwrap();
+        let claimed = event_turn(a).await;
+        assert_eq!(snapshot(&claimed), None);
+        finish_live(a, &claimed).await;
+    })
+}
+
+#[path = "async_service_policy_tests.rs"]
+mod service_policy;
+
+#[path = "async_service_invocation_tests.rs"]
+mod invocation_policy;

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { hookHarness } from "../assistant/assistantHookTestHarness";
 import * as model from "./agentKeyLoginModel";
@@ -132,10 +132,10 @@ test("key form uses compact selection fields and keeps edits local until explici
   assert.equal(form.reviewed.length, 0);
   form.review();
   assert.equal(form.reviewed.length, 1);
-  assert.equal(form.reviewed[0].scopes, "read services:read proxy");
-  assert.equal(form.reviewed[0].platform, "codex");
-  assert.equal(form.reviewed[0].allow_all_services, false);
-  assert.equal(form.reviewed[0].allow_all_nodes, false);
+  assert.equal(form.reviewed[0]!.scopes, "read services:read proxy");
+  assert.equal(form.reviewed[0]!.platform, "codex");
+  assert.equal(form.reviewed[0]!.allow_all_services, false);
+  assert.equal(form.reviewed[0]!.allow_all_nodes, false);
 });
 
 test("platform access locks only same-owner implied services without replacing exact grants", () => {
@@ -152,13 +152,13 @@ test("platform access locks only same-owner implied services without replacing e
   field.onChange(["unavailable", "platform", "org-platform", "manual"]);
   form.harness.flush();
   form.review();
-  assert.deepEqual(form.reviewed[0].allowed_service_ids, [
+  assert.deepEqual(form.reviewed[0]!.allowed_service_ids, [
     "unavailable",
     "platform",
     "org-platform",
     "manual",
   ]);
-  assert.equal(form.reviewed[0].allow_auto_connected_services, true);
+  assert.equal(form.reviewed[0]!.allow_auto_connected_services, true);
 
   const impliedOnly = setupForm({
     ...model.defaultNewAgentKey(),
@@ -171,7 +171,7 @@ test("platform access locks only same-owner implied services without replacing e
   impliedOnly.field("Service access").onChange(["platform", "manual"]);
   impliedOnly.harness.flush();
   impliedOnly.review();
-  assert.deepEqual(impliedOnly.reviewed[0].allowed_service_ids, ["manual"]);
+  assert.deepEqual(impliedOnly.reviewed[0]!.allowed_service_ids, ["manual"]);
 });
 
 test("changing key owner clears previous-owner grants while keeping a same-owner selection intact", () => {
@@ -194,9 +194,9 @@ test("changing key owner clears previous-owner grants while keeping a same-owner
   assert.equal(form.field("Service access").scopeKey, "org");
   assert.deepEqual([...form.field("Node access").options], []);
   form.review();
-  assert.equal(form.reviewed[0].target_org_id, "org");
-  assert.deepEqual(form.reviewed[0].allowed_node_ids, []);
-  assert.equal(form.reviewed[0].allow_auto_connected_services, false);
+  assert.equal(form.reviewed[0]!.target_org_id, "org");
+  assert.deepEqual(form.reviewed[0]!.allowed_node_ids, []);
+  assert.equal(form.reviewed[0]!.allow_auto_connected_services, false);
 });
 
 test("allow-all toggles remain explicit, clear restricted grants, and do not enable the other resource", () => {
@@ -217,9 +217,9 @@ test("allow-all toggles remain explicit, clear restricted grants, and do not ena
   );
   assert.deepEqual([...form.field("Node access").value], ["node"]);
   form.review();
-  assert.equal(form.reviewed[0].allow_all_services, true);
-  assert.equal(form.reviewed[0].allow_all_nodes, false);
-  assert.deepEqual(form.reviewed[0].allowed_service_ids, []);
+  assert.equal(form.reviewed[0]!.allow_all_services, true);
+  assert.equal(form.reviewed[0]!.allow_all_nodes, false);
+  assert.deepEqual(form.reviewed[0]!.allowed_service_ids, []);
 });
 
 test("applying the existing custom expiry preserves its exact timestamp", () => {
@@ -232,7 +232,7 @@ test("applying the existing custom expiry preserves its exact timestamp", () => 
   form.field("Key expiry").onChange(["custom"]);
   form.harness.flush();
   form.review();
-  assert.equal(form.reviewed[0].expires_at, input.expires_at);
+  assert.equal(form.reviewed[0]!.expires_at, input.expires_at);
 });
 
 test("expiry selectors retain validation and disable all permission pickers during pending work", () => {
@@ -251,7 +251,7 @@ test("expiry selectors retain validation and disable all permission pickers duri
   form.field("Key expiry").onChange(["none"]);
   form.harness.flush();
   form.review();
-  assert.equal(form.reviewed[0].expires_at, null);
+  assert.equal(form.reviewed[0]!.expires_at, null);
   const pending = setupForm(model.defaultNewAgentKey(), true);
   for (const item of elements(pending.harness.value()).filter(
     (element) =>
@@ -291,6 +291,7 @@ function setupLogin({ inSheet = false } = {}) {
         },
       },
     },
+    "./useMfaStepUp": { useMfaStepUp: () => ({ handle: async () => false, prompt: null }) },
     "./LoginCodeStatusView": { LoginCodeStatusView: "LoginCodeStatusView" },
     "./AuthSessionContext": {
       useAuthSession: () => ({ isAuthenticated: true }),

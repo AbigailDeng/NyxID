@@ -115,7 +115,7 @@ export function workspaceContextChatNavigationAction(
           return (
             route.name === "AssistantContext" &&
             previous?.conversationId === params.conversationId &&
-            previous.agentId === params.agentId
+            previous?.agentId === params.agentId
           );
         })
       : -1;

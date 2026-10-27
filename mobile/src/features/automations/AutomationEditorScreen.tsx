@@ -497,7 +497,7 @@ function AutomationEditor({
           });
       if (!current()) return;
       const oneTime: SecretValue[] = [];
-      if ("secret" in result && result.secret) {
+      if ("secret" in result && typeof result.secret === "string" && result.secret) {
         if (result.trigger.inbound_url)
           oneTime.push({
             label: "Inbound URL",

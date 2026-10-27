@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import { hookHarness } from "../assistant/assistantHookTestHarness";
 
 type Element = { type: unknown; props: Record<string, any> };
@@ -21,7 +21,7 @@ function elements(root: Element): Element[] {
 
 function setup(value: string | undefined = "model-a") {
   const calls: (string | undefined)[] = [];
-  const props = {
+  const props: { value: string | undefined; onChange: (value: string | undefined) => void; disabled: boolean; models: Model[] } = {
     value,
     disabled: false,
     models: [

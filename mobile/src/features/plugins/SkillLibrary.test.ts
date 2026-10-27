@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { hookHarness } from "../assistant/assistantHookTestHarness";
 import type { AddedSkillItem } from "./SkillLibrary";
@@ -206,18 +206,18 @@ test("Added searches names, descriptions and slug words using spaces, case and r
     const env = setup({ query });
     assert.equal(env.rows().length, 1, query);
     assert.match(
-      env.rows()[0].props.accessibilityLabel,
+      env.rows()[0]!.props.accessibilityLabel,
       /^cloudflare-dns-helper,/,
     );
     assert.match(env.text(), /Added · 2/);
     assert.match(env.text(), /2 of 16/);
   }
   assert.match(
-    setup({ query: "weekly report" }).rows()[0].props.accessibilityLabel,
+    setup({ query: "weekly report" }).rows()[0]!.props.accessibilityLabel,
     /^weekly_report,/,
   );
   assert.match(
-    setup({ query: "sales figures" }).rows()[0].props.accessibilityLabel,
+    setup({ query: "sales figures" }).rows()[0]!.props.accessibilityLabel,
     /^weekly_report,/,
   );
 });
@@ -254,16 +254,16 @@ test("catalog opens read-only review with the original opaque id and exact name,
   );
   assert.match(env.text(), /Find a skill for Research agent/);
   assert.match(
-    env.rows()[0].props.accessibilityLabel,
+    env.rows()[0]!.props.accessibilityLabel,
     /^weekly_report, Added$/,
   );
   assert.match(
-    env.rows()[1].props.accessibilityLabel,
+    env.rows()[1]!.props.accessibilityLabel,
     /^Document Expert, View versions$/,
   );
-  assert.match(textContent(env.rows()[0]), /Weekly report/);
-  env.rows()[0].props.onPress();
-  env.rows()[1].props.onPress();
+  assert.match(textContent(env.rows()[0]!), /Weekly report/);
+  env.rows()[0]!.props.onPress();
+  env.rows()[1]!.props.onPress();
   assert.deepEqual(env.calls, [
     {
       kind: "open",
@@ -289,10 +289,10 @@ test("catalog opens read-only review with the original opaque id and exact name,
 test("Added rows preserve original identity and exact version in accessibility while labels stay readable", () => {
   const env = setup();
   assert.equal(
-    env.rows()[0].props.accessibilityLabel,
+    env.rows()[0]!.props.accessibilityLabel,
     "cloudflare-dns-helper, version 2026.10-exact, Enabled",
   );
-  env.rows()[0].props.onPress();
+  env.rows()[0]!.props.onPress();
   assert.deepEqual(env.calls, [
     {
       kind: "open",

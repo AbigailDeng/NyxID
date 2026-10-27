@@ -26,6 +26,119 @@ fn limits() -> TextLimits {
     }
 }
 
+#[tokio::test]
+async fn optional_provider_header_reaches_utility_inference_after_listing() {
+    let protocol = InferenceWireProtocol::OpenaiCompletions;
+    let (state, mut service, mock) = fixture(protocol).await;
+    service.auth_method = "none".into();
+    service.auth_key_name.clear();
+    service.platform_key = None;
+    service.credential_encrypted.clear();
+    state
+        .db
+        .collection::<DownstreamService>(COLLECTION_NAME)
+        .replace_one(doc! { "_id": &service.id }, &service)
+        .await
+        .unwrap();
+    let provider_id = uuid::Uuid::new_v4().to_string();
+    let now = bson::DateTime::now();
+    state
+        .db
+        .collection::<Document>("provider_configs")
+        .insert_one(doc! {
+            "_id": &provider_id, "slug": "github", "name": "GitHub",
+            "provider_type": "oauth2", "is_active": true, "created_by": "system",
+            "created_at": now, "updated_at": now,
+        })
+        .await
+        .unwrap();
+    state
+        .db
+        .collection::<Document>("service_provider_requirements")
+        .insert_one(doc! {
+            "_id": uuid::Uuid::new_v4().to_string(), "service_id": &service.id,
+            "provider_config_id": &provider_id, "required": false,
+            "injection_method": "header", "injection_key": "X-GitHub-Token",
+            "created_at": now, "updated_at": now,
+        })
+        .await
+        .unwrap();
+    let listed = Box::pin(crate::handlers::keys::list_keys(
+        axum::extract::State(state.clone()),
+        crate::test_utils::test_auth_user(ACTOR),
+    ))
+    .await
+    .unwrap();
+    assert!(listed.0.keys.iter().any(|key| {
+        key.catalog_service_id.as_deref() == Some(service.id.as_str())
+            && key.auth_method == "none"
+            && key.api_key_id.is_none()
+    }));
+    assert_eq!(state.db.collection::<Document>("user_services")
+        .count_documents(doc! { "user_id": ACTOR, "catalog_service_id": &service.id, "source": "auto_provision" })
+        .await.unwrap(), 1);
+    completion(&mock, protocol, "Optional utility", Duration::ZERO).await;
+    assert_eq!(
+        Box::pin(one_shot_text(&state, ACTOR, "Summarize", "Input", limits()))
+            .await
+            .as_deref(),
+        Some("Optional utility")
+    );
+    let requests = mock.received_requests().await.unwrap();
+    assert_eq!(
+        requests.len(),
+        2,
+        "model discovery and inference must both execute"
+    );
+    assert!(
+        requests
+            .iter()
+            .all(|r| !r.headers.contains_key("x-github-token"))
+    );
+
+    let token_id = uuid::Uuid::new_v4().to_string();
+    let (versions, encrypted, _) = crate::services::credential_record_service::oauth_token_fields(
+        &state.encryption_keys,
+        &token_id,
+        ACTOR,
+        None,
+        "utility-optional-token",
+        None,
+    )
+    .await
+    .unwrap();
+    state.db.collection::<Document>("user_provider_tokens").insert_one(doc! {
+        "_id": token_id, "user_id": ACTOR,
+        "provider_config_id": &provider_id, "token_type": "oauth2", "status": "active",
+        "secret_context_versions": bson::to_bson(&versions).unwrap(),
+        "access_token_encrypted": bson::Binary { subtype: bson::spec::BinarySubtype::Generic, bytes: encrypted },
+        "created_at": now, "updated_at": now,
+    }).await.unwrap();
+    // Clear only this test's capability-cache entry so the populated-token
+    // assertion exercises both model discovery and completion again.
+    MODEL_CACHE
+        .lock()
+        .unwrap()
+        .entries
+        .retain(|(id, _), _| id != &service.id);
+    assert_eq!(
+        Box::pin(one_shot_text(&state, ACTOR, "Summarize", "Input", limits()))
+            .await
+            .as_deref(),
+        Some("Optional utility")
+    );
+    let requests = mock.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 4);
+    for request in &requests[2..] {
+        assert_eq!(
+            request.headers.get("x-github-token").unwrap(),
+            "utility-optional-token"
+        );
+        assert!(!request.headers.contains_key("authorization"));
+    }
+    state.db.drop().await.unwrap();
+}
+
 pub(crate) async fn fixture(
     protocol: InferenceWireProtocol,
 ) -> (AppState, DownstreamService, MockServer) {
@@ -420,7 +533,7 @@ async fn assistant_oneshot_platform_usage_bills_acting_person() {
 }
 
 #[tokio::test]
-async fn assistant_oneshot_org_byok_requires_live_actor_access_and_bills_person() {
+async fn assistant_oneshot_never_uses_org_fallback_even_with_live_membership() {
     let (mut state, service, mock) = fixture(InferenceWireProtocol::OpenaiResponses).await;
     let org = "2d86fd56-60eb-4f1d-a3f0-d4199df34dd5";
     state
@@ -465,17 +578,14 @@ async fn assistant_oneshot_org_byok_requires_live_actor_access_and_bills_person(
     assert!(
         one_shot_text(&state, ACTOR, "Summarize", "Data", limits())
             .await
-            .is_some()
+            .is_none()
     );
-    let rows = crate::services::channel_x_tests::billing::settled(&state).await;
-    assert_eq!(rows.len(), 2);
-    for row in rows {
-        assert_eq!(row.billing_owner_id, ACTOR);
-        assert_eq!(row.credential_class, CredentialClass::UserOwned);
-    }
-    for request in mock.received_requests().await.unwrap() {
-        assert_eq!(request.headers["authorization"], format!("Bearer {OWN}"));
-    }
+    assert!(mock.received_requests().await.unwrap().is_empty());
+    assert!(
+        crate::services::channel_x_tests::billing::settled(&state)
+            .await
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -490,7 +600,10 @@ async fn assistant_oneshot_timeout_cancels_without_retry_and_settles_meter() {
     )
     .await;
     let mut bounds = limits();
-    bounds.timeout = Duration::from_secs(2);
+    // The deadline includes model discovery and real database admission.
+    // Leave those steps enough time under parallel suite load so the test
+    // exercises cancellation of a dispatched inference, not admission.
+    bounds.timeout = Duration::from_secs(10);
     let start = std::time::Instant::now();
     assert!(
         one_shot_text(&state, ACTOR, "Summarize", "Data", bounds)
@@ -498,10 +611,12 @@ async fn assistant_oneshot_timeout_cancels_without_retry_and_settles_meter() {
             .is_none()
     );
     assert!(
-        start.elapsed() < Duration::from_secs(10),
-        "Generous CI ceiling; the requested deadline is 2 s"
+        start.elapsed() < Duration::from_secs(20),
+        "The 10 s deadline must cancel before the 30 s vendor response"
     );
-    assert_eq!(mock.received_requests().await.unwrap().len(), 2);
+    let requests = mock.received_requests().await.unwrap();
+    let paths: Vec<_> = requests.iter().map(|r| r.url.path()).collect();
+    assert_eq!(paths, ["/models", "/responses"]);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
         let rows = crate::services::channel_x_tests::billing::settled(&state).await;

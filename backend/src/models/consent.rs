@@ -12,9 +12,13 @@ pub struct Consent {
     pub user_id: String,
     pub client_id: String,
     pub scopes: String,
-    /// Opaque version fences browser decisions and pending incremental codes.
+    /// Authority version rotates when previously valid authority is removed.
+    /// Browser decisions additionally bind the complete authority fingerprint.
     #[serde(default)]
     pub revision: Option<String>,
+    /// Independent CAS version; authority revisions remain stable on broadening.
+    #[serde(default)]
+    pub write_version: Option<String>,
     /// Serializes incremental token issuance with transactional revocation.
     #[serde(default)]
     pub issuance_fence: Option<String>,
@@ -31,6 +35,15 @@ pub struct Consent {
     pub granted_at: DateTime<Utc>,
     #[serde(default, with = "bson_datetime::optional")]
     pub expires_at: Option<DateTime<Utc>>,
+}
+
+/// Protected, server-issued consent identity carried by OAuth codes and tokens.
+/// Missing legacy references never acquire Machine authority on refresh.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedConsentRef {
+    pub consent_id: String,
+    pub consent_revision: String,
 }
 
 /// Explicit opt-in; omission retains the existing replacement/review behavior.
@@ -74,6 +87,7 @@ mod tests {
             client_id: "client-1".to_string(),
             scopes: "openid profile email".to_string(),
             revision: None,
+            write_version: None,
             issuance_fence: None,
             allow_all_services: false,
             allowed_service_ids: None,

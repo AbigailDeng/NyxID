@@ -416,12 +416,12 @@ test("real transport preserves an owned session so malformed media answers recei
       f.calls.map((call) => call.path),
       [`${root}/voice-sessions`, `${root}/voice-sessions/${sessionId}/control`],
     );
-    assert.deepEqual(f.calls[1].options?.body, {
+    assert.deepEqual(f.calls[1]!.options?.body, {
       command_id: requestId,
       expected_revision: session.control_revision,
       action: "end",
     });
-    assert.equal(f.calls[1].options?.signal, undefined);
+    assert.equal(f.calls[1]!.options?.signal, undefined);
   }
 });
 
@@ -436,14 +436,14 @@ test("closing during a real POST still ends a late owned session with a malforme
     await Promise.resolve();
   assert.equal(f.calls.length, 1);
   await f.client.end();
-  assert.equal(f.calls[0].options?.signal?.aborted, true);
+  assert.equal(f.calls[0]!.options?.signal?.aborted, true);
   resolve({ session, sdp_answer: 7 });
   await starting;
   assert.deepEqual(
     f.calls.map((call) => call.path),
     [`${root}/voice-sessions`, `${root}/voice-sessions/${sessionId}/control`],
   );
-  assert.equal(f.calls[1].options?.signal, undefined);
+  assert.equal(f.calls[1]!.options?.signal, undefined);
   assert.deepEqual(f.mediaEvents, ["close"]);
   assert.deepEqual(f.errors, []);
   assert.deepEqual(f.conflicts, []);

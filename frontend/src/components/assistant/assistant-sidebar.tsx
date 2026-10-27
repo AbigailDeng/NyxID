@@ -32,7 +32,6 @@ import {
   Monitor,
   CalendarClock,
   ShieldCheck,
-  SlidersHorizontal,
   Trash2,
   User,
   type LucideIcon,
@@ -59,6 +58,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useAssistantWorkspaceCounts } from "@/hooks/use-assistant-workspace";
+import { useFeature } from "@/hooks/use-feature-flag";
+import { FEATURE_FLAG } from "@/lib/feature-flags";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/auth-store";
 import { useAssistantDraftStore } from "@/stores/assistant-draft-store";
@@ -179,6 +180,7 @@ function ConversationRow({
             className="h-3 w-3 shrink-0 text-text-tertiary"
           />
           <span className="min-w-0 truncate">{shownTitle}</span>
+          {conversation.platform_thread && <span className="shrink-0 rounded bg-muted px-1 text-10 text-muted-foreground">{channelPlatformName(conversation.platform_thread.platform)}</span>}
         </span>
         {showDraft && (
           <span
@@ -604,6 +606,7 @@ export function AssistantSidebar({
   const { current: accountPanel } = useAccountPanel();
   const user = useAuthStore((state) => state.user);
   const counts = useAssistantWorkspaceCounts();
+  const workspacePreview = useFeature(FEATURE_FLAG.ASSISTANT_WORKSPACE_PREVIEW);
   const pluginsActive = activeView === "plugins";
   const approvalsActive = activeView === "approvals";
   const [deleteTarget, setDeleteTarget] = useState<Conversation | undefined>();
@@ -765,15 +768,17 @@ export function AssistantSidebar({
           />
           <span className="truncate">Plugins</span>
         </Link>
-        <ComingSoonItem
-          icon={FileText}
-          label="Artifacts"
-          trailing={
-            <span className="font-mono text-9 text-text-tertiary">
-              {counts.data?.artifacts ?? 0}
-            </span>
-          }
-        />
+        {workspacePreview ? (
+          <ComingSoonItem
+            icon={FileText}
+            label="Artifacts"
+            trailing={
+              <span className="font-mono text-9 text-text-tertiary">
+                {counts.data?.artifacts ?? 0}
+              </span>
+            }
+          />
+        ) : null}
         <Link
           to="/assistant/approvals"
           aria-current={approvalsActive ? "page" : undefined}
@@ -793,7 +798,9 @@ export function AssistantSidebar({
             </span>
           )}
         </Link>
-        <ComingSoonItem icon={Activity} label="Activity" />
+        {workspacePreview ? (
+          <ComingSoonItem icon={Activity} label="Activity" />
+        ) : null}
       </div>
 
       {notice ? (
@@ -804,7 +811,7 @@ export function AssistantSidebar({
           {notice}
         </p>
       ) : null}
-      <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3">
+      <nav aria-label="Agents and conversations" data-scroll-fade="" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3">
         {agents ? (
           <>
             <div className="-ml-2 flex items-center justify-between">
@@ -857,21 +864,13 @@ export function AssistantSidebar({
       </nav>
 
       <div className="shrink-0 border-t border-border/60 p-2">
-        <Link
-          to="/dashboard"
-          className="flex items-center gap-3 rounded-lg px-3 py-2 text-13 text-muted-foreground transition-colors hover:bg-overlay hover:text-foreground"
-        >
-          <SlidersHorizontal className="h-4 w-4 text-text-tertiary" />
-          <span className="flex-1">Studio</span>
-          <ChevronRight className="h-3.5 w-3.5" />
-        </Link>
         <AssistantAccountMenu align="start" side="top">
           <button
             type="button"
             aria-label="Account menu"
             data-keep-drawer-open=""
             className={cn(
-              "mt-1 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-overlay",
+              "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-overlay",
               Boolean(accountPanel.panel) && "bg-overlay-strong font-medium text-foreground",
             )}
           >

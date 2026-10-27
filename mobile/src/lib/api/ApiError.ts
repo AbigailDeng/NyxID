@@ -12,6 +12,7 @@ export class ApiError extends Error {
   readonly statusCode: number;
   /** Optional structured validation diagnostics; rendered only by their owner. */
   readonly details?: unknown;
+  readonly reason?: string;
 
   constructor(opts: {
     errorKey: string;
@@ -19,6 +20,7 @@ export class ApiError extends Error {
     statusCode: number;
     message: string;
     details?: unknown;
+    reason?: string;
   }) {
     super(opts.message);
     this.name = "ApiError";
@@ -26,6 +28,7 @@ export class ApiError extends Error {
     this.errorCode = opts.errorCode;
     this.statusCode = opts.statusCode;
     this.details = opts.details;
+    this.reason = opts.reason;
   }
 }
 

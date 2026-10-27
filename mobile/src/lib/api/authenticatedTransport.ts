@@ -1,6 +1,8 @@
 import { decodeJwtSub } from "../auth/jwt";
 
 export type RequestOptions = {
+  expectedAccountId?: string;
+  authorityGuard?: () => void;
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   body?: unknown;
   rawBody?: ArrayBuffer;
@@ -62,7 +64,10 @@ export async function executeAuthenticatedRequest<
   if (requiresAuth && !session?.accessToken)
     throw new Error("auth_session_missing");
   const originalIdentity = session ? identity(session) : null;
+  if (options.expectedAccountId && (!session || decodeJwtSub(session.accessToken) !== options.expectedAccountId))
+    throw new Error("analytics_account_changed");
   const checkAdmission = () => {
+    options.authorityGuard?.();
     ensureNotAborted(options.signal);
     if (requiresAuth && input.getAuthEpoch?.() !== originalEpoch) {
       throw Object.assign(new Error("auth_session_changed"), {

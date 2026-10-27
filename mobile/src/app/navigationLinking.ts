@@ -25,7 +25,6 @@ export const navigationLinkingConfig: NonNullable<
       initialRouteName: "Pages",
       screens: {
         Pages: {
-          initialRouteName: "Agents",
           screens: {
             Automations: {
               path: "automations",

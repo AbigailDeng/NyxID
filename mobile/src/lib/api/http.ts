@@ -1,15 +1,22 @@
+import { createSessionRefresh } from "../auth/sessionRefresh";
 import Constants from "expo-constants";
 import { fetch as expoFetch } from "expo/fetch";
 import { executeAuthenticatedRequest, type RequestOptions } from "./authenticatedTransport";
 import { mapBackendRequestToChallenge, mapChallengeStatus, type BackendApprovalRequestItem } from "./approvalAdapter";
 import { getAuthEpoch } from "../auth/authEpoch";
 import { readBoundedBytes } from "./readBoundedBytes";
+import { guardedJsonTransport } from "./guardedTransport";
+import { analyticsConsentState, analyticsDeviceHeaders } from "../analyticsConsentState";
+import { decodeJwtSub } from "../auth/jwt";
+import { ACCOUNT_DELETION_POLICY_VERSION } from "../accountDeletionPolicy";
 
 import { ApiError } from "./ApiError";
+import { mfaChallengeFromResponse } from "../auth/mfaChallenge";
 import {
   clearStoredAuthSession,
+  commitRefreshedAuthSession,
+  authSessionGeneration,
   loadStoredAuthSession,
-  persistRefreshedAuthSession,
 } from "../auth/sessionStore";
 import {
   ApprovalMode,
@@ -169,7 +176,12 @@ function buildApiError(payload: unknown, status: number): ApiError | Error {
         ? obj.message
         : errorKey;
 
-    return new ApiError({ errorKey, errorCode, statusCode: status, message, details: obj.details });
+    const challenge = mfaChallengeFromResponse(payload, status);
+    if (challenge) return challenge;
+    const reason = obj.details && typeof obj.details === "object" &&
+      (obj.details as Record<string, unknown>).reason === "mfa_challenge_expired"
+      ? "mfa_challenge_expired" : undefined;
+    return new ApiError({ errorKey, errorCode, statusCode: status, message, reason, details: obj.details });
   }
 
   if (typeof payload === "string" && payload.length > 0) {
@@ -289,7 +301,6 @@ function buildPushDevicePayload(payload: PushTokenRegisterRequest): {
   };
 }
 
-let inFlightRefreshRequest: Promise<RefreshResponse | null> | null = null;
 
 async function requestRefreshAccessToken(
   refreshToken: string,
@@ -342,49 +353,10 @@ async function requestRefreshAccessToken(
   return null;
 }
 
-async function refreshAccessTokenWithSingleFlight(): Promise<RefreshResponse | null> {
-  if (inFlightRefreshRequest) {
-    return inFlightRefreshRequest;
-  }
-
-  inFlightRefreshRequest = (async () => {
-    const epoch = getAuthEpoch();
-    const session = await loadStoredAuthSession();
-    if (!session?.refreshToken) {
-      return null;
-    }
-
-    const refreshed = await requestRefreshAccessToken(session.refreshToken);
-    if (!refreshed) {
-      return null;
-    }
-
-    // An old refresh must never restore credentials after logout or replace
-    // a newly signed-in account while its network request was in flight.
-    const currentSession = await loadStoredAuthSession();
-    if (!currentSession || currentSession.refreshToken !== session.refreshToken || epoch !== getAuthEpoch()) {
-      return null;
-    }
-
-    const nextRefreshToken = refreshed.refresh_token || session.refreshToken;
-    const persisted = await persistRefreshedAuthSession({
-      accessToken: refreshed.access_token,
-      refreshToken: nextRefreshToken,
-      accessTokenExpiresAt: computeAccessTokenExpiresAt(refreshed.expires_in),
-      userId: session.userId,
-    }, epoch, session.refreshToken);
-    if (!persisted) return null;
-
-    return {
-      ...refreshed,
-      refresh_token: nextRefreshToken,
-    };
-  })().finally(() => {
-    inFlightRefreshRequest = null;
-  });
-
-  return inFlightRefreshRequest;
-}
+const refreshAccessTokenWithSingleFlight = createSessionRefresh({
+  load: loadStoredAuthSession, commit: commitRefreshedAuthSession,
+  request: requestRefreshAccessToken, expiresAt: computeAccessTokenExpiresAt,
+});
 
 export async function refreshAccessTokenIfNeeded(): Promise<boolean> {
   const session = await loadStoredAuthSession();
@@ -408,6 +380,7 @@ export async function refreshAccessTokenIfNeeded(): Promise<boolean> {
 
 function clientHeaders(): Record<string, string> {
   return {
+    ...analyticsDeviceHeaders(),
     "X-NyxID-Client": "mobile",
     "X-NyxID-Client-Version": Constants.expoConfig?.version ?? "dev",
   };
@@ -431,15 +404,80 @@ export async function requestAuthenticatedResponse(path: string, options: Reques
 }
 
 export async function requestJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { response, assertOwner } = await executeAuthenticatedRequest({
-    url: buildUrl(path), options, clientHeaders: clientHeaders(),
-    transport: fetch, loadSession: loadStoredAuthSession,
-    refresh: refreshAccessTokenWithSingleFlight, invalidate: invalidateSession,
-    toError: buildApiError, getAuthEpoch,
+  const method = options.method ?? "GET";
+  const requiresAuth = options.requiresAuth ?? true;
+  const retryOnAuthFailure = options.retryOnAuthFailure ?? true;
+  const expectedEpoch = getAuthEpoch();
+  const expectedSessionGeneration = authSessionGeneration();
+  const guard = () => {
+    options.authorityGuard?.();
+    if (options.signal?.aborted) throw Object.assign(new Error("Request cancelled"), { name: "AbortError" });
+    if (requiresAuth && getAuthEpoch() !== expectedEpoch) throw new Error("auth_session_changed");
+    if (requiresAuth && authSessionGeneration() !== expectedSessionGeneration) throw new Error("auth_session_changed");
+    if (options.expectedAccountId && analyticsConsentState.getSnapshot().accountId !== options.expectedAccountId)
+      throw new Error("analytics_account_changed");
+  };
+
+  // Device narrowing is bound to the expected actor; it cannot authorize
+  // collection under a different session loaded during a switch.
+  const telemetryHeaders: Record<string, string> = {
+    ...analyticsDeviceHeaders(),
+    "X-NyxID-Client": "mobile",
+    "X-NyxID-Client-Version":
+      (Constants.expoConfig?.version as string | undefined) ?? "dev",
+  };
+
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    ...telemetryHeaders,
+    ...options.headers,
+  };
+
+  if (options.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  guard();
+  const session = requiresAuth ? await loadStoredAuthSession() : null;
+  guard();
+  if (options.expectedAccountId && (!session || decodeJwtSub(session.accessToken) !== options.expectedAccountId))
+    throw new Error("analytics_account_changed");
+
+  if (requiresAuth) {
+    if (!session?.accessToken) {
+      throw new Error("auth_session_missing");
+    }
+    headers.Authorization = `Bearer ${session.accessToken}`;
+  }
+
+  const send = () => {
+    guard();
+    return fetch(buildUrl(path), {
+      method,
+      headers,
+      signal: options.signal,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    });
+
+  };
+
+  return guardedJsonTransport<T>({
+    send, read: readJsonSafely, guard, requiresAuth, retry: retryOnAuthFailure,
+    refresh: async () => {
+      const refreshed = await refreshAccessTokenWithSingleFlight();
+      guard();
+      if (!refreshed) return false;
+      if (options.expectedAccountId && decodeJwtSub(refreshed.access_token) !== options.expectedAccountId)
+        throw new Error("analytics_account_changed");
+      headers.Authorization = `Bearer ${refreshed.access_token}`;
+      return true;
+    },
+    invalidate: async () => {
+      guard();
+      if (onSessionInvalidated) onSessionInvalidated(); else await clearStoredAuthSession();
+    },
+    failure: buildApiError,
   });
-  const payload = await readJsonSafely(response);
-  await assertOwner();
-  return payload as T;
 }
 
 /** Raw upload shares the same secure admission and single 401 refresh as JSON. */
@@ -594,6 +632,10 @@ export async function loginWithPasswordRequest(payload: LoginRequest): Promise<L
     body: { ...payload, client: "mobile" },
     requiresAuth: false,
   });
+}
+
+export async function verifyMfaRequest(body: { code: string; mfa_token: string }): Promise<LoginResponse> {
+  return requestJson<LoginResponse>("/auth/mfa/verify", { method: "POST", body: { ...body, client: "mobile" }, requiresAuth: false, retryOnAuthFailure: false });
 }
 
 export async function registerWithPasswordRequest(
@@ -783,5 +825,6 @@ export async function getCurrentUserProfileRequest(signal?: AbortSignal): Promis
 export async function deleteCurrentUserAccountRequest(): Promise<DeleteAccountResponse> {
   return requestJson<DeleteAccountResponse>("/users/me", {
     method: "DELETE",
+    headers: { "X-NyxID-Account-Deletion-Policy": ACCOUNT_DELETION_POLICY_VERSION },
   });
 }

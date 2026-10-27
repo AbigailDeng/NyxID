@@ -25,9 +25,12 @@ export function AgentKeyCreateForm({
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createDeviceLoginStyles(colors), [colors]);
-  const [draft, setDraft] = useState(initialValues ?? defaultNewAgentKey);
+  const [draft, setDraft] = useState(() => initialValues ? {
+    ...initialValues,
+    expires_at: initialValues.never_expires ? null : initialValues.expires_at || defaultNewAgentKey().expires_at,
+  } : defaultNewAgentKey());
   const [expiry, setExpiry] = useState(
-    initialValues ? (initialValues.expires_at ? "custom" : "none") : "90",
+    initialValues?.never_expires ? "none" : initialValues?.expires_at ? "custom" : "90",
   );
   const [error, setError] = useState<string | null>(null);
   function update<K extends keyof NewAgentKey>(key: K, value: NewAgentKey[K]) {
@@ -60,9 +63,12 @@ export function AgentKeyCreateForm({
         disabled={disabled}
         onChange={([owner]) => {
           if (!owner || owner === (draft.target_org_id ?? "personal")) return;
+          setExpiry("90");
           setDraft({
             ...draft,
             target_org_id: owner === "personal" ? undefined : owner,
+            expires_at: defaultNewAgentKey().expires_at,
+            never_expires: undefined,
             allowed_service_ids: [],
             allowed_node_ids: [],
             allow_all_services: false,
@@ -237,6 +243,7 @@ export function AgentKeyCreateForm({
         onChange={([choice]) => {
           if (!choice || choice === expiry) return;
           setExpiry(choice);
+          update("never_expires", choice === "none");
           update(
             "expires_at",
             choice === "none"

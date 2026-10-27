@@ -137,7 +137,7 @@ export function workspaceHeaderOptions({
         : [
             {
               type: "custom",
-              element: leftButton(),
+              element: leftButton()!,
               hidesSharedBackground: true,
             },
           ],
@@ -146,7 +146,7 @@ export function workspaceHeaderOptions({
         ? [
             {
               type: "custom",
-              element: closeButton(),
+              element: closeButton()!,
               hidesSharedBackground: true,
             },
           ]

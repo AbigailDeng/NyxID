@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { hookHarness } from "../features/assistant/assistantHookTestHarness";
 
@@ -32,7 +32,7 @@ function setup(iconUrl?: string | null) {
   });
   const exports = harness.load(
     fileURLToPath(new URL("./ServiceIcon.tsx", import.meta.url)),
-  );
+  ) as { ServiceIcon: (props: unknown) => Element; serviceIconSource: (value: unknown) => {svg: boolean} | null };
   const props = { iconUrl, initial: "GH", color: "green" };
   harness.mount(() => exports.ServiceIcon(props));
   return { harness, props, source: exports.serviceIconSource };
@@ -87,9 +87,9 @@ test("icon URLs are validated without allowing local files, credentials or execu
     `https://assets.example/${"a".repeat(2048)}`,
   ])
     assert.equal(view.source(invalid), null, String(invalid));
-  assert.equal(view.source("http://localhost/catalog-icons/id").svg, true);
-  assert.equal(view.source("https://assets.example/logo.SVG?v=2").svg, true);
-  assert.equal(view.source("https://assets.example/logo.png").svg, false);
+  assert.equal(view.source("http://localhost/catalog-icons/id")!.svg, true);
+  assert.equal(view.source("https://assets.example/logo.SVG?v=2")!.svg, true);
+  assert.equal(view.source("https://assets.example/logo.png")!.svg, false);
 });
 
 test("missing or invalid icons retain a decorative fallback without adding another accessibility stop", () => {

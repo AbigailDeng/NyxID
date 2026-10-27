@@ -3,7 +3,11 @@ import type {
   ServiceViewsPreferences,
 } from "@/schemas/service-view";
 import type { ProxyOperationPolicy } from "@/schemas/services";
-import type { InferenceMetadata, PlatformKeyConfig, LanePricingView } from "@/schemas/platform-keys";
+import type {
+  InferenceMetadata,
+  PlatformKeyConfig,
+  LanePricingView,
+} from "@/schemas/platform-keys";
 import type { BillingMetric } from "@/schemas/billing";
 
 /// Resolved platform role for a user. `admin` is full read+write,
@@ -18,9 +22,10 @@ export interface User {
   readonly avatar_url: string | null;
   readonly email_verified: boolean;
   readonly mfa_enabled: boolean;
-  /// Social login provider ("google", "github", ...) or null for
-  /// email/password accounts. Older backends omit the field.
+  /// Linked social provider ("google", "github", ...) or null when absent.
+  /// Password availability is independent. Older backends omit this field.
   readonly social_provider?: string | null;
+  readonly has_password?: boolean;
   readonly is_admin: boolean;
   /// Read-only platform admin. Defaults to false. When true (and `is_admin`
   /// is false) the user can hit admin GET endpoints but no writes.
@@ -45,13 +50,23 @@ export interface OnboardingState {
 }
 
 /// User-scoped configuration surfaced on `GET /users/me`.
+export interface SecurityPreferences {
+  readonly skip_mfa_for_approved_sign_ins: boolean;
+}
+
 export interface ProfileConfig {
+  readonly security?: SecurityPreferences;
   readonly services_view?: ServiceViewFilters | null;
   readonly service_views?: ServiceViewsPreferences | null;
   readonly onboarding: OnboardingState;
 }
 
 export interface UserCapabilities {
+  /** Admin, or Operator holding Tools Manager. Older backends omit it. */
+  readonly manage_tools?: boolean;
+  readonly read_feature_flags?: boolean;
+  readonly create_feature_flags?: boolean;
+  readonly manage_all_feature_flags?: boolean;
   /** Admin, or Operator holding Catalog Manager. Older backends omit it. */
   readonly manage_catalog?: boolean;
   readonly billing_available?: boolean;
@@ -121,7 +136,9 @@ export function canManageCreditGrants(
     | null
     | undefined,
 ): boolean {
-  return canAdminWrite(user) || user?.capabilities?.manage_credit_grants === true;
+  return (
+    canAdminWrite(user) || user?.capabilities?.manage_credit_grants === true
+  );
 }
 
 export function canManageCatalog(
@@ -131,6 +148,29 @@ export function canManageCatalog(
     | undefined,
 ): boolean {
   return canAdminWrite(user) || user?.capabilities?.manage_catalog === true;
+}
+
+/** Backend capability is required; role labels alone never grant Tool writes. */
+export function canManageTools(
+  user:
+    | Pick<User, "is_admin" | "is_operator" | "role" | "capabilities">
+    | null
+    | undefined,
+): boolean {
+  return canAdminWrite(user) || user?.capabilities?.manage_tools === true;
+}
+export function canWriteTool(
+  user: User | null | undefined,
+  service: DownstreamService,
+): boolean {
+  return (
+    canAdminWrite(user) ||
+    (canManageTools(user) &&
+      service.tools_manager_eligible === true &&
+      service.tools_manager_created === true &&
+      service.created_by === user?.id &&
+      (!service.owner_user_id || service.owner_user_id === user?.id))
+  );
 }
 
 /// True if the user may open the admin Usage page: everyone with admin read
@@ -145,7 +185,30 @@ export function canReadAdminUsage(
   return hasAdminRead(user) || user?.capabilities?.read_admin_usage === true;
 }
 
+export function canReadFeatureFlags(
+  user:
+    | Pick<User, "is_admin" | "is_operator" | "role" | "capabilities">
+    | null
+    | undefined,
+): boolean {
+  return hasAdminRead(user) || user?.capabilities?.read_feature_flags === true;
+}
+
+export function canCreateFeatureFlags(
+  user:
+    | Pick<User, "is_admin" | "is_operator" | "role" | "capabilities">
+    | null
+    | undefined,
+): boolean {
+  return (
+    canAdminWrite(user) || user?.capabilities?.create_feature_flags === true
+  );
+}
+
 export interface ApiKey {
+  /** Approval CAS only; normal use may advance this version. */
+  readonly state_version?: number;
+  readonly purpose?: string;
   readonly assistant_conversation_id?: string | null;
   readonly id: string;
   readonly name: string;
@@ -199,6 +262,7 @@ export interface ApiKeyCreateResponse {
   readonly key_prefix: string;
   readonly scopes: string;
   readonly created_at: string;
+  readonly expires_at: string | null;
 }
 
 export interface ApiKeyUsageService {
@@ -261,6 +325,11 @@ export interface OAuthClient {
 }
 
 export interface DownstreamService {
+  readonly icon_url?: string | null;
+  readonly catalog_manager_created?: boolean;
+  readonly tools_manager_created?: boolean;
+  readonly tools_manager_eligible?: boolean;
+  readonly tools_credential_frozen?: boolean;
   readonly offering_kind?: "ai_service" | "tool";
   readonly topics?: readonly string[];
   readonly supplier?: string | null;
@@ -268,6 +337,7 @@ export interface DownstreamService {
     | import("zod").infer<typeof import("@/schemas/tools").importSourceSchema>
     | null;
   readonly provider_config_id?: string | null;
+  readonly destination_targets?: Readonly<Record<string, string>>;
   readonly credential_configured?: boolean | null;
   readonly proxy_operation_policy?: ProxyOperationPolicy | null;
   readonly inference?: InferenceMetadata | null;
@@ -286,6 +356,7 @@ export interface DownstreamService {
   readonly service_type: string;
   readonly visibility: string;
   readonly auth_method: string;
+  readonly auth_scheme?: string | null;
   readonly auth_type: string | null;
   readonly auth_key_name: string;
   readonly is_active: boolean;
@@ -355,6 +426,19 @@ export interface DownstreamService {
    * (UI offers a "manage in AI Services" link).
    */
   readonly your_binding_count?: number;
+  /**
+   * Whether the viewer may resync connection identity for this service.
+   * Sent only by `GET /services/{id}`; absent means not allowed.
+   */
+  readonly can_resync_identity?: boolean;
+}
+
+export interface ResyncIdentityResponse {
+  readonly catalog_service_id: string;
+  /** Connections to this service that were checked. */
+  readonly matched_count: number;
+  /** Connections whose identity settings differed and were rewritten. */
+  readonly changed_count: number;
 }
 
 export interface DefaultRequestHeader {
@@ -417,6 +501,7 @@ export interface ServiceCapabilities {
 }
 
 export interface ServiceBilling {
+  readonly managed_execution?: ManagedExecutionContract | null;
   readonly byok_pricing?: LanePricingView | null;
   readonly platform_key_pricing?: LanePricingView | null;
   /** Admin opt-in: only platform_billable services charge wallet credits. */
@@ -431,6 +516,17 @@ export interface ServiceBilling {
   readonly resale_billable?: boolean;
   readonly resale_metric?: string;
   readonly lago_resale_metric_code?: string | null;
+}
+
+export interface ManagedExecutionContract {
+  readonly model: string;
+  readonly max_input_tokens: number;
+  readonly max_output_tokens: number;
+  readonly max_request_bytes: number;
+  readonly max_response_bytes: number;
+  readonly tariff_version: string;
+  readonly tariff_source: string;
+  readonly tariff_verified_at: { readonly $date: { readonly $numberLong: string } | string };
 }
 
 export interface ServicePlatformPricing {
@@ -475,6 +571,7 @@ export type CreateServicePayload =
       /// Required when auth_type is "body" (e.g. "app_secret" for Lark).
       /// Also accepted as an override for other auth types.
       readonly auth_key_name?: string;
+      readonly auth_scheme?: string;
       /** Write-only master credential for an internal service row. */
       readonly credential?: string;
       readonly service_category?: string;
@@ -499,6 +596,7 @@ export type UpdateServicePayload =
       readonly description?: string;
       readonly visibility?: string;
       readonly base_url?: string;
+      readonly auth_scheme?: string | null;
       readonly is_active?: boolean;
       readonly openapi_spec_url?: string;
       readonly asyncapi_spec_url?: string;
@@ -676,7 +774,7 @@ export interface MfaRequiredError {
 
 export interface MfaVerifyRequest {
   readonly code: string;
-  readonly mfa_token: string;
+  readonly mfa_token?: string;
 }
 
 export interface PublicConfig {
@@ -714,6 +812,7 @@ export interface ProviderConfig {
   readonly default_scopes: readonly string[] | null;
   readonly supports_oauth_scopes?: boolean;
   readonly supports_pkce: boolean;
+  readonly authorization_nonce_required?: boolean;
   readonly device_code_url: string | null;
   readonly device_token_url: string | null;
   readonly device_verification_url: string | null;
@@ -740,6 +839,7 @@ export interface ProviderRevocationConfig {
   readonly url: string;
   readonly auth: "inherit" | "none" | "client_id" | "basic" | "post";
   readonly revokes_grant: boolean;
+  readonly effect_scope?: "token_only" | "grant_wide" | "request_scoped" | null;
 }
 
 export interface UserProviderCredentials {

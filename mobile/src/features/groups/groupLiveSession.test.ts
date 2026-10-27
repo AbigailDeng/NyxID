@@ -120,7 +120,7 @@ test("last release cancels both lanes, rejects late callbacks, and resets seen m
   h.runs[0]!.onEvent({ type: "group", id: GROUP });
   h.runs[0]!.onStatus("live");
   h.advance(2500);
-  assert.deepEqual(h.invalidations, []);
+  assert.equal(h.invalidations.length, 0);
   assert.equal(h.session.getStatus(h.client, 1), "idle");
   const freshRelease = h.session.acquire(h.client, 1, () => true);
   h.runs[1]!.onEvent(event);
@@ -193,12 +193,12 @@ test("global and consumer availability fence events, statuses and delayed invali
   h.runs[0]!.onEvent({ type: "group", id: GROUP });
   h.allow(false);
   h.advance(2000);
-  assert.deepEqual(h.invalidations, []);
+  assert.equal(h.invalidations.length, 0);
   h.allow(true);
   h.runs[0]!.onEvent({ type: "group", id: GROUP });
   foreground = false;
   h.advance(2000);
-  assert.deepEqual(h.invalidations, []);
+  assert.equal(h.invalidations.length, 0);
   const releaseVisible = h.session.acquire(h.client, 1, () => true);
   h.runs[0]!.onStatus("live");
   h.runs[0]!.onEvent({ type: "group", id: GROUP });

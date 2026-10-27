@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import { deferred, hookHarness } from "./assistantHookTestHarness";
 import { historySchema, type AssistantHistory } from "./assistantTypes";
 import type { useAssistant } from "./useAssistant";
@@ -130,7 +130,7 @@ test("switching chats during either final refresh always releases the finished s
     x.h.flush();
     assert.equal(x.h.value().sending, true);
     x.hold(phase);
-    x.streams[0].done.resolve();
+    x.streams[0]!.done.resolve();
     await x.h.settle();
     assert.equal(x.held(), true, phase);
     x.h.value().openConversation();
@@ -151,7 +151,7 @@ test("old final refresh cannot clear the new send's lock, live reply or optimist
   const first = x.h.value().send("first message");
   x.h.flush();
   x.hold("history");
-  x.streams[0].done.resolve();
+  x.streams[0]!.done.resolve();
   await x.h.settle();
   assert.equal(x.held(), true);
   x.h.value().openConversation();
@@ -167,10 +167,10 @@ test("old final refresh cannot clear the new send's lock, live reply or optimist
   assert.equal(x.h.value().sending, true);
   assert.equal(x.h.value().live?.conversationId, B);
   assert.equal(x.h.value().inputText, "second message");
-  assert.equal(x.streams[1].controller.signal.aborted, false);
+  assert.equal(x.streams[1]!.controller.signal.aborted, false);
   await assert.rejects(x.h.value().send("third message"), /already being sent/);
   assert.equal(x.streams.length, 2);
-  x.streams[1].done.resolve();
+  x.streams[1]!.done.resolve();
   await second;
   await x.h.settle();
   assert.equal(x.h.value().sending, false);
@@ -183,7 +183,7 @@ test("unmount during final refresh cannot publish terminal UI into the released 
   const send = x.h.value().send("message");
   x.h.flush();
   x.hold("history");
-  x.streams[0].done.resolve();
+  x.streams[0]!.done.resolve();
   await x.h.settle();
   x.h.unmount();
   x.release();

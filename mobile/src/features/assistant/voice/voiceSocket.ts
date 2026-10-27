@@ -34,7 +34,7 @@ export function createVoiceSocketFactory(input: {
       /^\/assistant\/nyxagent\/conversations\/([^/]+)\/voice-sessions\/([^/]+)\/stream$/.exec(
         path,
       );
-    if (!match || assistantVoiceStreamPath(match[1], match[2]) !== path)
+    if (!match?.[1] || !match[2] || assistantVoiceStreamPath(match[1], match[2]) !== path)
       throw new Error("Invalid voice connection.");
     const base = new URL(input.apiBaseUrl);
     if (

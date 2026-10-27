@@ -1,3 +1,4 @@
+import { hydratedTestRouter } from "./routerTestHarness";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
@@ -18,13 +19,13 @@ import {
   type WorkspaceChatTarget,
 } from "./workspaceChatNavigation";
 
-const workspaceRouter = TabRouter(workspaceRouterOptions);
+const workspaceRouter = hydratedTestRouter(TabRouter(workspaceRouterOptions));
 const workspaceOptions = {
   routeNames: ["Assistant"],
   routeParamList: {},
   routeGetIdList: {},
 };
-const rootRouter = StackRouter({ initialRouteName: "Workspace" });
+const rootRouter = hydratedTestRouter(StackRouter({ initialRouteName: "Workspace" }));
 const rootOptions = {
   routeNames: [
     "Auth",

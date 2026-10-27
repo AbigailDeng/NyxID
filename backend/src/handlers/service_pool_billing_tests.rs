@@ -20,6 +20,13 @@ struct EntitledLago;
 
 #[async_trait::async_trait]
 impl LagoApi for EntitledLago {
+    async fn tax_config(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> crate::errors::AppResult<crate::services::billing::lago_client::LagoTaxConfig> {
+        Ok(crate::services::billing::taxes::zero_config())
+    }
     async fn ensure_customer(&self, input: &OwnerProvisionInput) -> AppResult<String> {
         Ok(input.external_customer_id.clone())
     }
@@ -194,7 +201,11 @@ async fn billed_fixture(label: &str, first_response: ResponseTemplate) -> Billed
 }
 
 async fn settled_rows(fixture: &BilledFixture, expected: usize) -> Vec<UsageMeterRow> {
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+    // Release follows the attempt's own deadline (up to 20 s overall in these
+    // fixtures) plus MongoDB settlement. Observe for longer than that budget so
+    // a loaded four-slot CI runner cannot turn a correct release into a timeout;
+    // the assertions on what was released are unchanged.
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
             let rows: Vec<UsageMeterRow> = fixture
                 .proxy
@@ -525,10 +536,15 @@ async fn pool_proxy_billing_releases_proven_unsent_hold_before_byok_admission() 
 
 #[tokio::test]
 async fn pool_proxy_billing_unknown_timeout_releases_hold_without_inventing_usage() {
+    // Admission shares the attempt deadline. A one-second budget can expire
+    // during real MongoDB admission under parallel fixture/index creation,
+    // exercising proven-unsent behavior instead of the post-dispatch timeout
+    // this test must cover. Keep the vendor slower than a generous admission
+    // and attempt budget; assertions below still require actual dispatch.
     let fixture = billed_fixture(
         "pool_billing_unknown",
         ResponseTemplate::new(200)
-            .set_delay(std::time::Duration::from_secs(3))
+            .set_delay(std::time::Duration::from_secs(30))
             .set_body_json(json!({"usage": {"total_tokens": 1}})),
     )
     .await;
@@ -540,8 +556,8 @@ async fn pool_proxy_billing_unknown_timeout_releases_hold_without_inventing_usag
         .update_one(
             doc! { "_id": &fixture.proxy.pool_id },
             doc! { "$set": {
-                "failover.retry_on": ["timeout"], "failover.per_attempt_timeout_ms": 1_000,
-                "failover.overall_deadline_ms": 2_000,
+                "failover.retry_on": ["timeout"], "failover.per_attempt_timeout_ms": 10_000,
+                "failover.overall_deadline_ms": 20_000,
             } },
         )
         .await
@@ -550,8 +566,19 @@ async fn pool_proxy_billing_unknown_timeout_releases_hold_without_inventing_usag
         Ok(response) => response,
         Err(error) => error.into_response(),
     };
-    assert!(response.status().is_server_error());
-    assert_eq!(fixture.first.received_requests().await.unwrap().len(), 1);
+    let status = response.status();
+    assert!(status.is_server_error());
+    let body = axum::body::to_bytes(response.into_body(), 8192)
+        .await
+        .unwrap();
+    let error_code =
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap_or_default()["error_code"]
+            .clone();
+    assert_eq!(
+        fixture.first.received_requests().await.unwrap().len(),
+        1,
+        "must exercise a dispatched timeout; status={status}, error_code={error_code}"
+    );
     assert!(fixture.second.received_requests().await.unwrap().is_empty());
     let rows = settled_rows(&fixture, 1).await;
     assert!(
@@ -641,7 +668,10 @@ async fn pool_proxy_paused_consumer_renews_lease_and_lease_loss_closes_provider(
     let initial = rows.find_one(doc! {}).await.unwrap().unwrap();
     assert!(!initial.released);
     let initial_lease = initial.pool_attempt.as_ref().unwrap().lease_until;
-    tokio::time::timeout(std::time::Duration::from_secs(14), async {
+    // The heartbeat renews every 10 s. Observe two full intervals plus margin,
+    // because a loaded CI runner can delay one tick past a single interval
+    // without the renewal ever stopping. The renewal itself is still required.
+    tokio::time::timeout(std::time::Duration::from_secs(25), async {
         loop {
             let current = rows
                 .find_one(doc! { "_id": &initial.id })

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { hookHarness } from "../assistant/assistantHookTestHarness";
 import { agentSchema } from "../agents/agentContracts";
@@ -367,7 +367,7 @@ test("an organization draft can return to Personal after organization eligibilit
   ]) {
     const env = setup({ creating: true });
     env.field("Ownership").onChange([ORG]);
-    env.ownershipAvailability(feature, identity);
+    env.ownershipAvailability(feature!, identity!);
     const ownership = env.field("Ownership");
     assert.deepEqual(plain(ownership.value), [ORG]);
     assert.equal(

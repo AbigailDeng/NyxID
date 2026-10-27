@@ -101,7 +101,7 @@ type AssistantScreenProps = {
 
 // Both persisted and streamed replies share Web's automatic URL recognition.
 const assistantMarkdown = MarkdownIt(assistantMarkdownOptions);
-assistantMarkdown.validateLink = (url) => safeAssistantLinkUrl(url) !== null;
+assistantMarkdown.validateLink = (url: string) => safeAssistantLinkUrl(url) !== null;
 
 export function AssistantScreen({
   route,

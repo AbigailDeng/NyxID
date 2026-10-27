@@ -3,7 +3,6 @@ use futures::TryStreamExt;
 use mongodb::bson::{self, Binary, Bson, Document, doc, spec::BinarySubtype};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
-use url::Url;
 use uuid::Uuid;
 
 use crate::crypto::token::{generate_random_token, hash_token};
@@ -32,6 +31,7 @@ pub const KNOWN_OIDC_SCOPES: &[&str] = &[
     "groups",
     OFFLINE_ACCESS_SCOPE,
     "proxy",
+    "machine",
     "urn:nyxid:scope:broker_binding",
 ];
 
@@ -196,13 +196,14 @@ pub fn validate_allowed_scopes_list(scopes: &[String]) -> AppResult<String> {
     validate_allowed_scopes(&scopes.join(" "))
 }
 
-/// Validate, trim, and deduplicate registered OAuth redirect URIs.
+/// Trim, validate and deduplicate registered OAuth redirect URIs. Preserve the
+/// trimmed spelling for exact execution-time OAuth redirect matching.
 ///
 /// Allows HTTPS, localhost HTTP, loopback/custom app schemes, and other
 /// schemes historically accepted by NyxID developer apps, but rejects obvious
-/// browser execution/local-file schemes and fragments. Returns the exact
-/// trimmed URI strings rather than `url`-serialized strings because OAuth
-/// redirect URI matching is exact.
+/// browser execution/local-file schemes and fragments. Returns the trimmed
+/// URI strings rather than `url`-serialized strings because OAuth redirect
+/// URI matching is exact.
 pub fn validate_redirect_uris(redirect_uris: &[String]) -> AppResult<Vec<String>> {
     if redirect_uris.is_empty() {
         return Err(AppError::ValidationError(
@@ -221,25 +222,11 @@ pub fn validate_redirect_uris(redirect_uris: &[String]) -> AppResult<Vec<String>
             ));
         }
 
-        let parsed = Url::parse(uri).map_err(|_| {
-            AppError::ValidationError(format!("Invalid redirect_uri format: {uri}"))
-        })?;
+        crate::services::oauth_service::validate_redirect_uri_scheme(uri)
+            .map_err(|_| AppError::ValidationError("Unsupported redirect_uri".to_string()))?;
 
-        if matches!(parsed.scheme(), "javascript" | "data" | "file") {
-            return Err(AppError::ValidationError(format!(
-                "Unsupported redirect_uri scheme: {uri}"
-            )));
-        }
-
-        if parsed.fragment().is_some() {
-            return Err(AppError::ValidationError(format!(
-                "redirect_uri must not contain fragment: {uri}"
-            )));
-        }
-
-        let trimmed = uri.to_string();
-        if unique.insert(trimmed.clone()) {
-            validated.push(trimmed);
+        if unique.insert(uri.to_string()) {
+            validated.push(uri.to_string());
         }
     }
 
@@ -259,15 +246,14 @@ pub async fn seed_default_clients(db: &mongodb::Database) -> AppResult<()> {
 
     if let Some(existing) = collection.find_one(doc! { "_id": MCP_CLIENT_ID }).await? {
         if let Some(updated_scopes) = merge_missing_default_mcp_scopes(&existing.allowed_scopes)? {
-            collection
-                .update_one(
-                    doc! { "_id": MCP_CLIENT_ID },
-                    doc! { "$set": {
-                        "allowed_scopes": &updated_scopes,
-                        "updated_at": bson::DateTime::from_chrono(Utc::now()),
-                    }},
-                )
-                .await?;
+            apply_client_update(
+                db,
+                doc! { "_id": MCP_CLIENT_ID },
+                doc! { "allowed_scopes": &updated_scopes,
+                "updated_at": bson::DateTime::from_chrono(Utc::now()) },
+                true,
+            )
+            .await?;
 
             tracing::info!(
                 allowed_scopes = %updated_scopes,
@@ -363,21 +349,22 @@ pub async fn migrate_dynamic_clients_grant_default_mcp_scopes(
 
         // Compare the policy snapshot as well as provenance: an administrator
         // may have edited it since the cursor read, including on an older replica.
-        let result = collection
-            .update_one(
-                doc! {
-                    "_id": &client.id,
-                    "created_by": "dynamic_registration",
-                    "scope_provenance": "defaulted",
-                    "allowed_scopes": &client.allowed_scopes,
-                    "updated_at": bson::DateTime::from_chrono(client.updated_at),
-                },
-                doc! { "$set": {
-                    "allowed_scopes": &updated_scopes,
-                    "updated_at": now,
-                }},
-            )
-            .await?;
+        let result = apply_client_update(
+            db,
+            doc! {
+                "_id": &client.id,
+                "created_by": "dynamic_registration",
+                "scope_provenance": "defaulted",
+                "allowed_scopes": &client.allowed_scopes,
+                "updated_at": bson::DateTime::from_chrono(client.updated_at),
+            },
+            doc! {
+                "allowed_scopes": &updated_scopes,
+                "updated_at": now,
+            },
+            true,
+        )
+        .await?;
 
         upgraded += result.modified_count as usize;
     }
@@ -1222,6 +1209,48 @@ pub async fn get_client_for_creator(
         .ok_or_else(|| AppError::NotFound("OAuth client not found".to_string()))
 }
 
+/// Security changes increment a durable source epoch even if bounded grant
+/// invalidation needs additional batches. Re-enabling cannot restore old grants.
+async fn apply_client_update(
+    db: &mongodb::Database,
+    filter: Document,
+    set_doc: Document,
+    security: bool,
+) -> AppResult<mongodb::results::UpdateResult> {
+    if !security {
+        return Ok(db
+            .collection::<OauthClient>(OAUTH_CLIENTS)
+            .update_one(filter, doc! { "$set": set_doc })
+            .await?);
+    }
+    let client_id = filter
+        .get_str("_id")
+        .map_err(|_| AppError::Internal("Missing OAuth client selector".into()))?
+        .to_owned();
+    let mut session = db.client().start_session().await?;
+    let db = db.clone();
+    session.start_transaction().write_concern(mongodb::options::WriteConcern::majority()).and_run2(async move |session| {
+        let db = &db;
+        let result: AppResult<mongodb::results::UpdateResult> = async {
+            let result = db.collection::<OauthClient>(OAUTH_CLIENTS).update_one(filter.clone(),
+                doc! { "$set": set_doc.clone(), "$inc": { "machine_external_security_revision": 1_i64 } })
+                .session(&mut *session).await?;
+            if result.matched_count != 0 {
+                if set_doc.get_bool("is_active").ok() == Some(false) {
+                    for collection in [CONSENTS,REFRESH_TOKENS,AUTH_CODES] {
+                        db.collection::<bson::Document>(collection).delete_many(doc! {"client_id":&client_id})
+                            .session(&mut *session).await?;
+                    }
+                }
+                super::machine_external_grant_service::invalidate_client_in_session(
+                    db, &client_id, "oauth_client_security_changed", 100, session).await?;
+            }
+            Ok(result)
+        }.await;
+        super::api_key_mutation_service::transaction_result(result)
+    }).await.map_err(super::api_key_mutation_service::map_transaction_error)
+}
+
 /// Update the redirect URIs on an OAuth client.
 pub async fn update_redirect_uris(
     db: &mongodb::Database,
@@ -1229,18 +1258,18 @@ pub async fn update_redirect_uris(
     redirect_uris: &[String],
 ) -> AppResult<()> {
     let now = Utc::now();
-    let result = db
-        .collection::<OauthClient>(OAUTH_CLIENTS)
-        .update_one(
-            doc! { "_id": client_id, "is_active": true },
-            doc! { "$set": {
-                "redirect_uris": bson::to_bson(redirect_uris).map_err(|e| {
-                    AppError::Internal(format!("Failed to convert redirect_uris to bson: {e}"))
-                })?,
-                "updated_at": bson::DateTime::from_chrono(now),
-            }},
-        )
-        .await?;
+    let result = apply_client_update(
+        db,
+        doc! { "_id": client_id, "is_active": true },
+        doc! {
+            "redirect_uris": bson::to_bson(redirect_uris).map_err(|e| {
+                AppError::Internal(format!("Failed to convert redirect_uris to bson: {e}"))
+            })?,
+            "updated_at": bson::DateTime::from_chrono(now),
+        },
+        true,
+    )
+    .await?;
 
     if result.matched_count == 0 {
         return Err(AppError::NotFound("OAuth client not found".to_string()));
@@ -1319,13 +1348,16 @@ pub async fn update_client_for_creator(
         );
     }
 
-    let result = db
-        .collection::<OauthClient>(OAUTH_CLIENTS)
-        .update_one(
-            doc! { "_id": client_id, "created_by": created_by, "is_active": true },
-            doc! { "$set": set_doc },
-        )
-        .await?;
+    let result = apply_client_update(
+        db,
+        doc! { "_id": client_id, "created_by": created_by, "is_active": true },
+        set_doc,
+        redirect_uris.is_some()
+            || delegation_scopes.is_some()
+            || allowed_scopes.is_some()
+            || broker_capability_enabled.is_some(),
+    )
+    .await?;
 
     if result.matched_count == 0 {
         return Err(AppError::NotFound("OAuth client not found".to_string()));
@@ -1384,10 +1416,16 @@ pub async fn admin_update_client(
         set_doc.insert("is_active", active);
     }
 
-    let result = db
-        .collection::<OauthClient>(OAUTH_CLIENTS)
-        .update_one(doc! { "_id": client_id }, doc! { "$set": set_doc })
-        .await?;
+    let result = apply_client_update(
+        db,
+        doc! { "_id": client_id },
+        set_doc,
+        update.redirect_uris.is_some()
+            || update.allowed_scopes.is_some()
+            || update.broker_capability_enabled.is_some()
+            || update.is_active.is_some(),
+    )
+    .await?;
 
     if result.matched_count == 0 {
         return Err(AppError::NotFound("OAuth client not found".to_string()));
@@ -1397,9 +1435,7 @@ pub async fn admin_update_client(
         || update.allowed_scopes.is_some()
         || update.broker_capability_enabled.is_some();
 
-    if update.is_active == Some(false) {
-        cascade_client_deactivation(db, client_id).await?;
-    } else if clears_pending_auth_codes {
+    if update.is_active != Some(false) && clears_pending_auth_codes {
         delete_unused_authorization_codes(db, client_id).await?;
     }
 
@@ -1410,22 +1446,19 @@ pub async fn admin_update_client(
 pub async fn delete_client(db: &mongodb::Database, client_id: &str) -> AppResult<()> {
     let now = Utc::now();
 
-    let result = db
-        .collection::<OauthClient>(OAUTH_CLIENTS)
-        .update_one(
-            doc! { "_id": client_id },
-            doc! { "$set": {
-                "is_active": false,
-                "updated_at": bson::DateTime::from_chrono(now),
-            }},
-        )
-        .await?;
+    let result = apply_client_update(
+        db,
+        doc! { "_id": client_id },
+        doc! { "is_active": false,
+            "updated_at": bson::DateTime::from_chrono(now),
+        },
+        true,
+    )
+    .await?;
 
     if result.matched_count == 0 {
         return Err(AppError::NotFound("OAuth client not found".to_string()));
     }
-
-    cascade_client_deactivation(db, client_id).await?;
 
     Ok(())
 }
@@ -1437,45 +1470,32 @@ pub async fn delete_client_for_creator(
     created_by: &str,
 ) -> AppResult<()> {
     let now = Utc::now();
-    let result = db
-        .collection::<OauthClient>(OAUTH_CLIENTS)
-        .update_one(
-            doc! { "_id": client_id, "created_by": created_by },
-            doc! { "$set": {
-                "is_active": false,
-                "updated_at": bson::DateTime::from_chrono(now),
-            }},
-        )
-        .await?;
+    let result = apply_client_update(
+        db,
+        doc! { "_id": client_id, "created_by": created_by },
+        doc! { "is_active": false,
+            "updated_at": bson::DateTime::from_chrono(now),
+        },
+        true,
+    )
+    .await?;
 
     if result.matched_count == 0 {
         return Err(AppError::NotFound("OAuth client not found".to_string()));
     }
-
-    cascade_client_deactivation(db, client_id).await?;
 
     Ok(())
 }
 
 // Mirrors org-delete cascade in org_service.rs so stale consents/refresh tokens
 // do not linger after a single client is deactivated (issue #498).
-async fn cascade_client_deactivation(db: &mongodb::Database, client_id: &str) -> AppResult<()> {
-    db.collection::<bson::Document>(CONSENTS)
-        .delete_many(doc! { "client_id": client_id })
-        .await?;
-    db.collection::<bson::Document>(REFRESH_TOKENS)
-        .delete_many(doc! { "client_id": client_id })
-        .await?;
-    delete_unused_authorization_codes(db, client_id).await?;
-    Ok(())
-}
-
 async fn delete_unused_authorization_codes(
     db: &mongodb::Database,
     client_id: &str,
 ) -> AppResult<()> {
     db.collection::<bson::Document>(AUTH_CODES)
         .delete_many(doc! { "client_id": client_id, "used": false })
+        .write_concern(mongodb::options::WriteConcern::majority())
         .await?;
     Ok(())
 }
@@ -1497,15 +1517,15 @@ pub async fn rotate_client_secret_for_creator(
     let new_secret = generate_random_token();
     let new_hash = hash_token(&new_secret);
 
-    db.collection::<OauthClient>(OAUTH_CLIENTS)
-        .update_one(
-            doc! { "_id": client_id, "created_by": created_by, "is_active": true },
-            doc! { "$set": {
-                "client_secret_hash": new_hash,
-                "updated_at": bson::DateTime::from_chrono(Utc::now()),
-            }},
-        )
-        .await?;
+    apply_client_update(
+        db,
+        doc! { "_id": client_id, "created_by": created_by, "is_active": true },
+        doc! { "client_secret_hash": new_hash,
+            "updated_at": bson::DateTime::from_chrono(Utc::now()),
+        },
+        true,
+    )
+    .await?;
 
     let updated = get_client_for_creator(db, client_id, created_by).await?;
     Ok((updated, new_secret))
@@ -2481,6 +2501,21 @@ mod tests {
     }
 
     #[test]
+    fn validate_redirect_uris_rejects_non_exact_browser_normalization() {
+        for redirect_uri in [
+            "https://app.example\t/callback",
+            "https://app.example\n/callback",
+            "https://app.example\r\n/callback",
+            "custom:payload",
+        ] {
+            assert!(
+                validate_redirect_uris(&[redirect_uri.to_string()]).is_err(),
+                "redirect URI should be rejected: {redirect_uri:?}"
+            );
+        }
+    }
+
+    #[test]
     fn validate_redirect_uris_preserves_exact_trimmed_strings() {
         let uris = validate_redirect_uris(&[
             " https://app.example ".to_string(),
@@ -3144,6 +3179,7 @@ mod tests {
             db.collection::<Consent>(CONSENTS)
                 .insert_one(&Consent {
                     revision: None,
+                    write_version: None,
                     issuance_fence: None,
                     id: format!("consent-{client_id}"),
                     user_id: "user-with-consent".to_string(),
@@ -3159,6 +3195,7 @@ mod tests {
 
             db.collection::<RefreshToken>(REFRESH_TOKENS)
                 .insert_one(&RefreshToken {
+                    protected_consent: None,
                     id: format!("refresh-{client_id}"),
                     jti: format!("jti-{client_id}"),
                     client_id: client_id.to_string(),
@@ -3201,6 +3238,7 @@ mod tests {
             let now = Utc::now();
             db.collection::<AuthorizationCode>(AUTH_CODES)
                 .insert_one(&AuthorizationCode {
+                    protected_consent: None,
                     incremental_consent: None,
                     id: code_id.to_string(),
                     code_hash: format!("hash-{code_id}"),

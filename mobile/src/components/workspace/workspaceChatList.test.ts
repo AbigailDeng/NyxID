@@ -8,7 +8,7 @@ import {
   drawerAgentConversations,
   orderedDrawerAgents,
   searchDrawerItems,
-} from "./workspaceChatList";
+} from "./workspaceChatListModel";
 
 const agent = (id: string, overrides: object = {}) =>
   agentSchema.parse({
@@ -113,7 +113,7 @@ test("NyxBot is pinned first, followed by named live agents and then past agents
     orderedDrawerAgents(rows).map((row) => row.id),
     ["bot", "a", "z", "past"],
   );
-  assert.equal(rows[0].id, "z");
+  assert.equal(rows[0]!.id, "z");
 });
 
 test("drawer previews cap long lists at five rows in their existing order", () => {

@@ -3,7 +3,7 @@ use mongodb::bson::{Document, doc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::models::default_request_header::DefaultRequestHeader;
+use crate::models::default_request_header::StoredDefaultRequestHeader;
 use crate::models::service_billing::ServiceBilling;
 use crate::models::ssh_auth_mode::{SshAuthMode, default_ssh_auth_mode};
 use crate::models::ws_frame_injection::WsFrameInjection;
@@ -237,7 +237,7 @@ pub enum ProxyPathConstraint {
     MultiSegment,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SshServiceConfig {
     pub host: String,
     pub port: u16,
@@ -255,6 +255,8 @@ pub struct SshServiceConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub ca_private_key_encrypted: Option<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ca_context_version: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ca_public_key: Option<String>,
 }
@@ -285,7 +287,7 @@ pub struct CatalogImportSource {
     pub imported_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DownstreamService {
     #[serde(default)]
     pub offering_kind: OfferingKind,
@@ -330,12 +332,18 @@ pub struct DownstreamService {
     /// - `path`: inject credential into URL path (Telegram bot token style)
     /// - `none`: no credential injection
     pub auth_method: String,
+    /// Optional RFC 9110 bearer scheme. Absent retains `Bearer`; catalog-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_scheme: Option<String>,
     /// Header name, query param name, body field name, or path placeholder
     /// for the credential (depends on `auth_method`).
     pub auth_key_name: String,
     /// Encrypted master credential for this service
     #[serde(with = "crate::models::bson_bytes::required")]
     pub credential_encrypted: Vec<u8>,
+    /// Explicit versions for service-owned master credential fields.
+    #[serde(default)]
+    pub secret_context_versions: std::collections::BTreeMap<String, u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform_key: Option<PlatformKeyConfig>,
     /// Original auth type as selected by the admin (e.g., "api_key", "oauth2", "oidc", "basic", "bearer").
@@ -381,6 +389,12 @@ pub struct DownstreamService {
     /// other row keeps the plain creator rule.
     #[serde(default)]
     pub catalog_manager_created: bool,
+    /// Server-owned provenance. Legacy rows remain Admin-only for Tool writes.
+    #[serde(default)]
+    pub tools_manager_created: bool,
+    /// Sticky after the first credential, including after an Admin clears it.
+    #[serde(default)]
+    pub tools_credential_frozen: bool,
     /// Current catalog owner after an administrative transfer. Legacy rows use
     /// `created_by`; creator attribution is never rewritten by a transfer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -418,6 +432,10 @@ pub struct DownstreamService {
     /// When set, this service was auto-created for the provider's API.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_config_id: Option<String>,
+
+    /// Optional immutable static SVG asset for provider-less Tools.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
 
     // --- Rich metadata for AI agent discovery (issue #148) ---
     /// Public product or docs landing page
@@ -485,7 +503,7 @@ pub struct DownstreamService {
     /// rejected at update time — see
     /// `crate::models::default_request_header::validate_headers`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_request_headers: Option<Vec<DefaultRequestHeader>>,
+    pub default_request_headers: Option<Vec<StoredDefaultRequestHeader>>,
 
     /// WebSocket frame-auth injection rules. Orthogonal to HTTP
     /// `auth_method`; existing documents default to no frame injection.
@@ -498,6 +516,11 @@ pub struct DownstreamService {
     /// Ignored for public services (they auto-provision for everyone).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub developer_app_ids: Option<Vec<String>>,
+
+    /// Confidential resource servers allowed to inspect keys for this catalog service.
+    /// Administrator-managed; independent of visibility and auto-connection policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introspection_client_ids: Option<Vec<String>>,
 
     /// Declarative token exchange config. Required when `auth_method` is
     /// `token_exchange`, ignored otherwise. See [`TokenExchangeConfig`].
@@ -571,6 +594,17 @@ fn default_delegation_scope() -> String {
     "llm:proxy".to_string()
 }
 
+impl std::fmt::Debug for DownstreamService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DownstreamService")
+            .field("id", &self.id)
+            .field("slug", &self.slug)
+            .field("offering_kind", &self.offering_kind)
+            .field("credential_encrypted", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
+}
+
 #[cfg(test)]
 pub mod test_helpers {
     use super::*;
@@ -579,6 +613,7 @@ pub mod test_helpers {
     /// valid struct but don't care about specific field values.
     pub fn dummy_service() -> DownstreamService {
         DownstreamService {
+            secret_context_versions: Default::default(),
             offering_kind: Default::default(),
             topics: Vec::new(),
             supplier: None,
@@ -599,6 +634,7 @@ pub mod test_helpers {
             credential_encrypted: Vec::new(),
             platform_key: None,
             auth_type: None,
+            auth_scheme: None,
             openapi_spec_url: None,
             asyncapi_spec_url: None,
             streaming_supported: false,
@@ -609,6 +645,9 @@ pub mod test_helpers {
             is_active: true,
             created_by: "test".to_string(),
             catalog_manager_created: false,
+            tools_manager_created: false,
+            icon_url: None,
+            tools_credential_frozen: false,
             identity_propagation_mode: "none".to_string(),
             identity_include_user_id: false,
             identity_include_email: false,
@@ -636,6 +675,7 @@ pub mod test_helpers {
             default_request_headers: None,
             ws_frame_injections: Vec::new(),
             developer_app_ids: None,
+            introspection_client_ids: None,
             token_exchange_config: None,
             anonymous_endpoints: Vec::new(),
             proxy_operation_policy: None,
@@ -691,6 +731,7 @@ mod tests {
     #[test]
     fn bson_roundtrip() {
         let svc = DownstreamService {
+            secret_context_versions: Default::default(),
             offering_kind: Default::default(),
             topics: Vec::new(),
             supplier: None,
@@ -711,6 +752,7 @@ mod tests {
             credential_encrypted: vec![1, 2, 3],
             platform_key: None,
             auth_type: Some("bearer".to_string()),
+            auth_scheme: None,
             openapi_spec_url: None,
             asyncapi_spec_url: None,
             streaming_supported: false,
@@ -721,6 +763,9 @@ mod tests {
             is_active: true,
             created_by: "admin".to_string(),
             catalog_manager_created: false,
+            tools_manager_created: false,
+            icon_url: None,
+            tools_credential_frozen: false,
             identity_propagation_mode: "none".to_string(),
             identity_include_user_id: false,
             identity_include_email: false,
@@ -752,13 +797,15 @@ mod tests {
             default_request_headers: Some(vec![
                 crate::models::default_request_header::DefaultRequestHeader {
                     name: "x-openclaw-scopes".to_string(),
-                    value: "operator.read,operator.write".to_string(),
+                    value: "operator.read,operator.write".to_string().into(),
                     overridable: false,
                     sensitive: false,
-                },
+                }
+                .into(),
             ]),
             ws_frame_injections: Vec::new(),
             developer_app_ids: None,
+            introspection_client_ids: None,
             token_exchange_config: None,
             anonymous_endpoints: Vec::new(),
             proxy_operation_policy: None,
@@ -786,6 +833,7 @@ mod tests {
         // Serialize a full struct, then remove default fields from the doc,
         // and verify they get their defaults on deserialization.
         let svc = DownstreamService {
+            secret_context_versions: Default::default(),
             offering_kind: Default::default(),
             topics: Vec::new(),
             supplier: None,
@@ -806,6 +854,7 @@ mod tests {
             credential_encrypted: vec![1],
             platform_key: None,
             auth_type: None,
+            auth_scheme: None,
             openapi_spec_url: None,
             asyncapi_spec_url: None,
             streaming_supported: false,
@@ -816,6 +865,9 @@ mod tests {
             is_active: true,
             created_by: "admin".to_string(),
             catalog_manager_created: false,
+            tools_manager_created: false,
+            icon_url: None,
+            tools_credential_frozen: false,
             identity_propagation_mode: "none".to_string(),
             identity_include_user_id: false,
             identity_include_email: false,
@@ -843,6 +895,7 @@ mod tests {
             default_request_headers: None,
             ws_frame_injections: Vec::new(),
             developer_app_ids: None,
+            introspection_client_ids: None,
             token_exchange_config: None,
             anonymous_endpoints: Vec::new(),
             proxy_operation_policy: None,
@@ -881,6 +934,7 @@ mod tests {
     #[test]
     fn ssh_config_roundtrip() {
         let config = SshServiceConfig {
+            ca_context_version: None,
             host: "ssh.internal.example".to_string(),
             port: 22,
             ssh_auth_mode: SshAuthMode::Cert,
@@ -898,5 +952,11 @@ mod tests {
         assert_eq!(restored.ssh_auth_mode, SshAuthMode::Cert);
         assert!(restored.certificate_auth_enabled);
         assert_eq!(restored.allowed_principals, vec!["ubuntu".to_string()]);
+    }
+}
+
+impl std::fmt::Debug for SshServiceConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SshServiceConfig").finish_non_exhaustive()
     }
 }

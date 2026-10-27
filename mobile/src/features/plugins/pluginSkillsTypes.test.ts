@@ -136,8 +136,8 @@ test("re-pinning an enabled skill preserves additive activation settings", () =>
     preview,
   });
   assert.equal(result.skills[0]?.disabled, false);
-  assert.deepEqual(result.skills[0]?.activation, { mode: "on_demand" });
-  assert.equal(result.skills[0]?.publisher_id, "existing-publisher");
+  assert.deepEqual((result.skills[0] as Record<string, unknown>)?.activation, { mode: "on_demand" });
+  assert.equal((result.skills[0] as Record<string, unknown>)?.publisher_id, "existing-publisher");
   assert.equal(result.skills[0]?.version, "2.3.4");
 });
 
@@ -155,7 +155,7 @@ test("selection round-trips unknown fields and dependency metadata on sibling pi
     type: "detach",
     skillId: "second",
   });
-  assert.equal(result.skills[0]?.activation_mode, "always");
+  assert.equal((result.skills[0] as Record<string, unknown>)?.activation_mode, "always");
   assert.equal(result.skills[0]?.dependencies[0]?.publisher_id, "publisher-a");
   assert.equal(result.skills[0]?.version, "1.0.0");
 });

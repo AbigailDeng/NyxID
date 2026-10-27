@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { deferred, hookHarness } from "./assistantHookTestHarness";
 import type { AssistantUploadedMessage } from "./AssistantUploadSession";
@@ -356,8 +356,8 @@ test("empty chat creates exactly one real draft and adopts it before opening voi
   open.props.onPress();
   x.harness.flush();
   assert.equal(x.drafts.length, 1);
-  assert.equal(x.drafts[0].agentId, "agent-a");
-  assert.equal(x.drafts[0].signal.aborted, false);
+  assert.equal(x.drafts[0]!.agentId, "agent-a");
+  assert.equal(x.drafts[0]!.signal.aborted, false);
   assert.equal(x.button("Open voice call")?.props.disabled, true);
   assert.equal(x.voice(), undefined);
   x.draft.resolve(A);
@@ -533,7 +533,7 @@ test("switching chat while draft creation is pending aborts it and ignores its l
   x.props.route.params.conversationId = B;
   x.assistant.openConversation(B);
   x.harness.render();
-  assert.equal(x.drafts[0].signal.aborted, true);
+  assert.equal(x.drafts[0]!.signal.aborted, true);
   x.draft.resolve(A);
   await x.harness.settle();
   assert.equal(x.assistant.conversationId, B);
@@ -623,7 +623,7 @@ test("unmount aborts pending draft creation and late success cannot navigate", a
   const x = setup();
   x.button("Open voice call")!.props.onPress();
   x.harness.unmount();
-  assert.equal(x.drafts[0].signal.aborted, true);
+  assert.equal(x.drafts[0]!.signal.aborted, true);
   x.draft.resolve(A);
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(

@@ -109,6 +109,7 @@ async fn google_concurrent_sync_inserts_editors_and_updates_old_contracts_once()
                 let db = db.clone();
                 tasks.spawn(async move {
                     provider_service::seed_default_services(&db, &test_encryption_keys()).await?;
+                    crate::test_utils::init_test_audit_chain_hmac_key();
                     catalog_spec_sync::sync_seeded_service_endpoints(&db).await
                 });
             }
@@ -248,6 +249,7 @@ async fn google_partial_custom_maps_sync_only_available_origins_and_keep_custom_
             provider_service::seed_default_services(&db, &test_encryption_keys())
                 .await
                 .unwrap();
+            crate::test_utils::init_test_audit_chain_hmac_key();
             catalog_spec_sync::sync_seeded_service_endpoints(&db)
                 .await
                 .unwrap();
@@ -420,7 +422,7 @@ async fn node_upload(
                 method: method.into(),
                 path: path.into(),
                 query: Some(query.into()),
-                headers: vec![("content-type".into(), content_type.into())],
+                headers: (vec![("content-type".into(), content_type.into())]).into(),
                 body: Some(body.to_vec()),
             },
             Some(&[0x11; 32]),
@@ -756,6 +758,7 @@ async fn google_service_disabled_403_passes_through_rest_and_mcp_distinct_from_a
 
 fn copy_upload_endpoint(endpoint: &mcp_service::McpToolEndpoint) -> mcp_service::McpToolEndpoint {
     mcp_service::McpToolEndpoint {
+        attachment_input: None,
         async_operation: None,
         name: endpoint.name.clone(),
         method: endpoint.method.clone(),
@@ -801,7 +804,8 @@ async fn google_durable_corrected_grant_drifts_unchanged_grant_survives_and_reap
         let coll =
             db.collection::<service_endpoint::ServiceEndpoint>(service_endpoint::COLLECTION_NAME);
         let expiry =
-            chrono::DateTime::from_timestamp(chrono::Utc::now().timestamp() + 7200, 0).unwrap();
+            chrono::DateTime::from_timestamp(chrono::Utc::now().timestamp() + 7200, 123_456_789)
+                .unwrap();
         let mut selections = Vec::new();
         for name in ["drive_create_file", "docs_create_document"] {
             let body = if name == "drive_create_file" {
@@ -855,6 +859,26 @@ async fn google_durable_corrected_grant_drifts_unchanged_grant_survives_and_reap
         )
         .await
         .unwrap();
+        assert_eq!(plan.key_expires_at, Some(expiry.to_rfc3339()));
+        let stored_expiry = bson::DateTime::from_chrono(expiry).to_chrono();
+        let floored_plan = api_key_scope_service::build_scope_plan_with_operations(
+            &db,
+            &manager,
+            &owner.id,
+            None,
+            &service_ids,
+            &selections,
+            Some(stored_expiry),
+            false,
+        )
+        .await
+        .unwrap();
+        // Preview and creation must use the same exact intent, even though
+        // persisted timestamps and their returned metadata use milliseconds.
+        assert_ne!(
+            plan.normalized_grant_digest,
+            floored_plan.normalized_grant_digest
+        );
         let provisioned = durable_operation_grant_service::provision_scheduled_key(
             &db,
             &manager,
@@ -873,6 +897,15 @@ async fn google_durable_corrected_grant_drifts_unchanged_grant_survives_and_reap
         )
         .await
         .unwrap();
+        assert_eq!(provisioned.key.expires_at, Some(stored_expiry));
+        let stored_key = db
+            .collection::<crate::models::api_key::ApiKey>(crate::models::api_key::COLLECTION_NAME)
+            .find_one(doc! {"_id": &provisioned.key.id})
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored_key.expires_at, provisioned.key.expires_at);
+        crate::test_utils::init_test_audit_chain_hmac_key();
         catalog_spec_sync::sync_seeded_service_endpoints(&db)
             .await
             .unwrap();
@@ -916,7 +949,7 @@ async fn google_durable_corrected_grant_drifts_unchanged_grant_survives_and_reap
             None,
             &service_ids,
             &selections,
-            Some(expiry),
+            Some(stored_expiry),
             false,
         )
         .await
@@ -1088,6 +1121,7 @@ async fn google_generic_mcp_cannot_set_multipart_content_type() {
         .unwrap();
     service.is_generic_proxy = true;
     let endpoint = mcp_service::McpToolEndpoint {
+        attachment_input: None,
         async_operation: None,
         endpoint_id: mcp_service::GENERIC_PROXY_ENDPOINT_ID.into(),
         ..Default::default()

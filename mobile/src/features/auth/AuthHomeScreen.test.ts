@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
+import { MfaChallengeError } from "../../lib/auth/mfaChallenge";
 import { ApiError } from "../../lib/api/ApiError";
 import { deferred, hookHarness } from "../assistant/assistantHookTestHarness";
 import type { PublicAuthConfig } from "./publicAuthConfig";
@@ -130,12 +131,14 @@ function setup({
     "expo-linear-gradient": { LinearGradient: "ExpoLinearGradient" },
     "../../components/ScreenContainer": { ScreenContainer: "ScreenContainer" },
     "../../components/ToastOverlay": { ToastOverlay: "ToastOverlay" },
+    "../../lib/auth/sessionStore": { authSessionGeneration: () => 0 },
     "../../lib/api/mobileApi": {
       mobileApi: {
         loginWithPassword: (input: LoginInput) => {
           calls.push(plain(input));
           return login(input);
         },
+        verifyMfa: (body: {code: string; mfa_token: string}) => { calls.push({ mfaCode: body.code } as LoginInput); return Promise.resolve(signedIn); },
         getSocialAuthorizeUrl: (provider: string) =>
           `https://example.test/${provider}`,
       },
@@ -236,17 +239,17 @@ for (const state of ["ready", "loading", "error"] as const) {
     assert.equal(screen.sessions.length, 1);
     assert.deepEqual(
       {
-        accessToken: screen.sessions[0].accessToken,
-        refreshToken: screen.sessions[0].refreshToken,
+        accessToken: screen.sessions[0]!.accessToken,
+        refreshToken: screen.sessions[0]!.refreshToken,
       },
       {
         accessToken: signedIn.accessToken,
         refreshToken: signedIn.refreshToken,
       },
     );
-    assert.ok(screen.sessions[0].accessTokenExpiresAt >= started + 3_600_000);
+    assert.ok(screen.sessions[0]!.accessTokenExpiresAt >= started + 3_600_000);
     assert.ok(
-      screen.sessions[0].accessTokenExpiresAt <= Date.now() + 3_600_000,
+      screen.sessions[0]!.accessTokenExpiresAt <= Date.now() + 3_600_000,
     );
     assert.equal(
       screen.configRefetches(),
@@ -259,16 +262,7 @@ for (const state of ["ready", "loading", "error"] as const) {
 test("email authentication handles the actual MFA challenge before adopting a session", async (t) => {
   const screen = setup();
   t.after(screen.harness.unmount);
-  screen.setLogin(async (input) => {
-    if (!input.mfaCode)
-      throw new ApiError({
-        errorKey: "mfa_required",
-        errorCode: 2002,
-        statusCode: 403,
-        message: "MFA verification required",
-      });
-    return signedIn;
-  });
+  screen.setLogin(async () => { throw new MfaChallengeError("synthetic-challenge"); });
   screen.change("Email", "reviewer@example.test");
   screen.change("Password", "password");
   screen.submit().props.onPress();
@@ -284,7 +278,7 @@ test("email authentication handles the actual MFA challenge before adopting a se
   await screen.harness.settle();
   assert.deepEqual(screen.calls, [
     { email: "reviewer@example.test", password: "password" },
-    { email: "reviewer@example.test", password: "password", mfaCode: "012345" },
+    { mfaCode: "012345" },
   ]);
   assert.equal(screen.sessions.length, 1);
 });
@@ -331,7 +325,7 @@ test("a pending email attempt blocks duplicate presses and concurrent social log
   screen.change("Email", "reviewer@example.test");
   screen.change("Password", "password");
   const staleSubmit = screen.submit().props.onPress;
-  const staleSocial = screen.social()[0].props.onPress;
+  const staleSocial = screen.social()[0]!.props.onPress;
   staleSubmit();
   staleSubmit();
   staleSocial();
@@ -339,7 +333,7 @@ test("a pending email attempt blocks duplicate presses and concurrent social log
   assert.equal(screen.calls.length, 1);
   assert.equal(screen.submit().props.disabled, true);
   assert.equal(screen.input("Email").props.editable, false);
-  assert.equal(screen.social()[0].props.disabled, true);
+  assert.equal(screen.social()[0]!.props.disabled, true);
   assert.equal(screen.configRefetches(), 0);
   assert.deepEqual(screen.socialUrls, []);
   pending.resolve(signedIn);
@@ -358,7 +352,7 @@ test("social login remains configured and revalidates availability before openin
     data: { emailAuthEnabled: false, socialProviders: [] },
     error: null,
   }));
-  screen.social()[0].props.onPress();
+  screen.social()[0]!.props.onPress();
   await screen.harness.settle();
   assert.equal(screen.configRefetches(), 1);
   assert.deepEqual(screen.socialUrls, []);
@@ -377,7 +371,7 @@ test("a pending social attempt blocks concurrent email login", async (t) => {
   screen.change("Email", "reviewer@example.test");
   screen.change("Password", "password");
   const staleSubmit = screen.submit().props.onPress;
-  screen.social()[0].props.onPress();
+  screen.social()[0]!.props.onPress();
   staleSubmit();
   screen.harness.flush();
   assert.equal(screen.submit().props.disabled, true);

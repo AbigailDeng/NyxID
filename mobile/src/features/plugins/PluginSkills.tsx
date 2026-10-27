@@ -171,7 +171,7 @@ export function PluginSkills({
                 values.length === 1 &&
                 manageable.some((item) => item.id === values[0])
               )
-                setChosen(values[0]);
+                setChosen(values[0]!);
             }}
             onClose={() => setPicking(false)}
           />

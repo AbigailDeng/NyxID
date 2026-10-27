@@ -45,7 +45,7 @@ type SharedEntryParamList = {
 
 /** All management flows live inside one dismissible drawer above the chat. */
 export type WorkspaceSheetParamList = SharedEntryParamList & {
-  Pages: NavigatorScreenParams<WorkspacePanelParamList> | undefined;
+  Pages: NavigatorScreenParams<WorkspacePanelParamList>;
   AgentCreate: undefined;
   AgentDetail: { agentId: string };
   GroupEditor: { groupId?: string } | undefined;

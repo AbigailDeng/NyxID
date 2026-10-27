@@ -21,6 +21,7 @@ export function openWorkspaceSheetAction<
 >(name: Name, params?: WorkspaceSheetParamList[Name]) {
   return {
     type: "NAVIGATE" as const,
+    target: undefined as string | undefined,
     payload: {
       name: "WorkspaceSheet",
       params: { screen: name, params, initial: false, merge: true, pop: true },
@@ -126,6 +127,9 @@ export function dismissWorkspaceSheetAction(
 }
 
 /** Drawer destinations overlay chat; Chats simply dismisses that overlay. */
+export function workspaceNavigateAction<Name extends Exclude<keyof WorkspaceParamList, "Assistant">>(name: Name, params?: WorkspaceParamList[Name], state?: NavigationState): ReturnType<typeof openWorkspaceSheetAction<"Pages">>;
+export function workspaceNavigateAction(name: "Assistant", params?: WorkspaceParamList["Assistant"], state?: NavigationState): ReturnType<typeof dismissWorkspaceSheetAction>;
+export function workspaceNavigateAction<Name extends keyof WorkspaceParamList>(name: Name, params?: WorkspaceParamList[Name], state?: NavigationState): ReturnType<typeof openWorkspaceSheetAction<"Pages">> | ReturnType<typeof dismissWorkspaceSheetAction>;
 export function workspaceNavigateAction<Name extends keyof WorkspaceParamList>(
   name: Name,
   params?: WorkspaceParamList[Name],
@@ -179,8 +183,10 @@ export function challengeNavigationAction(
 }
 
 /** Cold management links always have a chat beneath the dismissible drawer. */
+export function withWorkspaceFallback(state: PartialState<NavigationState> | undefined): PartialState<NavigationState> | undefined;
+export function withWorkspaceFallback(state: NavigationState): NavigationState | PartialState<NavigationState>;
 export function withWorkspaceFallback(
-  state: PartialState<NavigationState> | undefined,
+  state: NavigationState | PartialState<NavigationState> | undefined,
 ) {
   if (!state) return state;
   let changed = false;

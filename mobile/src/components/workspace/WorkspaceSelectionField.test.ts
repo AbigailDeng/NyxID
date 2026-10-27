@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { hookHarness } from "../../features/assistant/assistantHookTestHarness";
 import type { WorkspaceSelectionOption } from "./WorkspaceSelectionField";
@@ -85,7 +85,7 @@ function setup(overrides: Record<string, any> = {}, field = false) {
   });
   const exports = harness.load(
     fileURLToPath(new URL("./WorkspaceSelectionField.tsx", import.meta.url)),
-  ) as Record<string, (props: any) => Element>;
+  ) as { WorkspaceSelectionField: (props: any) => Element; WorkspaceSelectionSheet: (props: any) => Element };
   harness.mount(() =>
     (field ? exports.WorkspaceSelectionField : exports.WorkspaceSelectionSheet)(
       props,

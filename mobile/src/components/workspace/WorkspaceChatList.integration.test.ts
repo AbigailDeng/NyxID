@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import type { WorkspaceChatTarget } from "../../app/workspaceChatNavigation";
 import {
@@ -9,7 +9,7 @@ import {
 import { conversationSchema } from "../../features/assistant/assistantTypes";
 import { hookHarness } from "../../features/assistant/assistantHookTestHarness";
 import { groupSchema } from "../../features/groups/groupContracts";
-import * as listHelpers from "./workspaceChatList";
+import * as listHelpers from "./workspaceChatListModel";
 
 type Element = { type: unknown; props: Record<string, any> };
 type QueryOptions = { queryKey: unknown[]; enabled: boolean };
@@ -205,7 +205,7 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
     "../../theme/designTokens": { fonts: {} },
     "./WorkspaceChatBrowser": { WorkspaceChatBrowser: "WorkspaceChatBrowser" },
-    "./workspaceChatList": listHelpers,
+    "./workspaceChatListModel": listHelpers,
   });
   type Props = typeof props;
   const { WorkspaceChatList } = harness.load(

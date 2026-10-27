@@ -35,7 +35,7 @@ import {
   DRAWER_PREVIEW_LIMIT,
   drawerAgentConversations,
   orderedDrawerAgents,
-} from "./workspaceChatList";
+} from "./workspaceChatListModel";
 
 type Props = {
   visible: boolean;

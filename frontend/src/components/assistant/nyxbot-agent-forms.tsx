@@ -92,14 +92,15 @@ export function ServiceGrantPicker({
   if (!rows.length) {
     return (
       <p className="rounded-lg border border-dashed border-border px-3 py-2 text-12 text-muted-foreground">
-        You have no connected services yet. The agent can ask NyxBot for access later.
+        You have no connected services yet. Connect a service first, then grant it
+        here; the agent uses only what you grant.
       </p>
     );
   }
   return (
     <ul
       aria-label="Services"
-      className="assistant-scrollbar max-h-44 space-y-0.5 overflow-y-auto rounded-lg border border-border p-1"
+      className="assistant-scrollbar relative max-h-44 space-y-0.5 overflow-y-auto rounded-lg border border-border p-1"
     >
       {rows.map((service) => {
         const id = `grant-${service.slug}`;
@@ -218,8 +219,10 @@ export function NewAgentDialog({
         <DialogHeader className="shrink-0 pr-6">
           <DialogTitle>New agent</DialogTitle>
           <DialogDescription>
-            A specialist keeps its own memory and threads, uses only the
-            services you grant here, and asks NyxBot for anything else.
+            A specialist keeps its own memory and threads and uses only the
+            services you grant here. When you talk to it directly it handles
+            the work itself and tells you what it is missing; you add grants
+            in its details.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { hookHarness } from "../../features/assistant/assistantHookTestHarness";
-import { searchDrawerItems } from "./workspaceChatList";
+import { searchDrawerItems } from "./workspaceChatListModel";
 
 type Element = { type: unknown; props: Record<string, any> };
 type Item = { id: string; title: string };
@@ -132,7 +132,7 @@ function setup(
     },
     "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
     "../../theme/designTokens": { fonts: {} },
-    "./workspaceChatList": { searchDrawerItems },
+    "./workspaceChatListModel": { searchDrawerItems },
   });
   const { WorkspaceChatBrowser } = harness.load(
     fileURLToPath(new URL("./WorkspaceChatBrowser.tsx", import.meta.url)),

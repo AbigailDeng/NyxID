@@ -25,7 +25,7 @@ test("loss of permission, account, focus or connection during validation prevent
     const pending = submitSkillDraft({
       canContinue: () => current,
       validate: () =>
-        new Promise((resolve) => {
+        new Promise<{ valid: boolean }>((resolve) => {
           finish = resolve;
         }),
       save: async () => {
@@ -47,7 +47,7 @@ test("a background interruption stays invalid even if foreground returns before 
   const pending = submitSkillDraft({
     canContinue: () => revision === started,
     validate: () =>
-      new Promise((resolve) => {
+      new Promise<{ valid: boolean }>((resolve) => {
         finish = resolve;
       }),
     save: async () => {

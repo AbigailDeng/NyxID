@@ -116,6 +116,12 @@ pub async fn compute_viewer_routing(
     Ok(out)
 }
 
+/// Read-only capability probes fall back on policy/identity denials. Database
+/// and internal errors must remain visible as errors, never negative capability.
+pub(crate) fn is_capability_denial(error: &AppError) -> bool {
+    error.is_forbidden() || matches!(error, AppError::Unauthorized(_) | AppError::NotFound(_))
+}
+
 /// Verify that the authenticated user has admin privileges.
 pub async fn require_admin(state: &AppState, auth_user: &AuthUser) -> AppResult<()> {
     if !is_admin(state, auth_user).await? {
@@ -144,6 +150,10 @@ pub async fn require_admin_or_creator(
     auth_user: &AuthUser,
     service: &DownstreamService,
 ) -> AppResult<()> {
+    if service.offering_kind == crate::models::downstream_service::OfferingKind::Tool {
+        super::login_client_context::require_first_party_human(auth_user)?;
+        return require_admin(state, auth_user).await;
+    }
     if service.owner_user_id.is_some() {
         return require_admin(state, auth_user).await;
     }
@@ -250,11 +260,47 @@ pub async fn resolve_service_or_user_service(
 /// the create handler, where the catalog row didn't exist a moment
 /// ago). See [`compute_viewer_routing`] for batched resolution and
 /// [`ViewerRouting`] for the multi-binding semantics.
+pub async fn service_to_response_with_eligibility(
+    db: &mongodb::Database,
+    keys: Option<&crate::crypto::aes::EncryptionKeys>,
+    service: DownstreamService,
+    viewer: Option<&ViewerRouting>,
+) -> AppResult<ServiceResponse> {
+    let eligible =
+        crate::services::tools_manager_service::eligible_manager_tool_in_db(db, &service, None)
+            .await?;
+    Ok(service_to_response_with_known_eligibility(keys, service, viewer, eligible).await)
+}
+
+pub async fn service_to_response_with_known_eligibility(
+    keys: Option<&crate::crypto::aes::EncryptionKeys>,
+    service: DownstreamService,
+    viewer: Option<&ViewerRouting>,
+    eligible: bool,
+) -> ServiceResponse {
+    let mut response = service_to_response_with_viewer(keys, service, viewer).await;
+    response.tools_manager_eligible = eligible;
+    response
+}
+
 pub async fn service_to_response_with_viewer(
     inspection_keys: Option<&crate::crypto::aes::EncryptionKeys>,
     s: DownstreamService,
     viewer: Option<&ViewerRouting>,
 ) -> ServiceResponse {
+    let displayed_headers = crate::services::default_header_service::management(
+        inspection_keys,
+        crate::models::downstream_service::COLLECTION_NAME,
+        &s.id,
+        crate::services::ownership_transfer_service::catalog_owner(&s),
+        s.default_request_headers.as_deref(),
+    )
+    .await
+    .unwrap_or_else(|_| {
+        crate::models::default_request_header::stored_list_for_response(
+            s.default_request_headers.clone(),
+        )
+    });
     let skills_manifest_digest = crate::services::catalog_skill_service::manifest_digest(
         &crate::services::catalog_skill_service::state(&s),
     );
@@ -289,6 +335,12 @@ pub async fn service_to_response_with_viewer(
             })
             .collect();
     ServiceResponse {
+        catalog_manager_created: s.catalog_manager_created,
+        tools_manager_created: s.tools_manager_created,
+        tools_manager_eligible: crate::services::tools_manager_service::eligible_manager_tool(&s),
+        tools_credential_frozen: s.offering_kind
+            == crate::models::downstream_service::OfferingKind::Tool
+            && s.tools_credential_frozen,
         offering_kind: s.offering_kind,
         topics: s.topics.clone(),
         supplier: s.supplier.clone(),
@@ -300,6 +352,9 @@ pub async fn service_to_response_with_viewer(
             Some(keys) => {
                 crate::services::platform_key_service::credential_configured(keys, &s).await
             }
+            None if s.offering_kind == crate::models::downstream_service::OfferingKind::Tool => {
+                Some(!s.credential_encrypted.is_empty())
+            }
             None => None,
         },
         id: s.id,
@@ -310,6 +365,7 @@ pub async fn service_to_response_with_viewer(
         service_type: s.service_type,
         visibility: s.visibility,
         auth_method: s.auth_method,
+        auth_scheme: s.auth_scheme,
         auth_type: s.auth_type,
         auth_key_name: s.auth_key_name,
         is_active: s.is_active,
@@ -337,6 +393,7 @@ pub async fn service_to_response_with_viewer(
         forward_access_token: s.forward_access_token,
         inject_delegation_token: s.inject_delegation_token,
         delegation_token_scope: s.delegation_token_scope,
+        icon_url: s.icon_url,
         homepage_url: s.homepage_url,
         repository_url: s.repository_url,
         issues_url: s.issues_url,
@@ -356,14 +413,13 @@ pub async fn service_to_response_with_viewer(
         recommended_skill_refs: s.recommended_skill_refs,
         recommended_skills: s.recommended_skills,
         custom_user_agent: s.custom_user_agent,
-        default_request_headers: crate::models::default_request_header::redact_list_for_response(
-            s.default_request_headers,
-        ),
+        default_request_headers: displayed_headers,
         ws_frame_injections: s.ws_frame_injections,
         anonymous_endpoints: s.anonymous_endpoints,
         proxy_operation_policy: s.proxy_operation_policy,
         destination_targets: s.destination_targets,
         developer_app_ids: s.developer_app_ids,
+        introspection_client_ids: s.introspection_client_ids,
         owner_user_id: s
             .owner_user_id
             .clone()
@@ -374,6 +430,7 @@ pub async fn service_to_response_with_viewer(
         node_id: viewer.and_then(|v| v.node_id.clone()),
         your_user_service_id: viewer.and_then(|v| v.user_service_id.clone()),
         your_binding_count: viewer.map_or(0, |v| v.binding_count),
+        can_resync_identity: None,
     }
 }
 
@@ -426,6 +483,34 @@ pub async fn validate_developer_app_ids(
         }
     }
 
+    Ok(())
+}
+
+/// Trust is separately administered from private-service consent/auto-connection.
+pub async fn validate_introspection_client_ids(
+    state: &AppState,
+    auth_user: &AuthUser,
+    client_ids: &[String],
+) -> AppResult<()> {
+    require_admin(state, auth_user).await?;
+    if client_ids.len() > 50 {
+        return Err(AppError::ValidationError(
+            "introspection_client_ids must not exceed 50 entries".into(),
+        ));
+    }
+    for id in client_ids {
+        let exists = state
+            .db
+            .collection::<OauthClient>(OAUTH_CLIENTS)
+            .find_one(doc! {"_id": id, "is_active": true, "client_type": "confidential"})
+            .await?
+            .is_some();
+        if !exists {
+            return Err(AppError::ValidationError(
+                "introspection_client_ids must name active confidential OAuth clients".into(),
+            ));
+        }
+    }
     Ok(())
 }
 

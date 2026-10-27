@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { hookHarness } from "../../features/assistant/assistantHookTestHarness";
 
@@ -8,7 +8,7 @@ type Element = { type: unknown; props: Record<string, any> };
 async function setup(platform: "ios" | "android", initiallyVisible = false) {
   let visible = initiallyVisible;
   let dismissed = 0;
-  let onDismiss = () => dismissed++;
+  let onDismiss: () => void = () => { dismissed++; };
   const animations: {
     stopped: boolean;
     complete: (finished?: boolean) => void;

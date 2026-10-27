@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { hookHarness } from "../assistant/assistantHookTestHarness";
 import * as contracts from "./agentContracts";
@@ -210,6 +210,7 @@ function setup(
   const one = (predicate: (row: Element) => boolean) => {
     const rows = all().filter(predicate);
     assert.equal(rows.length, 1, "Expected one element");
+    assert.ok(rows[0]);
     return rows[0];
   };
   const action = (label: string) =>
@@ -286,7 +287,7 @@ test("creation permission confirmation updates only the local draft until Create
   });
   state.harness.flush();
   assert.equal(result, true);
-  assert.deepEqual(state.calls, []);
+  assert.equal(state.calls.length, 0);
   assert.deepEqual(plain(state.field().props.value), {
     services: ["documents"],
     account_read: true,
@@ -304,7 +305,7 @@ test("creation permission confirmation updates only the local draft until Create
   await state.harness.settle();
   const creates = state.calls.filter((call) => call.method === "create");
   assert.equal(creates.length, 1);
-  assert.deepEqual(creates[0].args, [
+  assert.deepEqual(creates[0]!.args, [
     {
       name: "researcher",
       display_name: "",
@@ -358,13 +359,13 @@ test("a new agent draft confirms Back and protects outer drawer dismissal", asyn
   assert.equal(state.guard().discardOnClose.title, "Discard new agent?");
   state.guard().onBack();
   assert.equal(closed, 0);
-  assert.equal(state.alerts[0].title, "Discard new agent?");
-  state.alerts[0].buttons
+  assert.equal(state.alerts[0]!.title, "Discard new agent?");
+  state.alerts[0]!.buttons
     .find((button) => button.text === "Discard")
     ?.onPress?.();
   await state.harness.settle();
   assert.equal(closed, 1);
-  assert.deepEqual(state.calls, []);
+  assert.equal(state.calls.length, 0);
 });
 
 test("a direct new agent draft stays editable offline but cannot submit", async () => {
@@ -379,7 +380,7 @@ test("a direct new agent draft stays editable offline but cannot submit", async 
   assert.equal(state.action("Create agent").props.disabled, true);
   state.action("Create agent").props.onPress();
   await state.harness.settle();
-  assert.deepEqual(state.calls, []);
+  assert.equal(state.calls.length, 0);
   assert.equal(state.guard().discardOnClose.title, "Discard new agent?");
 });
 
@@ -407,7 +408,7 @@ test("a direct new agent draft stays editable at the personal limit without call
   assert.equal(state.action("Create agent").props.disabled, true);
   state.action("Create agent").props.onPress();
   await state.harness.settle();
-  assert.deepEqual(state.calls, []);
+  assert.equal(state.calls.length, 0);
   assert.equal(profile().props.value.name, "researcher");
   assert.equal(profile().props.value.description, "Review documents");
   assert.deepEqual(plain(state.field().props.value), {
@@ -439,5 +440,5 @@ test("agent filters open in a sheet and apply only after confirmation", () => {
   filter().props.onPress();
   state.harness.flush();
   assert.deepEqual(plain(sheet().props.value), ["destroyed"]);
-  assert.deepEqual(state.calls, []);
+  assert.equal(state.calls.length, 0);
 });

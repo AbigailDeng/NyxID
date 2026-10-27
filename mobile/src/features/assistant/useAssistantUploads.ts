@@ -96,7 +96,7 @@ export function useAssistantUploads({
   >(undefined);
   function createSession() {
     let confirmedModel: string | undefined;
-    const ctx = new AssistantUploadSession(
+    const ctx: AssistantUploadSession = new AssistantUploadSession(
       {
         current: () => current.current === ctx && epoch === getAuthEpoch(),
         reservedMentionHandles: () => live.current.reservedMentionHandles ?? [],

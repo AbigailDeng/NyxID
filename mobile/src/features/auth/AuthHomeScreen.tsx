@@ -1,3 +1,4 @@
+import { mfaPrompt } from "./mfaPrompt";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import * as WebBrowser from "expo-web-browser";
@@ -20,15 +21,14 @@ import { LinearGradient as ExpoLinearGradient } from "expo-linear-gradient";
 import type { RootStackParamList } from "../../app/AppNavigator";
 
 import { ScreenContainer } from "../../components/ScreenContainer";
-import {
-  ToastKind,
-  ToastOverlay,
-  ToastState,
-} from "../../components/ToastOverlay";
+import { ToastKind, ToastOverlay, ToastState } from "../../components/ToastOverlay";
+import { runAuthAttempt } from "../../lib/auth/authAttempt";
+import { MfaChallengeError } from "../../lib/auth/mfaChallenge";
+import { ApiError } from "../../lib/api/ApiError";
+import { authSessionGeneration } from "../../lib/auth/sessionStore";
 import { mobileApi } from "../../lib/api/mobileApi";
 import { resolveErrorMessage } from "../../lib/api/errorMessages";
 import { useAuthSession } from "./AuthSessionContext";
-import { passwordLoginInput, requiresTotp } from "./emailLogin";
 import { getPublicAuthConfig } from "../../lib/api/publicAuthApi";
 import { requireSocialProvider } from "./publicAuthConfig";
 import {
@@ -51,6 +51,8 @@ function resolveAuthError(error: unknown): string {
 
 function resolveSocialAuthError(error: string | undefined): string {
   switch (error) {
+    case "social_auth_invalid_mfa":
+      return "Your verification challenge is invalid. Please sign in again.";
     case "social_auth_denied":
       return "Social sign-in was cancelled.";
     case "social_auth_csrf":
@@ -205,7 +207,9 @@ export function AuthHomeScreen({ navigation }: Props) {
   const [toast, setToast] = useState<ToastState | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mfaRequired, setMfaRequired] = useState(false);
+  const [mfaProvider, setMfaProvider] = useState<string | null>(null);
+  const [recoveryMode, setRecoveryMode] = useState(false);
+  const [mfaChallenge, setMfaChallenge] = useState<MfaChallengeError | null>(null);
   const [mfaCode, setMfaCode] = useState("");
   const [isEmailAuthPending, setIsEmailAuthPending] = useState(false);
   const socialLoginLock = useRef(false);
@@ -261,6 +265,16 @@ export function AuthHomeScreen({ navigation }: Props) {
 
       if (callback.status === "error") {
         setLoginError(resolveSocialAuthError(callback.error));
+        resetSocialState();
+        return;
+      }
+
+      if (callback.status === "mfa_required" && callback.mfaToken) {
+        setMfaProvider(callback.provider ?? "social");
+        setRecoveryMode(false);
+        setMfaChallenge(new MfaChallengeError(callback.mfaToken));
+        setMfaCode("");
+        setLoginError(null);
         resetSocialState();
         return;
       }
@@ -328,27 +342,17 @@ export function AuthHomeScreen({ navigation }: Props) {
 
     try {
       const available = await publicConfig.refetch();
-      if (
-        !isMountedRef.current ||
-        !focusedRef.current ||
-        AppState.currentState !== "active"
-      )
-        return;
+      if (!isMountedRef.current || !focusedRef.current || AppState.currentState !== "active") return;
       if (available.error) throw available.error;
       requireSocialProvider(available.data, provider);
-      capture({
-        name: "ui.mobile_provider_connect_initiated",
-        props: { provider, method: "oauth" },
-      });
-      const authorizeUrl = mobileApi.getSocialAuthorizeUrl(
-        provider,
-        SOCIAL_CALLBACK_URL,
-      );
+      capture({ name: "ui.mobile_provider_connect_initiated", props: { provider, method: "oauth" } });
+      const authorizeUrl = mobileApi.getSocialAuthorizeUrl(provider, SOCIAL_CALLBACK_URL);
 
       const result = await WebBrowser.openAuthSessionAsync(
         authorizeUrl,
         SOCIAL_CALLBACK_URL,
       );
+
 
       if (result.type === "success") {
         await handleSocialCallback(result.url);
@@ -373,33 +377,38 @@ export function AuthHomeScreen({ navigation }: Props) {
   };
 
   const handleEmailLogin = async () => {
-    if (
-      emailLoginLock.current ||
-      socialLoginLock.current ||
-      !email.trim() ||
-      !password
-    )
-      return;
+    if (emailLoginLock.current || socialLoginLock.current || (!mfaChallenge && (!email.trim() || !password))) return;
     emailLoginLock.current = true;
+    const generation = authSessionGeneration();
     setIsEmailAuthPending(true);
     setLoginError(null);
+    const current = () => isMountedRef.current && authSessionGeneration() === generation;
     try {
-      const result = await mobileApi.loginWithPassword(
-        passwordLoginInput(email, password, mfaRequired, mfaCode),
+      await runAuthAttempt(
+        () => mfaChallenge
+          ? mfaChallenge.verify(mfaCode, mobileApi.verifyMfa)
+          : mobileApi.loginWithPassword({ email: email.trim(), password }),
+        current,
+        async (result) => {
+          setMfaProvider(null); setRecoveryMode(false); setMfaChallenge(null); setMfaCode(""); setPassword("");
+          await signInWithSession({
+            accessToken: result.accessToken,
+            refreshToken: result.refreshToken,
+            accessTokenExpiresAt: Date.now() + Math.floor(result.expiresIn * 1000),
+          });
+        },
+        (error) => {
+          if (error instanceof MfaChallengeError) {
+            setMfaProvider(null); setRecoveryMode(false); setMfaChallenge(error); setPassword(""); setMfaCode("");
+          } else {
+            setMfaCode("");
+            if (error instanceof ApiError && error.reason === "mfa_challenge_expired") {
+              setMfaProvider(null); setRecoveryMode(false); setMfaChallenge(null);
+              setLoginError("Your verification expired. Please sign in again.");
+            } else { setLoginError(resolveErrorMessage(error)); }
+          }
+        },
       );
-      await signInWithSession({
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-        accessTokenExpiresAt: Date.now() + Math.floor(result.expiresIn * 1000),
-      });
-    } catch (error) {
-      if (requiresTotp(error)) {
-        setMfaRequired(true);
-        setLoginError(null);
-      } else {
-        setLoginError(resolveErrorMessage(error));
-      }
-      setMfaCode("");
     } finally {
       emailLoginLock.current = false;
       if (isMountedRef.current) {
@@ -408,6 +417,7 @@ export function AuthHomeScreen({ navigation }: Props) {
     }
   };
 
+  const prompt = mfaPrompt(mfaProvider, recoveryMode);
   const isAnyPending = isSocialAuthPending || isEmailAuthPending;
 
   return (
@@ -433,82 +443,53 @@ export function AuthHomeScreen({ navigation }: Props) {
 
         {/* Email login */}
         <View style={flowStyles.card}>
-          {/* Existing-account password login is available even when the
-              server hides email registration and its Web sign-in form. */}
-          <Text style={styles.emailHeading}>Sign in with email</Text>
-          <TextInput
-            style={styles.input}
-            accessibilityLabel="Email"
-            editable={!isAnyPending}
-            placeholder="Email"
-            placeholderTextColor={colors.textMuted}
-            value={email}
-            onChangeText={(v) => {
-              setEmail(v);
-              setMfaRequired(false);
-              setMfaCode("");
-              setLoginError(null);
-            }}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoComplete="email"
-          />
-          <TextInput
-            style={styles.input}
-            accessibilityLabel="Password"
-            editable={!isAnyPending}
-            placeholder="Password"
-            placeholderTextColor={colors.textMuted}
-            value={password}
-            onChangeText={(v) => {
-              setPassword(v);
-              setLoginError(null);
-            }}
-            secureTextEntry
-            autoComplete="current-password"
-          />
-          {mfaRequired ? (
+          {prompt.showPasswordFields && (
             <>
-              <Text
-                style={{
-                  ...typeScale.caption,
-                  color: colors.textSecondary,
-                }}
-              >
-                Enter the six-digit code from your authenticator.
-              </Text>
               <TextInput
                 style={styles.input}
-                accessibilityLabel="Authenticator code"
-                placeholder="000000"
+                accessibilityLabel="Email"
+                placeholder="Email"
                 placeholderTextColor={colors.textMuted}
-                value={mfaCode}
-                onChangeText={(value) =>
-                  setMfaCode(value.replace(/\D/g, "").slice(0, 6))
-                }
-                keyboardType="number-pad"
-                autoComplete="one-time-code"
-                maxLength={6}
-                editable={!isAnyPending}
-                autoFocus
+                value={email}
+                onChangeText={(v) => { setEmail(v); setMfaChallenge(null); setMfaCode(""); setLoginError(null); }}
+                editable={!isAnyPending && !mfaChallenge}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoComplete="email"
+              />
+              <TextInput
+                style={styles.input}
+                accessibilityLabel="Password"
+                placeholder="Password"
+                placeholderTextColor={colors.textMuted}
+                value={password}
+                onChangeText={(v) => { setPassword(v); setLoginError(null); }}
+                editable={!isAnyPending && !mfaChallenge}
+                secureTextEntry
+                autoComplete="current-password"
               />
             </>
-          ) : null}
+          )}
+          {mfaChallenge && <View>
+            <Text style={styles.heroTagline}>{prompt.title}</Text>
+            <TextInput accessibilityLabel={prompt.label}
+              placeholder={prompt.placeholder}
+              keyboardType={recoveryMode ? "default" : "number-pad"} style={styles.input} value={mfaCode}
+              onChangeText={setMfaCode} maxLength={32} autoCapitalize="none" autoCorrect={false}
+              autoComplete="one-time-code" editable={!isEmailAuthPending} />
+            <Pressable accessibilityRole="button" disabled={isEmailAuthPending} onPress={() => { setRecoveryMode(!recoveryMode); setMfaCode(""); }}>
+              <Text style={styles.heroTagline}>{prompt.toggle}</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" disabled={isEmailAuthPending} onPress={() => { setMfaProvider(null); setRecoveryMode(false); setMfaChallenge(null); setMfaCode(""); setPassword(""); }}>
+              <Text style={styles.heroTagline}>Back to sign-in</Text>
+            </Pressable>
+          </View>}
           {/* DESIGN.md §Buttons: primary CTA uses `nyx-gradient-vivid`. */}
           <Pressable
             onPress={() => void handleEmailLogin()}
             accessibilityRole="button"
-            disabled={
-              isAnyPending ||
-              !email.trim() ||
-              !password ||
-              (mfaRequired && !/^\d{6}$/.test(mfaCode))
-            }
-            style={[
-              styles.signInButtonWrap,
-              (isEmailAuthPending || !email.trim() || !password) &&
-                styles.buttonDisabled,
-            ]}
+            disabled={isAnyPending || (mfaChallenge ? !/^(?:\d{6}|[A-Za-z0-9_-]{8}|[a-fA-F0-9]{32})$/.test(mfaCode) : !email.trim() || !password)}
+            style={[styles.signInButtonWrap, (isEmailAuthPending || (mfaChallenge ? !mfaCode : !email.trim() || !password)) && styles.buttonDisabled]}
           >
             <ExpoLinearGradient
               colors={[colors.gradientStart, colors.gradientEnd]}
@@ -520,13 +501,7 @@ export function AuthHomeScreen({ navigation }: Props) {
                 {isEmailAuthPending ? (
                   <ActivityIndicator size="small" color={colors.onPrimary} />
                 ) : null}
-                <Text style={styles.signInButtonText}>
-                  {isEmailAuthPending
-                    ? "Signing in..."
-                    : mfaRequired
-                      ? "Verify & sign in"
-                      : "Sign In"}
-                </Text>
+                <Text style={styles.signInButtonText}>{isEmailAuthPending ? "Signing in..." : mfaChallenge ? "Verify & sign in" : "Sign In"}</Text>
               </View>
             </ExpoLinearGradient>
           </Pressable>

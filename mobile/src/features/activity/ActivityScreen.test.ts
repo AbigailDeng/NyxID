@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { deferred, hookHarness } from "../assistant/assistantHookTestHarness";
 import * as challengeUiState from "./challengeUiState";
@@ -166,7 +166,7 @@ function setup({
       useQueryClient: () => queryClient,
       useInfiniteQuery: (options: { queryKey: string[] }) =>
         queries.get(
-          options.queryKey[0] === "approvals" ? "active" : options.queryKey[1],
+          options.queryKey[0] === "approvals" ? "active" : options.queryKey[1]!,
         ),
       useQuery: (options: { queryKey: string[]; initialData?: unknown }) =>
         options.queryKey[0] === "notifications"

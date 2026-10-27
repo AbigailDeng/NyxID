@@ -18,11 +18,12 @@ for HTTP response shapes.
   must be drained before eight-character v2 issuance. Both readers remain.
   Normalize case, separators and I/L→1, O→0, U→V. Ambiguous retained matches in
   either collection fail closed. Reservations survive insertion failures until TTL.
-- Use the server-returned `verification_uri_complete`, built from configured
+- Browser-owned QR login uses the server-returned `verification_uri_complete`, built from configured
   `FRONTEND_URL` and `/login/device?user_code=…`. The installed scanner fixture
   accepts trusted host/query payloads with eight-character codes. A QR identifies
   a request; scanning/signing in never approves it. No new browser handoff or
-  deep-link scheme is introduced.
+  deep-link scheme is introduced. CLI-originated links omit the code: the human
+  copies the separately displayed `user_code` into the approval page.
 - Step 1 shows the actual preview/code. Signed-in approvers acknowledge “This is my request — continue”; signed-out approvers verify inline after choosing browser persistence.
   Step 2 offers full account or restricted access only when `supports_grant_choice`
   permits it. Step 3 shows requested filters, matching keys and the actual grant,
@@ -64,8 +65,13 @@ for HTTP response shapes.
 
 `expiry_days` prefills the date picker with the UTC date that many days ahead;
 date-only choices expire at 23:59:59 UTC on that date, following backend parsing.
-The actual-grant summary and approval payload use that same instant. `none` clears
-the expiry. These remain editable draft suggestions.
+The actual-grant summary and approval payload use that same instant. `none` selects
+explicit `never_expires: true` for the new parent; clearing a date without that
+choice uses the finite 90-day server default. These remain editable draft suggestions.
+A new child credential defaults to 90 days, clamped to the parent expiry. An
+existing parent is never modified when issuing a child. Stored legacy child
+nonexpiry remains unchanged during authentication and delivery. See
+[API key issuance and deployment](API_KEY_ISSUANCE.md) for replica/client rollout.
 
 Raw query length is bounded to 49,152 characters. Unknown names, malformed percent
 encoding, control characters, empty list entries, invalid enum values and duplicate
@@ -134,27 +140,28 @@ browser callback if the backend lacks the requested protocol.
 
 The CLI prints `request_id`, `user_code`, the unchanged bare `verification_uri`,
 **`verification_uri_complete`**, `expires_at`, `interval`, `profile` and `auth_kind`.
-Share `verification_uri_complete` directly; no URL-building script is needed. Text
-output and interactive browser opening use that same completed URL. With
+Share the URL and `user_code` separately. The CLI retains the
+`verification_uri_complete` field for compatibility, but it contains only approval
+preferences, never `user_code` or `device_code`. Without preferences it equals the
+bare `verification_uri`. Text output and interactive browser opening use that same
+code-free URL. The human must copy/paste or type the displayed code before reviewing
+the request; `--clipboard` can copy it locally without adding it to a URL. With
 `--no-wait`, the CLI stores the private polling secret locally and returns without
-opening a browser or polling. The new JSON field is additive.
+opening a browser or polling.
 
 Direct API clients can build their own hinted URL from the returned challenge.
-Device requests include `verification_uri_complete`; Agent Key requests provide
-`verification_uri` and `user_code`. Build from those server-returned fields;
-never generate a code locally, substitute a different approval route, or put
-`device_code` in a link.
+Start from the bare `verification_uri` and display `user_code` separately for
+manual entry. Never append either code to a CLI login link, generate a code locally,
+or substitute a different approval route. The backend's completed URL remains
+available for the separate browser-owned QR flow.
 
 For a direct API integration, this builder supports either challenge shape:
 
 ```js
 function buildAgentApprovalUrl(challenge) {
-  const url = new URL(
-    challenge.verification_uri_complete ?? challenge.verification_uri,
-  );
-  if (!challenge.verification_uri_complete) {
-    url.searchParams.set("user_code", challenge.user_code);
-  }
+  const url = new URL(challenge.verification_uri);
+  url.search = "";
+  url.hash = "";
   const hints = {
     login_type: "agent",
     key_source: "new",
@@ -246,17 +253,19 @@ policies, provider permissions and service availability still apply at execution
 ## Signed-out approvers and insufficient authority
 
 1. Public preview shows the requester without granting credentials or exposing the
-   approver's service connections. Browsers and QR payloads use
-   `/login/device?user_code=XXXX-XXXX` with the documented hint parameters.
-   The code is always a query parameter, preserving installed scanner support.
+   approver's service connections. CLI links open `/login/device` with optional
+   approval preferences, and require manual code entry. Browser-owned QR payloads
+   use `/login/device?user_code=XXXX-XXXX`, preserving installed scanner support.
 2. The signed-out approver chooses **Only for this request** (default) or
    **Keep me signed in** on the request page. The shared login component offers
    configured Google, GitHub and Apple providers, the NyxID app, and email/password
    when enabled. Password and its configured NyxID MFA verification stay inline.
    Social providers return to this request with tab-local hints and handle their
-   own authentication challenges, matching ordinary social login. They do not
-   trigger an additional NyxID authenticator challenge. The app verifies identity
-   through an existing first-party human session without another MFA prompt.
+   own authentication challenges, matching ordinary social login. Password and
+   social identity require NyxID MFA when enrolled. App verification uses an
+   existing first-party human session: verified parents retain their assurance;
+   unverified legacy/mobile-exempt parents may skip the extra prompt only with
+   the account's approved-sign-in preference enabled.
    The original request expiry keeps running throughout verification.
 3. **Only for this request** creates an opaque, HttpOnly browser proof accepted
    exclusively by `/api/v1/auth/approval`. It is bound to the actual request ID,
@@ -416,3 +425,42 @@ credential identity and scopes remain equal.
 - Unchanged installed scanner: `mobile/src/features/auth/__fixtures__/installed-deviceUserCode.ts.txt`
   from `78cb26b3^`, exercised by `installedScanner.test.ts`. This proves source/parser
   compatibility, not physical-iPhone behavior.
+
+## MFA skip for app-approved sign-ins
+
+`PUT /api/v1/users/me/security` accepts only
+`{"skip_mfa_for_approved_sign_ins": true|false}` from a first-party human.
+`GET /users/me` exposes that boolean in `profile_config.security`. Absent policy
+is on, including accounts created before this preference existed. Only an explicit
+false disables it. Turning it back on for an MFA-enabled account requires a live
+verified session; disabling requires no step-up. Accounts without MFA can save
+either choice. Disabling MFA preserves the preference and rotates its revision.
+
+This covers legacy and v2 account QR login, v2 Agent Key grants and bound browser
+handoffs, request-only/persistent app identity, and dedicated Agent Key login.
+The server cannot distinguish a QR scan from a manually typed request code.
+Approval remains explicit. Sid-less bearers cannot use the exception. Password
+and social identity, ordinary login-code issuance/redemption and unrelated
+credential derivation stay strict.
+
+Skipped factors remain `mfa_assured: false`. Delivered account sessions carry
+`mfa_exemption: approved_sign_in_policy`; they authenticate and refresh while
+retaining their actual assurance. Exempt grants/proofs carry a server-authored
+`mfa_policy_revision`. Every exempt approval and final delivery writes the live
+user policy in the same transaction as its claim. Turning off rotates the
+revision, so neither concurrent delivery nor off/on can revive old authority.
+Denied undelivered sessions/refresh tokens and child credentials are revoked;
+delivery ciphertext is cleared and cleanup is audited. Completed sessions retain
+normal expiry/revocation; turning off prevents further exempt derivation.
+
+Missing revisions use a reserved nil UUID generation without a migration. The
+transaction fence accepts an absent boolean as on and always rejects explicit
+false. The first preference change or MFA-disable revision invalidates nil-stamped
+grants. Audits distinguish default policy use with `policy_default: true`.
+
+Use a coordinated traffic cutover to a fully upgraded backend fleet before
+publishing the frontend. Default-on approvals immediately write the new exemption;
+old replicas cannot deserialize it and may return 500 during a mixed-fleet rollout. Before a backend rollback,
+revoke every session matching `mfa_exemption: "approved_sign_in_policy"` and drain
+outstanding exempt grants/proofs. Old readers ignore grant revision fields and
+fail closed for unverified approval authority.
