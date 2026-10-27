@@ -495,7 +495,7 @@ describe("NyxBot agents in the sidebar", () => {
     const handlers = {
       onSelectAgent: vi.fn(),
       onNewThread: vi.fn(),
-      onCreateAgent: vi.fn(),
+      onNewAgent: vi.fn(),
     };
     const onSelect = vi.fn();
     render(
@@ -585,7 +585,7 @@ describe("NyxBot agents in the sidebar", () => {
               threads: [own, ...chats],
               onSelectAgent: vi.fn(),
               onNewThread: vi.fn(),
-              onCreateAgent: vi.fn(),
+              onNewAgent: vi.fn(),
             }}
           />
         </TooltipProvider>,
@@ -633,7 +633,7 @@ describe("NyxBot agents in the sidebar", () => {
             threads: [own, ...chats],
             onSelectAgent: vi.fn(),
             onNewThread: vi.fn(),
-            onCreateAgent: vi.fn(),
+            onNewAgent: vi.fn(),
           }}
         />
       </TooltipProvider>,
@@ -643,7 +643,7 @@ describe("NyxBot agents in the sidebar", () => {
 
   it("shows specialist status and pending requests, and selects an agent", async () => {
     const user = userEvent.setup();
-    const { onSelectAgent, onCreateAgent } = renderAgents();
+    const { onSelectAgent, onNewAgent } = renderAgents();
     const researcher = screen.getByRole("button", {
       name: "researcher, specialist, Running, 2 pending requests",
     });
@@ -651,8 +651,8 @@ describe("NyxBot agents in the sidebar", () => {
     expect(researcher).toHaveTextContent("2");
     await user.click(researcher);
     expect(onSelectAgent).toHaveBeenCalledWith("agent-researcher");
-    await user.click(screen.getByRole("button", { name: "Create agent" }));
-    expect(onCreateAgent).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: "New agent" }));
+    expect(onNewAgent).toHaveBeenCalledOnce();
   });
 
   it("keeps destroyed specialists behind a toggle, dimmed", async () => {
@@ -669,8 +669,7 @@ describe("NyxBot agents in the sidebar", () => {
     );
   });
 
-  it("prioritizes display names and keeps handles in accessible names and hover details", async () => {
-    const user = userEvent.setup();
+  it("names agents by their display name with the @handle beneath", () => {
     renderAgents({
       agents: [
         agent({ display_name: "Nyx" }),
@@ -678,12 +677,10 @@ describe("NyxBot agents in the sidebar", () => {
       ],
     });
     const nyxbot = screen.getByRole("button", { name: "Nyx (@NyxBot) — your personal agent" });
-    expect(nyxbot).toHaveTextContent("Nyx");
-    expect(nyxbot).not.toHaveTextContent("personal agent");
+    expect(nyxbot).toHaveTextContent("@NyxBot · personal agent");
     const writer = screen.getByRole("button", { name: "Luna (@writer), specialist, Idle" });
     expect(writer).toHaveTextContent("Luna");
-    await user.hover(writer);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("Luna (@writer)");
+    expect(writer).toHaveTextContent("@writer");
   });
 
   it("drops the generic New chat and the earlier engines' Chats list", () => {
@@ -723,6 +720,7 @@ describe("NyxBot agents in the sidebar", () => {
       groups: [group({}), group({ id: "nyxg-2", name: "Quiet", working_agent_ids: [] })],
       selectedGroupId: "nyxg-2",
       onSelectGroup: vi.fn(),
+      onNewGroup: vi.fn(),
     };
     renderAgents({}, { groups });
     const crew = screen.getByRole("button", {
@@ -734,17 +732,16 @@ describe("NyxBot agents in the sidebar", () => {
     );
     await user.click(crew);
     expect(groups.onSelectGroup).toHaveBeenCalledWith("nyxg-1");
-    expect(screen.queryByRole("button", { name: "New group" })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Create agent" })).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "New group" }));
+    expect(groups.onNewGroup).toHaveBeenCalledOnce();
   });
 
-  it("uses the same creation entry with an empty group list, without a second CTA", async () => {
+  it("invites a first group when there are none", async () => {
     const user = userEvent.setup();
-    const { onCreateAgent } = renderAgents({}, { groups: { groups: [], onSelectGroup: vi.fn() } });
-    await user.click(screen.getByRole("button", { name: "Create agent" }));
-    expect(onCreateAgent).toHaveBeenCalledOnce();
-    expect(screen.queryByText("Chat with several agents at once")).not.toBeInTheDocument();
-    expect(screen.queryByText("Groups")).not.toBeInTheDocument();
+    const onNewGroup = vi.fn();
+    renderAgents({}, { groups: { groups: [], onSelectGroup: vi.fn(), onNewGroup } });
+    await user.click(screen.getByRole("button", { name: "Chat with several agents at once" }));
+    expect(onNewGroup).toHaveBeenCalledOnce();
   });
 
   it("offers no new thread for a destroyed agent", () => {

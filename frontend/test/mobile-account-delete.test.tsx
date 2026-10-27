@@ -35,7 +35,6 @@ function harness() {
     StyleSheet: { create: (styles: unknown) => styles },
     Switch: () => <input type="checkbox" readOnly />,
     Text: ({ children }: NativeProps) => <span>{children}</span>,
-    useWindowDimensions: () => ({ width: 390, height: 844, scale: 3, fontScale: 1 }),
     View: box,
   };
 
@@ -58,8 +57,6 @@ function harness() {
         if (name === "react/jsx-runtime") return jsxRuntime;
         if (name === "@tanstack/react-query") return query;
         if (name === "react-native") return native;
-        if (name === "lucide-react-native") return { Minus: () => null, Plus: () => null };
-        if (name === "expo/fetch") return { fetch: transport };
         if (name === "@react-native-async-storage/async-storage") return { __esModule: true, default: {
           getItem: async (key: string) => deviceStorage.get(key) ?? null,
           setItem: async (key: string, value: string) => { deviceStorage.set(key, value); },

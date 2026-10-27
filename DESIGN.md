@@ -591,17 +591,3 @@ waveform action for voice conversations when the server enables
 `assistant:voice`; group chats support dictation. Dictation requires a build
 containing the speech recognition module. iPad, additional orientations,
 RN-web, machines and new backend capabilities remain outside native support.
-
-### Assistant sidebar density and creation
-
-Agent rows use one 32px line with an avatar, name, status and compact channel or
-pending indicators. Full names, handles and channel context remain available to
-assistive technology and in the row tooltip. Expanded conversation rows use
-28px lines and a shallow nested indent. Coarse pointers receive at least 40px
-targets. Ownership headings separate personal and organization resources without
-repeating metadata on every row.
-
-One **Create agent** entry opens the existing personal/organization agent form or
-the crew form. Groups remain navigable without a separate creation CTA. The
-roster retains its own scroll position; theme-colored overlays appear only at
-edges with hidden content and ignore pointer input.

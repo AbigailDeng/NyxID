@@ -99,7 +99,7 @@ it("describes a specialist as handling direct work itself, never as handing it t
       <NewAgentDialog onClose={vi.fn()} onCreated={vi.fn()} />
     </QueryClientProvider>,
   );
-  const dialog = await screen.findByRole("dialog", { name: "Create agent" });
+  const dialog = await screen.findByRole("dialog", { name: "New agent" });
   expect(dialog).toHaveTextContent(
     "When you talk to it directly it handles the work itself and tells you what it is missing; you add grants in its details.",
   );
@@ -108,7 +108,7 @@ it("describes a specialist as handling direct work itself, never as handing it t
 
 it("creates a specialist with its role, services and account read, then opens its home thread", async () => {
   const { onCreated, user } = renderDialog();
-  const dialog = screen.getByRole("dialog", { name: "Create agent" });
+  const dialog = screen.getByRole("dialog", { name: "New agent" });
   const create = within(dialog).getByRole("button", { name: "Create agent" });
   expect(create).toBeDisabled();
   // Only connected, active services are offered.
@@ -138,7 +138,7 @@ it("creates a specialist with its role, services and account read, then opens it
 
 it("sends an optional display name and persona", async () => {
   const { onCreated, user } = renderDialog();
-  const dialog = screen.getByRole("dialog", { name: "Create agent" });
+  const dialog = screen.getByRole("dialog", { name: "New agent" });
   await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "writer");
   await user.type(within(dialog).getByRole("textbox", { name: /Display name/ }), "Luna");
   await user.type(within(dialog).getByRole("textbox", { name: "Role" }), "Drafts notes");
@@ -161,7 +161,7 @@ it("sends an optional display name and persona", async () => {
 
 it("rejects an invalid name before calling the server and shows server refusals", async () => {
   const { onCreated, user } = renderDialog();
-  const dialog = screen.getByRole("dialog", { name: "Create agent" });
+  const dialog = screen.getByRole("dialog", { name: "New agent" });
   await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "-bad");
   await user.type(within(dialog).getByRole("textbox", { name: "Role" }), "Anything");
   await user.click(within(dialog).getByRole("button", { name: "Create agent" }));
@@ -237,7 +237,7 @@ it("hides organization selection while rollout is disabled", () => {
 it("opens Ownership above the assistant dialog and preserves keyboard selection", async () => {
   orgEnabled = true;
   const { user } = renderDialog();
-  const dialog = screen.getByRole("dialog", { name: "Create agent" });
+  const dialog = screen.getByRole("dialog", { name: "New agent" });
   expect(dialog).toHaveStyle({ zIndex: "90" });
   await user.click(screen.getByRole("combobox", { name: "Ownership" }));
   const menu = screen.getByRole("listbox");
@@ -245,33 +245,4 @@ it("opens Ownership above the assistant dialog and preserves keyboard selection"
   expect(dialog).not.toContainElement(menu);
   await user.click(screen.getByRole("option", { name: "Team" }));
   expect(screen.getByRole("combobox", { name: "Ownership" })).toHaveTextContent("Team");
-});
-
-it("offers one creation flow for agents with organization ownership and crews", async () => {
-  orgEnabled = true;
-  const { CreateAgentDialog } = await import("./create-agent-dialog");
-  const onAgentCreated = vi.fn();
-  const onCrewCreated = vi.fn();
-  const onClose = vi.fn();
-  const user = userEvent.setup();
-  const { unmount } = render(<QueryClientProvider client={client}><CreateAgentDialog agents={[]} onClose={onClose} onAgentCreated={onAgentCreated} onCrewCreated={onCrewCreated} /></QueryClientProvider>);
-  const chooser = screen.getByRole("dialog", { name: "Create agent" });
-  expect(within(chooser).queryByRole("textbox")).not.toBeInTheDocument();
-  await user.click(within(chooser).getByRole("button", { name: /^Agent / }));
-  await user.click(screen.getByRole("combobox", { name: "Ownership" }));
-  await user.click(screen.getByRole("option", { name: "Team" }));
-  await user.type(screen.getByRole("textbox", { name: "Name" }), "researcher");
-  await user.type(screen.getByRole("textbox", { name: "Role" }), "Research topics");
-  await user.click(screen.getByRole("button", { name: "Create agent" }));
-  await waitFor(() => expect(onAgentCreated).toHaveBeenCalledOnce());
-  expect(posts[0]).toMatchObject({ org: "org-team", name: "researcher" });
-  expect(onCrewCreated).not.toHaveBeenCalled();
-  unmount();
-
-  render(<QueryClientProvider client={client}><CreateAgentDialog agents={[]} onClose={onClose} onAgentCreated={onAgentCreated} onCrewCreated={onCrewCreated} /></QueryClientProvider>);
-  await user.click(screen.getByRole("button", { name: /^Crew / }));
-  expect(screen.getByRole("dialog", { name: "Create crew" })).toBeVisible();
-  expect(screen.getByRole("button", { name: "Create crew" })).toBeDisabled();
-  await user.click(screen.getByRole("button", { name: "Cancel" }));
-  expect(onClose).toHaveBeenCalledOnce();
 });

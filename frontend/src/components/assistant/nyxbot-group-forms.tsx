@@ -299,7 +299,7 @@ export function NewGroupDialog({
     >
       <DialogContent scrollMode="body" className="md:max-w-md">
         <DialogHeader className="shrink-0 pr-6">
-          <DialogTitle>Create crew</DialogTitle>
+          <DialogTitle>New group</DialogTitle>
           <DialogDescription>
             Chat with up to {ASSISTANT_GROUP_MAX_MEMBERS} of your agents at once.{" "}
             {GROUP_ROUTING_COPY}
@@ -333,7 +333,7 @@ export function NewGroupDialog({
                 isLoading={create.isPending}
                 disabled={!name.trim() || !members.length}
               >
-                Create crew
+                Create group
               </Button>
             </DialogFooter>
           </form>

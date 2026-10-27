@@ -18,7 +18,6 @@ import {
   type ChannelThreadGroup,
 } from "@/lib/assistant/nyxbot-labels";
 import { ChatKindIcon } from "@/components/assistant/nyxbot-channel-chats";
-import { TelegramGlyph } from "@/components/service-icons/_shared";
 import type { AssistantAgent, AssistantGroup } from "@/schemas/assistant-nyxagent";
 import {
   Activity,
@@ -31,7 +30,6 @@ import {
   PencilLine,
   Plus,
   Monitor,
-  MessageCircle,
   CalendarClock,
   ShieldCheck,
   Trash2,
@@ -79,7 +77,7 @@ const TITLE_FADE =
 
 function GroupLabel({ children }: { readonly children: string }) {
   return (
-    <div className="px-2 py-1.5 text-9 font-medium uppercase tracking-[1.5px] text-text-tertiary">
+    <div className="px-3 py-2 text-9 font-medium uppercase tracking-[1.5px] text-text-tertiary">
       {children}
     </div>
   );
@@ -100,7 +98,7 @@ function ComingSoonItem({
       <TooltipTrigger asChild>
         <div
           aria-disabled="true"
-          className="flex w-full cursor-not-allowed items-center min-h-8 gap-2 rounded-lg px-2 py-1 text-13 leading-5 [@media(pointer:coarse)]:min-h-10 text-muted-foreground opacity-50"
+          className="flex w-full cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-13 text-muted-foreground opacity-50"
         >
           <Icon className="h-4 w-4 shrink-0 text-text-tertiary" />
           <span className="min-w-0 flex-1 truncate">{label}</span>
@@ -167,7 +165,7 @@ function ConversationRow({
         aria-label={shownTitle}
         aria-describedby={showDraft ? draftPreviewId : undefined}
         className={cn(
-          "min-h-7 w-full overflow-hidden px-2 py-1 text-left text-13 leading-5 transition-colors [@media(pointer:coarse)]:min-h-10",
+          "w-full overflow-hidden px-3 py-2 text-left text-13 transition-colors",
           active
             ? "font-medium text-foreground"
             : "text-muted-foreground group-hover:text-foreground",
@@ -250,7 +248,7 @@ export interface SidebarAgents {
   readonly threadsLoading?: boolean;
   readonly onSelectAgent: (agentId: string) => void;
   readonly onNewThread: (agentId: string) => void;
-  readonly onCreateAgent: () => void;
+  readonly onNewAgent: () => void;
   /** The NyxBot home is open. */
   readonly homeActive?: boolean;
   readonly onHome?: () => void;
@@ -262,6 +260,7 @@ export interface SidebarGroups {
   readonly selectedGroupId?: string;
   readonly loading?: boolean;
   readonly onSelectGroup: (groupId: string) => void;
+  readonly onNewGroup: () => void;
 }
 
 function agentAccessibleName(agent: AssistantAgent): string {
@@ -317,7 +316,7 @@ function ChannelThreadsGroup({
         aria-label={`${group.label} on ${platform}, ${String(count)} ${count === 1 ? "chat" : "chats"}${running ? ", working" : ""}`}
         onClick={() => setPinned({ open: !open, active: activeThreadId })}
         data-keep-drawer-open=""
-        className="flex min-h-7 w-full items-center gap-1.5 rounded-lg px-2 py-1 text-left text-12 leading-5 text-text-tertiary transition-colors hover:bg-overlay hover:text-foreground [@media(pointer:coarse)]:min-h-10"
+        className="flex w-full items-center gap-1.5 rounded-lg px-3 py-1.5 text-left text-12 text-text-tertiary transition-colors hover:bg-overlay hover:text-foreground"
       >
         <ChevronRight
           aria-hidden="true"
@@ -333,7 +332,7 @@ function ChannelThreadsGroup({
         <span className="shrink-0 tabular-nums text-11">{count}</span>
       </button>
       {open ? (
-        <div className="ml-2 border-l border-border/60 pl-1">
+        <div className="ml-3 space-y-0.5 border-l border-border/60 pl-1.5">
           {Array.from(new Set(visible.map((thread) => thread.channel?.parent_chat_id ?? thread.channel?.chat_id ?? thread.id))).map((chatId) => {
             const children = visible.filter((thread) => (thread.channel?.parent_chat_id ?? thread.channel?.chat_id ?? thread.id) === chatId);
             const followed = children.some((thread) => thread.channel?.thread_id);
@@ -372,81 +371,69 @@ function AgentRow({
   readonly renderThread: (conversation: Conversation) => ReactNode;
 }) {
   const nyxbot = agent.kind === "nyxbot";
-  const platforms = [
-    ...new Set(agent.channels.map((channel) => channel.platform)),
-  ];
-  const threads = selected
-    ? splitChannelThreads(model.threads)
-    : { own: [], bots: [] };
+  const platforms = [...new Set(agent.channels.map((channel) => channel.platform))];
+  const threads = selected ? splitChannelThreads(model.threads) : { own: [], bots: [] };
   const pending = agent.pending_acknowledgements;
   const name = agentTitle(agent);
   const handle = agentHandle(agent);
-  const channelNames = platforms.map(channelPlatformName).join(", ");
+  // Under the name: NyxBot's role, and the @handle when a display name hides it.
+  const subtitle = nyxbot
+    ? handle
+      ? `${handle} · personal agent`
+      : "Your personal agent"
+    : handle;
   return (
     <div>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={() => model.onSelectAgent(agent.id)}
-            aria-label={agentAccessibleName(agent)}
-            aria-expanded={selected}
-            className={cn(
-              "flex min-h-8 w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-13 leading-5 transition-colors [@media(pointer:coarse)]:min-h-10",
-              selected
-                ? "font-medium text-foreground"
-                : "text-muted-foreground hover:bg-overlay hover:text-foreground",
-              agent.status === "destroyed" && "opacity-50",
-            )}
-          >
-            <span className="relative flex shrink-0">
-              <AgentAvatar agent={agent} size="sm" />
-              {nyxbot ? null : (
-                <AgentStatusDot
-                  status={agent.status}
-                  className="absolute -bottom-0.5 -right-0.5 ring-2 ring-background"
-                />
-              )}
+      <button
+        type="button"
+        onClick={() => model.onSelectAgent(agent.id)}
+        aria-label={agentAccessibleName(agent)}
+        aria-expanded={selected}
+        className={cn(
+          "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-13 transition-colors",
+          selected
+            ? "font-medium text-foreground"
+            : "text-muted-foreground hover:bg-overlay hover:text-foreground",
+          agent.status === "destroyed" && "opacity-50",
+        )}
+      >
+        <span className="relative flex shrink-0">
+          <AgentAvatar agent={agent} size="sm" />
+          {nyxbot ? null : (
+            <AgentStatusDot
+              status={agent.status}
+              className="absolute -bottom-0.5 -right-0.5 ring-2 ring-background"
+            />
+          )}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate">{name}</span>
+          {subtitle ? (
+            <span className="block truncate text-10 font-normal text-text-tertiary">
+              {subtitle}
             </span>
-            <span className="min-w-0 flex-1 truncate">{name}</span>
-            {platforms.length > 0 ? (
-              <span className="flex shrink-0 items-center gap-0.5 text-text-tertiary">
-                {platforms[0]?.startsWith("telegram") ? (
-                  <TelegramGlyph aria-hidden="true" className="h-3 w-3" />
-                ) : (
-                  <MessageCircle aria-hidden="true" className="h-3 w-3" />
-                )}
-                <span className="sr-only">{channelNames}</span>
-                {platforms.length > 1 ? (
-                  <span className="text-9">+{platforms.length - 1}</span>
-                ) : null}
-              </span>
-            ) : null}
-            {pending > 0 ? (
-              <span className="shrink-0 rounded-md border border-warning/30 bg-warning/10 px-1.5 text-10 font-medium text-warning">
-                {pending}
-              </span>
-            ) : null}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="right" className="max-w-64">
-          <p className="font-medium">
-            {name}
-            {handle ? ` (${handle})` : ""}
-          </p>
-          <p className="text-text-tertiary">
-            {nyxbot ? "Your personal agent" : AGENT_STATUS_LABEL[agent.status]}
-          </p>
-          {channelNames ? (
-            <p className="text-text-tertiary">{channelNames}</p>
           ) : null}
-        </TooltipContent>
-      </Tooltip>
+        </span>
+        {platforms.slice(0, 1).map((platform) => (
+          <span
+            key={platform}
+            className="shrink-0 rounded-md border border-hairline bg-overlay px-1 text-9 font-medium leading-4 text-text-tertiary"
+          >
+            {channelPlatformName(platform)}
+            {platforms.length > 1 ? ` +${String(platforms.length - 1)}` : ""}
+          </span>
+        ))}
+        {pending > 0 ? (
+          <span className="shrink-0 rounded-md border border-warning/30 bg-warning/10 px-1.5 text-10 font-medium text-warning">
+            {pending}
+          </span>
+        ) : null}
+      </button>
       {selected ? (
         <div
           role="group"
           aria-label={`Threads with ${name}`}
-          className="mb-1 ml-2 mt-0.5 border-l border-border/60 pl-1"
+          className="mb-1 ml-3 mt-0.5 space-y-0.5 border-l border-border/60 pl-1.5"
         >
           {threads.own.map((conversation) => renderThread(conversation))}
           {model.threadsLoading && !model.threads.length ? (
@@ -467,7 +454,7 @@ function AgentRow({
               type="button"
               onClick={() => model.onNewThread(agent.id)}
               aria-label={`New chat with ${name}`}
-              className="flex min-h-7 w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-12 leading-5 text-text-tertiary transition-colors hover:bg-overlay hover:text-foreground [@media(pointer:coarse)]:min-h-10"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-12 text-text-tertiary transition-colors hover:bg-overlay hover:text-foreground"
             >
               <Plus aria-hidden="true" className="h-3 w-3" />
               New chat
@@ -495,10 +482,10 @@ function AgentsSection({
     // NyxBot pinned first; the server already orders the rest.
     .sort((a, b) => Number(b.kind === "nyxbot") - Number(a.kind === "nyxbot"));
   return (
-    <div className="space-y-2">
+    <div className="space-y-0.5">
       {agentOwnerSections(visible).map((section) => (
         <section key={section.id} aria-label={section.label}>
-          <p className="px-2 pb-1 text-9 font-semibold uppercase tracking-[1px] text-text-tertiary">
+          <p className="px-3 pb-1 pt-3 text-10 font-semibold uppercase tracking-[1.5px] text-text-tertiary">
             {section.label}
           </p>
           {section.agents.map((agent) => (
@@ -536,7 +523,7 @@ function GroupsSection({ model }: { readonly model: SidebarGroups }) {
   return (
     <div className="space-y-0.5">
       {[...sections.entries()].map(([owner, groups]) => <div key={owner}>
-        <p className="px-2 pt-1 pb-1 text-9 font-medium text-text-tertiary">{owner === "personal" ? "Personal" : groups[0]?.owner?.name}</p>
+        <p className="px-3 pt-2 pb-1 text-10 font-medium text-text-tertiary">{owner === "personal" ? "Personal" : groups[0]?.owner?.name}</p>
         {groups.map((group) => {
         const working = group.working_agent_ids.length;
         const selected = group.id === model.selectedGroupId;
@@ -550,7 +537,7 @@ function GroupsSection({ model }: { readonly model: SidebarGroups }) {
               .map((member) => agentTitle(member))
               .join(", ")}${working ? `, ${String(working)} working` : ""}`}
             className={cn(
-              "flex w-full items-center min-h-8 gap-2 rounded-lg px-2 py-1 text-left text-13 leading-5 [@media(pointer:coarse)]:min-h-10 transition-colors",
+              "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-13 transition-colors",
               selected
                 ? "bg-overlay-strong font-medium text-foreground"
                 : "text-muted-foreground hover:bg-overlay hover:text-foreground",
@@ -569,6 +556,16 @@ function GroupsSection({ model }: { readonly model: SidebarGroups }) {
       })}</div>)}
       {model.loading && !model.groups.length ? (
         <p className="px-3 py-1.5 text-11 text-text-tertiary">Loading groups...</p>
+      ) : null}
+      {!model.loading && !model.groups.length ? (
+        <button
+          type="button"
+          onClick={model.onNewGroup}
+          data-keep-drawer-open=""
+          className="w-full rounded-lg px-3 py-1.5 text-left text-11 text-text-tertiary transition-colors hover:bg-overlay hover:text-muted-foreground"
+        >
+          Chat with several agents at once
+        </button>
       ) : null}
     </div>
   );
@@ -699,7 +696,7 @@ export function AssistantSidebar({
             type="button"
             onClick={agents.onHome}
             aria-current={agents.homeActive ? "page" : undefined}
-            className={`flex w-full items-center min-h-8 gap-2 rounded-lg px-2 py-1 leading-5 [@media(pointer:coarse)]:min-h-10 text-left text-13 transition-colors ${
+            className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-13 transition-colors ${
               agents.homeActive
                 ? "bg-overlay-strong font-medium text-foreground"
                 : "text-muted-foreground hover:bg-overlay hover:text-foreground"
@@ -713,7 +710,7 @@ export function AssistantSidebar({
         ) : (
           <Link
             to="/assistant"
-            className="flex items-center min-h-8 gap-2 rounded-lg px-2 py-1 leading-5 [@media(pointer:coarse)]:min-h-10 text-13 text-muted-foreground hover:bg-overlay hover:text-foreground"
+            className="flex items-center gap-3 rounded-lg px-3 py-2 text-13 text-muted-foreground hover:bg-overlay hover:text-foreground"
           >
             <House className="h-4 w-4" />
             Home
@@ -740,7 +737,7 @@ export function AssistantSidebar({
             to={item.to}
             aria-current={activeView === item.view ? "page" : undefined}
             className={cn(
-              "flex w-full items-center min-h-8 gap-2 rounded-lg px-2 py-1 leading-5 [@media(pointer:coarse)]:min-h-10 text-13 transition-colors",
+              "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-13 transition-colors",
               activeView === item.view
                 ? "bg-overlay-strong font-medium text-foreground"
                 : "text-muted-foreground hover:bg-overlay hover:text-foreground",
@@ -760,7 +757,7 @@ export function AssistantSidebar({
         <Link
           to="/assistant/plugins"
           aria-current={pluginsActive ? "page" : undefined}
-          className={`flex w-full items-center min-h-8 gap-2 rounded-lg px-2 py-1 leading-5 [@media(pointer:coarse)]:min-h-10 text-13 transition-colors ${
+          className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-13 transition-colors ${
             pluginsActive
               ? "bg-overlay-strong font-medium text-foreground"
               : "text-muted-foreground hover:bg-overlay hover:text-foreground"
@@ -785,7 +782,7 @@ export function AssistantSidebar({
         <Link
           to="/assistant/approvals"
           aria-current={approvalsActive ? "page" : undefined}
-          className={`flex w-full items-center min-h-8 gap-2 rounded-lg px-2 py-1 leading-5 [@media(pointer:coarse)]:min-h-10 text-13 transition-colors ${
+          className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-13 transition-colors ${
             approvalsActive
               ? "bg-overlay-strong font-medium text-foreground"
               : "text-muted-foreground hover:bg-overlay hover:text-foreground"
@@ -814,55 +811,57 @@ export function AssistantSidebar({
           {notice}
         </p>
       ) : null}
-      {agents ? (
-        <div className="shrink-0 px-2 pb-2">
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full justify-start gap-2"
-            data-keep-drawer-open=""
-            onClick={agents.onCreateAgent}
-          >
-            <Plus aria-hidden="true" className="h-3.5 w-3.5" />
-            Create agent
-          </Button>
-        </div>
-      ) : null}
-      <div className="assistant-sidebar-scroll relative min-h-0 flex-1">
-        <nav
-          aria-label="Agents and conversations"
-          data-scroll-fade="overlay"
-          className="h-full overflow-y-auto overscroll-contain px-2 pb-3"
-        >
-          {agents ? (
-            <>
+      <nav aria-label="Agents and conversations" data-scroll-fade="" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3">
+        {agents ? (
+          <>
+            <div className="-ml-2 flex items-center justify-between">
               <GroupLabel>Agents</GroupLabel>
-              <AgentsSection
-                model={agents}
-                activeThreadId={activeConversationId}
-                renderThread={renderRow}
-              />
-            </>
-          ) : null}
-          {groups && (groups.groups.length > 0 || groups.loading) ? (
-            <>
-              <div className="mt-2">
-                <GroupLabel>Groups</GroupLabel>
-              </div>
-              <GroupsSection model={groups} />
-            </>
-          ) : null}
-          {/* The earlier engines' chats; NyxAgent mode lists threads under agents. */}
-          {!agents ? (
-            <>
-              <div className="-mx-2">
-                <GroupLabel>Chats</GroupLabel>
-              </div>
-              <div className="space-y-0.5">{conversations.map(renderRow)}</div>
-            </>
-          ) : null}
-        </nav>
-      </div>
+              <button
+                type="button"
+                aria-label="New agent"
+                // The dialog is rendered by this sidebar; closing the mobile
+                // drawer would unmount it.
+                data-keep-drawer-open=""
+                onClick={agents.onNewAgent}
+                className="flex h-6 w-6 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-overlay hover:text-foreground"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <AgentsSection
+              model={agents}
+              activeThreadId={activeConversationId}
+              renderThread={renderRow}
+            />
+          </>
+        ) : null}
+        {groups ? (
+          <>
+            <div className="-ml-2 mt-2 flex items-center justify-between">
+              <GroupLabel>Groups</GroupLabel>
+              <button
+                type="button"
+                aria-label="New group"
+                data-keep-drawer-open=""
+                onClick={groups.onNewGroup}
+                className="flex h-6 w-6 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-overlay hover:text-foreground"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <GroupsSection model={groups} />
+          </>
+        ) : null}
+        {/* The earlier engines' chats; NyxAgent mode lists threads under agents. */}
+        {!agents ? (
+          <>
+            <div className="-mx-2">
+              <GroupLabel>Chats</GroupLabel>
+            </div>
+            <div className="space-y-0.5">{conversations.map(renderRow)}</div>
+          </>
+        ) : null}
+      </nav>
 
       <div className="shrink-0 border-t border-border/60 p-2">
         <AssistantAccountMenu align="start" side="top">
