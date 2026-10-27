@@ -1,11 +1,6 @@
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from "react-native";
+import { Pressable, StyleSheet, useWindowDimensions, View } from "react-native";
 import { Minus, Plus } from "lucide-react-native";
+import { DynamicTypeText as Text } from "../../components/DynamicTypeText";
 import { useChatLayout } from "./ChatLayoutContext";
 import {
   chatLayoutBounds,

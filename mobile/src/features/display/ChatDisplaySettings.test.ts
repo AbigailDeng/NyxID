@@ -8,8 +8,14 @@ import {
   type ChatLayout,
 } from "./chatLayout";
 
-type Element = { type: unknown; props: Record<string, any> };
+type Element = {
+  type: unknown;
+  props: Record<string, any>;
+  key?: number | string;
+};
 function elements(root: Element): Element[] {
+  if (typeof root.type === "function" && root.type.name === "DynamicTypeText")
+    return elements(root.type(root.props));
   return [
     root,
     ...[root.props.children]
@@ -25,7 +31,12 @@ const style = (node: Element) =>
   Object.assign({}, ...[node.props.style].flat(Infinity).filter(Boolean));
 function setup(width = 402, fontScale = 3.12) {
   let layout = { ...defaultChatLayout };
-  const jsx = (type: unknown, props: Element["props"]) => ({ type, props });
+  const jsx = (
+    type: unknown,
+    props: Element["props"],
+    key?: number | string,
+  ) => ({ type, props, key });
+  const dynamicText = {};
   const harness = hookHarness<Element>({
     "react/jsx-runtime": { jsx, jsxs: jsx },
     "react-native": {
@@ -36,6 +47,7 @@ function setup(width = 402, fontScale = 3.12) {
       useWindowDimensions: () => ({ width, fontScale }),
     },
     "lucide-react-native": { Minus: "Minus", Plus: "Plus" },
+    "../../components/DynamicTypeText": dynamicText,
     "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
     "./ChatLayoutContext": {
       useChatLayout: () => ({
@@ -49,6 +61,14 @@ function setup(width = 402, fontScale = 3.12) {
       }),
     },
   });
+  Object.assign(
+    dynamicText,
+    harness.load(
+      fileURLToPath(
+        new URL("../../components/DynamicTypeText.tsx", import.meta.url),
+      ),
+    ),
+  );
   const { ChatDisplaySettings } = harness.load(
     fileURLToPath(new URL("./ChatDisplaySettings.tsx", import.meta.url)),
   ) as {
@@ -61,7 +81,16 @@ function setup(width = 402, fontScale = 3.12) {
     assert.ok(node, label);
     return node;
   };
-  return { harness, all, button, layout: () => layout };
+  return {
+    harness,
+    all,
+    button,
+    layout: () => layout,
+    scale: (next: number) => {
+      fontScale = next;
+      harness.render();
+    },
+  };
 }
 
 test("large-text Display keeps labels and values scalable while step icons fit their accessible 44pt targets", () => {
@@ -112,5 +141,54 @@ test("Display keeps bounds and column-width availability at standard text size",
     true,
   );
   assert.ok(env.button("Increase chat column width"));
+  env.harness.unmount();
+});
+
+test("live Display scaling refreshes text metrics while retaining row/control identity and preference state", () => {
+  const env = setup(800, 1);
+  env.button("Increase maximum composer height").props.onPress();
+  env.harness.render();
+  const identities = () =>
+    env
+      .all()
+      .filter((node) => node.type !== "Text")
+      .map((node) => [node.type, node.key]);
+  const before = identities();
+  assert.ok(
+    env
+      .all()
+      .filter((node) => node.type === "Text")
+      .every((node) => node.key === 1),
+  );
+  env.scale(2.143);
+  assert.deepEqual(
+    identities(),
+    before,
+    "card, rows, buttons and icons retain their React identity",
+  );
+  assert.ok(
+    env
+      .all()
+      .filter((node) => node.type === "Text")
+      .every((node) => node.key === 2.143),
+  );
+  assert.equal(env.layout().composerMaxHeight, 140);
+  env.button("Increase maximum composer height").props.onPress();
+  env.harness.render();
+  assert.equal(env.layout().composerMaxHeight, 160);
+  assert.ok(
+    env
+      .all()
+      .filter((node) => node.type === "Text")
+      .every((node) => node.key === 2.143),
+    "preference edits do not replace text again",
+  );
+  env.scale(1);
+  assert.ok(
+    env
+      .all()
+      .filter((node) => node.type === "Text")
+      .every((node) => node.key === 1),
+  );
   env.harness.unmount();
 });

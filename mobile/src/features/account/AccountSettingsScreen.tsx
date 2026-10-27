@@ -2,13 +2,14 @@ import { ChatDisplaySettings } from "../display/ChatDisplaySettings";
 import { approvalDeliveryWarning } from "./approvalDeliveryPolicy";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Switch, Text,
-  useWindowDimensions, View,
+  Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Switch,
+  useWindowDimensions, View, type TextProps,
 } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
 import type { WorkspaceScreenProps } from "../../app/navigationTypes";
 
 import { PrimaryButton } from "../../components/PrimaryButton";
+import { DynamicTypeText as Text } from "../../components/DynamicTypeText";
 import { ScreenContainer } from "../../components/ScreenContainer";
 import { OfflineBanner } from "../../components/OfflineBanner";
 import { TelegramLinkModal } from "../../components/TelegramLinkModal";
@@ -28,10 +29,33 @@ import { activatePushAfterLogin } from "../../lib/notifications/pushNotification
 import { useTheme } from "../../theme/ThemeContext";
 import type { ThemeColors } from "../../theme/mobileTheme";
 import { createFlowStyles } from "../../theme/flowStyles";
-import { radius, spacing, typeScale } from "../../theme/designTokens";
+import { fonts, radius, spacing, typeScale } from "../../theme/designTokens";
 import { useEffect, useMemo, useState } from "react";
 
 type Props = WorkspaceScreenProps<"AccountSettings">;
+
+export function AccountSettingsTitle({
+  children,
+  tintColor,
+  allowFontScaling,
+  onLayout,
+}: Pick<TextProps, "allowFontScaling" | "onLayout"> & {
+  children: string;
+  tintColor?: string;
+}) {
+  return (
+    <Text
+      role="heading"
+      aria-level={1}
+      numberOfLines={1}
+      allowFontScaling={allowFontScaling}
+      onLayout={onLayout}
+      style={{ color: tintColor, fontFamily: fonts.displaySemi, fontSize: 18 }}
+    >
+      {children}
+    </Text>
+  );
+}
 
 // Push-register failure modes are surfaced as a tagged error so the
 // caller can branch on `reason` (e.g. iOS denial → Alert + Linking
@@ -535,7 +559,7 @@ export function AccountSettingsScreen({ navigation }: Props) {
           ) : isProfileError || !profile ? (
             <>
               <Text style={styles.errorText}>Failed to load profile</Text>
-              <PrimaryButton label="Retry" kind="ghost" onPress={() => refetchProfile()} />
+              <PrimaryButton refreshLabelOnFontScaleChange label="Retry" kind="ghost" onPress={() => refetchProfile()} />
             </>
           ) : (
             <>
@@ -729,7 +753,7 @@ export function AccountSettingsScreen({ navigation }: Props) {
               disabled={saveAnalytics.isPending || analyticsPermission.isFetching || analyticsPermission.isError || !analyticsPermission.data}
               onValueChange={(value) => saveAnalytics.mutate(value)} />
           </View>
-          {analyticsPermission.isError && <PrimaryButton label="Retry" kind="ghost" onPress={() => { void analyticsPermission.refetch(); }} />}
+          {analyticsPermission.isError && <PrimaryButton refreshLabelOnFontScaleChange label="Retry" kind="ghost" onPress={() => { void analyticsPermission.refetch(); }} />}
           <View style={styles.systemRow}>
             <Text style={styles.accountRowLabel}>Allow on this device</Text>
             <Switch accessibilityLabel="Allow usage analytics on this device" value={deviceConsent.enabled}
@@ -740,22 +764,22 @@ export function AccountSettingsScreen({ navigation }: Props) {
 
         {deviceConsent.persistenceError && <View style={styles.card}>
           <Text style={styles.accountRowValue}>This device's choice could not be saved. Analytics is off in this session; retry to save it before closing the app.</Text>
-          <PrimaryButton label="Retry saving device choice" kind="ghost" onPress={deviceConsent.retryPersistence} />
+          <PrimaryButton refreshLabelOnFontScaleChange label="Retry saving device choice" kind="ghost" onPress={deviceConsent.retryPersistence} />
         </View>}
 
         {/* Actions */}
         <View style={styles.actionsWrap}>
-          <PrimaryButton label="Profile & account security" kind="ghost"
+          <PrimaryButton refreshLabelOnFontScaleChange label="Profile & account security" kind="ghost"
             onPress={() => navigation.push("AccountSecurity")} />
-          <PrimaryButton label="Generate terminal login code" kind="ghost" disabled={isOffline}
+          <PrimaryButton refreshLabelOnFontScaleChange label="Generate terminal login code" kind="ghost" disabled={isOffline}
             onPress={() => navigation.push("AgentKeyLogin", { mint: true })} />
-          <PrimaryButton
+          <PrimaryButton refreshLabelOnFontScaleChange
             label="Sign Out"
             kind="ghost"
             disabled={deleteAccountMutation.isPending || isOffline}
             onPress={handleSignOut}
           />
-          <PrimaryButton
+          <PrimaryButton refreshLabelOnFontScaleChange
             label={deleteAccountMutation.isPending ? "Deleting..." : "Delete Account"}
             kind="danger"
             disabled={deleteAccountMutation.isPending || isOffline}

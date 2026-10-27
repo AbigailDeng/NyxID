@@ -560,6 +560,8 @@ full-screen. See
   these layout values. Web storage and width/index behavior are unchanged.
 - Settings preserves system text scaling. At narrow effective widths, identity,
   status, label/value and switch rows stack so long text can wrap within cards.
+  Live system text-size changes refresh Settings and Display label measurements
+  while retaining the page, scroll position and control state.
   Avatar initials retain enough space at the selected text size. Display step
   controls use fixed-size icons in labelled 44pt targets while labels and values
   continue to scale; the controls can wrap onto another line.

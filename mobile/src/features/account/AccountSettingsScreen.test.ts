@@ -4,7 +4,7 @@ import test from "node:test";
 import { hookHarness } from "../assistant/assistantHookTestHarness";
 import { lightColors } from "../../theme/mobileTheme";
 
-type Element = { type: unknown; props: Record<string, any> };
+type Element = { type: unknown; props: Record<string, any>; key?: number };
 const style = (node: Element) =>
   Object.assign({}, ...[node.props.style].flat(Infinity).filter(Boolean));
 function elements(root: Element): Element[] {
@@ -20,8 +20,11 @@ function elements(root: Element): Element[] {
   ];
 }
 function renderRows(node: Element): Element {
-  if (typeof node.type === "function" && node.type.name === "AccountRow") {
-    return node.type(node.props);
+  if (
+    typeof node.type === "function" &&
+    ["AccountRow", "DynamicTypeText"].includes(node.type.name)
+  ) {
+    return renderRows(node.type(node.props));
   }
   const render = (child: unknown): unknown =>
     Array.isArray(child)
@@ -36,8 +39,14 @@ function renderRows(node: Element): Element {
 }
 function setup(connectedTelegram = false, pushDevices = 0) {
   let dimensions = { width: 402, height: 874, fontScale: 1, scale: 3 };
+  let pending = false;
   const mutations: unknown[] = [];
-  const jsx = (type: unknown, props: Element["props"]) => ({ type, props });
+  const jsx = (type: unknown, props: Element["props"], key?: number) => ({
+    type,
+    props,
+    key,
+  });
+  const dynamicText = {};
   const harness = hookHarness<Element>({
     "react/jsx-runtime": { jsx, jsxs: jsx, Fragment: "Fragment" },
     "react-native": {
@@ -78,13 +87,14 @@ function setup(connectedTelegram = false, pushDevices = 0) {
       }),
       useMutation: () => ({
         mutate: (value: unknown) => mutations.push(value),
-        isPending: false,
+        isPending: pending,
       }),
     },
     "../display/ChatDisplaySettings": {
       ChatDisplaySettings: "ChatDisplaySettings",
     },
     "../../components/PrimaryButton": { PrimaryButton: "PrimaryButton" },
+    "../../components/DynamicTypeText": dynamicText,
     "../../components/ScreenContainer": { ScreenContainer: "ScreenContainer" },
     "../../components/OfflineBanner": { OfflineBanner: "OfflineBanner" },
     "../../components/TelegramLinkModal": {
@@ -98,7 +108,7 @@ function setup(connectedTelegram = false, pushDevices = 0) {
     "../../lib/analyticsConsentState": {},
     "../../lib/analyticsRelay": {},
     "../../lib/api/http": {},
-    "../../lib/telemetry": {},
+    "../../lib/telemetry": { capture() {} },
     "../../hooks/useNetworkStatus": {
       useNetworkStatus: () => ({ isConnected: true }),
     },
@@ -113,10 +123,19 @@ function setup(connectedTelegram = false, pushDevices = 0) {
     },
     "../../theme/flowStyles": { createFlowStyles: () => ({}) },
   });
-  const { AccountSettingsScreen } = harness.load(
+  Object.assign(
+    dynamicText,
+    harness.load(
+      fileURLToPath(
+        new URL("../../components/DynamicTypeText.tsx", import.meta.url),
+      ),
+    ),
+  );
+  const { AccountSettingsScreen, AccountSettingsTitle } = harness.load(
     fileURLToPath(new URL("./AccountSettingsScreen.tsx", import.meta.url)),
   ) as {
     AccountSettingsScreen: (props: any) => Element;
+    AccountSettingsTitle: (props: any) => Element;
   };
   harness.mount(() => renderRows(AccountSettingsScreen({ navigation: {} })));
   const all = () => elements(harness.value());
@@ -137,6 +156,14 @@ function setup(connectedTelegram = false, pushDevices = 0) {
     parent,
     mutations,
     harness,
+    title: () =>
+      renderRows(
+        AccountSettingsTitle({ children: "Settings", tintColor: "purple" }),
+      ),
+    pending: () => {
+      pending = true;
+      harness.render();
+    },
     resize(width: number, fontScale: number) {
       dimensions = { ...dimensions, width, fontScale };
       harness.render();
@@ -189,6 +216,65 @@ test("Settings reflows label/value, identity and control rows as Dynamic Type gr
     style(env.parent(env.text("Sign-in Method"))).flexDirection,
     "row",
   );
+  env.harness.unmount();
+});
+
+test("live Settings scaling refreshes title and label leaves while retaining scroll, controls and pending state", () => {
+  const env = setup();
+  const telegram = env
+    .all()
+    .find(
+      (node) =>
+        node.type === "Pressable" &&
+        elements(node).some((child) => child.props.children === "Telegram"),
+    )!;
+  telegram.props.onPress();
+  env.harness.render();
+  env.pending();
+  const identities = () =>
+    env
+      .all()
+      .filter((node) => node.type !== "Text")
+      .map((node) => [node.type, node.key]);
+  const before = identities();
+  for (const scale of [2.143, 1, 2.143]) {
+    env.resize(402, scale);
+    assert.deepEqual(
+      identities(),
+      before,
+      "only Text leaves change their React key; scroll/control/modal identities remain",
+    );
+    assert.ok(
+      env
+        .all()
+        .filter((node) => node.type === "Text")
+        .every((node) => node.key === scale),
+    );
+    const title = env.title();
+    assert.equal(title.type, "Text");
+    assert.equal(title.key, scale);
+    assert.equal(title.props.role, "heading");
+    assert.equal(title.props.children, "Settings");
+    assert.notEqual(title.props.allowFontScaling, false);
+    assert.equal(style(title).color, "purple");
+    assert.equal(
+      env.all().find((node) => node.type === "TelegramLinkModal")!.props
+        .visible,
+      true,
+      "screen-local state survives scaling",
+    );
+    const actions = env.all().filter((node) => node.type === "PrimaryButton");
+    assert.ok(
+      actions.every((node) => node.props.refreshLabelOnFontScaleChange),
+      "every Settings action opts into text-only invalidation",
+    );
+    assert.equal(
+      actions.find((node) => node.props.label === "Deleting...")!.props
+        .disabled,
+      true,
+      "pending write state stays authoritative",
+    );
+  }
   env.harness.unmount();
 });
 

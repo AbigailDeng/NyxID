@@ -18,7 +18,10 @@ import { AuthHomeScreen } from "../features/auth/AuthHomeScreen";
 import { DeviceLoginScreen } from "../features/auth/DeviceLoginScreen";
 import { AgentKeyLoginScreen } from "../features/auth/AgentKeyLoginScreen";
 import { useAuthSession } from "../features/auth/AuthSessionContext";
-import { AccountSettingsScreen } from "../features/account/AccountSettingsScreen";
+import {
+  AccountSettingsScreen,
+  AccountSettingsTitle,
+} from "../features/account/AccountSettingsScreen";
 import { AccountSecurityScreen } from "../features/account/AccountSecurityScreen";
 import { ActivityScreen } from "../features/activity/ActivityScreen";
 import { ActivityDetailScreen } from "../features/activity/ActivityDetailScreen";
@@ -335,7 +338,10 @@ function WorkspacePages() {
       <Tabs.Screen
         name="AccountSettings"
         component={AccountSettingsScreen}
-        options={{ title: "Settings" }}
+        options={{
+          title: "Settings",
+          headerTitle: (props) => <AccountSettingsTitle {...props} />,
+        }}
       />
     </Tabs.Navigator>
   );
