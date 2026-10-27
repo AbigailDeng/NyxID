@@ -46,7 +46,7 @@ The following existing Web capabilities are **not yet migrated** by this first i
 - Organization creation/membership/invites and organization resource creation beyond the group journey, Billing and hosted checkout, full Studio resources including service pools/Agent Keys, Developer OAuth apps and role-gated Admin modules.
 - Credential Nodes and SSH management/native terminal, specialized device-code/BYO OAuth/SSH connection setup, OAuth scope editing and full shared-grant cascade review. These currently require the corresponding Web setup.
 
-Artifacts/Assistant Activity/folder placeholders are not treated as new durable backend resources. Machines remain excluded. The password-change correction above takes precedence over the earlier design feasibility assessment.
+Artifacts/Assistant Activity/folder placeholders are not treated as new durable backend resources. Machines management now includes the retained drawer destination, canonical inventory/detail/logins links, personal/org Admin filtering, hosted exclusion, local capability and isolation metadata, and web handoffs. Native live desktop is a separate follow-on. The password-change correction above takes precedence over the earlier design feasibility assessment.
 
 ## Native UI alignment after main integration
 
@@ -95,8 +95,8 @@ message automatically and releases capture on background, chat/account change,
 loss of access or drawer presentation. It requires an app build containing the
 speech recognition module; older builds retain keyboard dictation and text entry.
 Eligible private chats with the server's `assistant:voice` capability also expose
-a separate waveform action for the existing voice conversation surface. Group
+a waveform action in the trailing Send slot for the existing voice conversation surface. Group
 voice conversations are unsupported. Provider audio and microphone behavior
 still require device verification; JavaScript exports do not establish acoustic
 or provider compatibility. No iOS orientation/tablet support, RN-web, native rail
-or machine capability was added.
+or live desktop capability was added.

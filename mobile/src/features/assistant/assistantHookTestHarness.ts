@@ -131,6 +131,7 @@ export function hookHarness<T>(mocks: Record<string, unknown>) {
                 : require(name),
           AbortController,
           URL,
+          URLSearchParams,
           queueMicrotask,
           requestAnimationFrame: (callback: () => void) => setTimeout(callback, 0),
           cancelAnimationFrame: clearTimeout,

@@ -24,6 +24,7 @@ export type AssistantParams = {
 export type WorkspaceParamList = {
   Assistant: AssistantParams | undefined;
   Automations: { agentId?: string; setup?: string } | undefined;
+  Machines: { machine?: string; tab?: "logins" } | undefined;
   Services: undefined;
   Plugins: { tab?: "connectors" | "skills"; agentId?: string } | undefined;
   Agents: { tab?: "agents" | "groups" } | undefined;

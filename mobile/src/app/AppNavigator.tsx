@@ -23,6 +23,7 @@ import {
   AccountSettingsTitle,
 } from "../features/account/AccountSettingsScreen";
 import { AccountSecurityScreen } from "../features/account/AccountSecurityScreen";
+import { MachinesScreen } from "../features/machines/MachinesScreen";
 import { ActivityScreen } from "../features/activity/ActivityScreen";
 import { ActivityDetailScreen } from "../features/activity/ActivityDetailScreen";
 import { AssistantScreen } from "../features/assistant/AssistantScreen";
@@ -331,6 +332,7 @@ function WorkspacePages() {
         component={ServicesScreen}
         options={{ title: "Services" }}
       />
+      <Tabs.Screen name="Machines" component={MachinesScreen} options={{ title: "Machines" }} />
       <Tabs.Screen
         name="Activity"
         component={ActivityScreen}

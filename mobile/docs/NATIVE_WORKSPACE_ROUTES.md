@@ -15,9 +15,10 @@ in `navigationHierarchy.ts` and `workspaceChatNavigation.ts`.
 | Tabs / Agents | Agents & Groups drawer module; AgentCreate, AgentDetail, AgentSkills, GroupEditor. Choosing a chat dismisses the drawer. |
 | Tabs / Plugins | Connectors and Skills; existing local overview/advanced/history/skill/version/draft/review subflows stay inside the drawer; ServiceSetup reuses connection setup. |
 | Tabs / Services | Existing connections/catalog and local setup/detail/credential/removal states inside the drawer. |
+| Tabs / Machines | Personal/org Admin inventory and read-only local ceiling/detail; `/assistant/machines?machine={id}` selects local detail; `?tab=logins` selects Saved logins. Cold entry retains Assistant underneath; local Back returns to inventory. Managed/hosted/setup routes hand off to Web. |
 | Tabs / Activity | Approvals/grants/history. Challenge notifications enter this module or its existing detail state through the shared guard/deferred-navigation path. |
 | Tabs / AccountSettings | Settings, notifications, appearance, device-local Display, analytics, account actions and legal/security links. |
-| SheetStack / Pages | Retains the six module routes above. Initial module is Agents. |
+| SheetStack / Pages | Retains the seven module routes above. Initial module is Agents. |
 | SheetStack / AgentCreate | Personal specialist form; dirty dismissal confirmation and pending-write guard. |
 | SheetStack / AgentDetail | Specialist profile, permissions, model and related actions; creation/details use the same screen implementation. |
 | SheetStack / GroupEditor | Create/edit group, ownership and membership; dirty/pending guards. Cold edit fallback is Agents → Groups. |
@@ -55,4 +56,4 @@ Close receives focus once per drawer. Explicit dismissal resolves a mounted
 active primary control after transitions; auth/context handoffs cancel restoration.
 
 This inventory describes native iOS/Android. It adds no RN-web route support,
-new API, machines, native voice admission, or native transcript index.
+new API, native live desktop admission, or native transcript index.

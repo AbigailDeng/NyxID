@@ -42,6 +42,7 @@ export const navigationLinkingConfig: NonNullable<
               path: "plugins",
               parse: { tab: String, agentId: String },
             },
+            Machines: { path: "assistant/machines", parse: { machine: String, tab: (value: string) => value === "logins" ? "logins" : undefined } },
             Services: "services",
             Activity: { path: "activity", parse: { challengeId: String } },
             AccountSettings: "account",

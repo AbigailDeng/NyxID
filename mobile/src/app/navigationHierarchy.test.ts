@@ -43,6 +43,7 @@ const panelOptions = {
     "Plugins",
     "Automations",
     "Services",
+    "Machines",
     "Activity",
     "AccountSettings",
   ],
@@ -306,6 +307,7 @@ test("opening any management destination retains the exact contextual chat and b
     "Automations",
     "Activity",
     "Services",
+    "Machines",
   ] as const) {
     const root = pushContext(fixture());
     const opened = apply(root, workspaceNavigateAction(page));
@@ -719,4 +721,19 @@ test("a cold ServiceSetup drawer returns to Plugins with the retained chat under
   const sheet = partial.routes.find((route) => route.name === "WorkspaceSheet");
   assert.equal(sheet?.state?.routes[0]?.state?.routes[0]?.name, "Plugins");
   assert.equal(partial.routes[0]?.name, "Workspace");
+});
+
+
+test("canonical machine links keep chat underneath and select detail or logins", () => {
+  for (const [path, params] of [
+    ["assistant/machines", undefined],
+    ["assistant/machines?machine=machine-one", { machine: "machine-one" }],
+    ["assistant/machines?tab=logins", { tab: "logins" }],
+  ] as const) {
+    const state = linkedState(path);
+    assert.deepEqual(focusedNames(state), ["WorkspaceSheet", "Pages", "Machines"]);
+    assert.equal(state.routes[0]?.name, "Workspace");
+    const panel = selected(selected(state).state!);
+    assert.deepEqual(selected(panel.state!).params, params);
+  }
 });

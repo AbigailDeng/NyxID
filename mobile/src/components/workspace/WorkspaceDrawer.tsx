@@ -17,6 +17,7 @@ import {
   ChevronRight,
   KeyRound,
   MessageSquare,
+  Monitor,
   Plug,
   ScanQrCode,
   ShieldCheck,
@@ -35,6 +36,7 @@ import { ScrollEdgeFades, useScrollEdges } from "./ScrollEdgeFades";
 export type WorkspaceRoute =
   | "Assistant"
   | "Automations"
+  | "Machines"
   | "Activity"
   | "Services"
   | "Plugins"
@@ -45,6 +47,7 @@ const destinations = [
   { route: "Agents", label: "Agents & Groups", Icon: Bot },
   { route: "Plugins", label: "Plugins", Icon: Plug },
   { route: "Automations", label: "Automations", Icon: CalendarClock },
+  { route: "Machines", label: "Machines", Icon: Monitor },
   { route: "Activity", label: "Approvals", Icon: ShieldCheck },
 ] as const;
 
