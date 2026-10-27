@@ -843,7 +843,12 @@ export function AssistantScreen({
   }
 
   return (
-    <WorkspacePage title={chatTitle} showHeading={false} scroll={false}>
+    <WorkspacePage
+      title={chatTitle}
+      showHeading={false}
+      scroll={false}
+      contentStyle={styles.chatPage}
+    >
       {!assistant.online ? (
         <Notice message="You're offline. Reconnect to refresh this chat and send messages." />
       ) : null}
@@ -1116,68 +1121,72 @@ export function AssistantScreen({
             {uploads.error ?? uploads.notice}
           </Label>
         ) : null}
-        <ChatComposerRow>
-          <ComposerAttachButton
-            label="Attach files"
-            busy={uploads.picking}
-            disabled={
-              !canCompose ||
-              uploads.picking ||
-              uploads.session.sending ||
-              uploads.files.length >= 10
-            }
-            onPress={() => void uploads.pick()}
-          />
-          <AssistantMentionInput
-            value={draft}
-            onChangeText={updateDraft}
-            generation={`${assistant.agentId}:${assistant.conversationId ?? "new"}:${composerGeneration}`}
-            editable={
-              !destroyed &&
-              !assistant.recoveryRequired &&
-              !route?.params?.openLatest
-            }
-            accessibilityLabel="Message to assistant"
-            placeholder={`Message ${agentName}`}
-          />
-          {running && assistant.conversationId ? (
-            <ComposerSubmitButton
-              kind="stop"
-              label="Stop assistant"
-              disabled={
-                stopProtected ||
-                assistant.mutating ||
-                conversation?.active_turn?.stop_requested
-              }
-              onPress={() => {
-                if (composerPress.current("stop")) void assistant.stop();
-              }}
-            />
-          ) : voiceAvailable &&
-            (!voiceThread || voiceThread !== assistant.conversationId) ? (
-            <IconButton
-              label="Open voice call"
-              disabled={!canCompose || openingVoice}
-              onPress={() => void openVoice()}
-            >
-              {openingVoice ? (
-                <ActivityIndicator size="small" color={colors.primary} />
+        <AssistantMentionInput
+          value={draft}
+          onChangeText={updateDraft}
+          generation={`${assistant.agentId}:${assistant.conversationId ?? "new"}:${composerGeneration}`}
+          editable={
+            !destroyed &&
+            !assistant.recoveryRequired &&
+            !route?.params?.openLatest
+          }
+          accessibilityLabel="Message to assistant"
+          placeholder={`Message ${agentName}`}
+          renderActions={(mentionAction) => (
+            <ChatComposerRow>
+              <ComposerAttachButton
+                label="Attach files"
+                busy={uploads.picking}
+                disabled={
+                  !canCompose ||
+                  uploads.picking ||
+                  uploads.session.sending ||
+                  uploads.files.length >= 10
+                }
+                onPress={() => void uploads.pick()}
+              />
+              {mentionAction}
+              <View style={{ flex: 1 }} />
+              {running && assistant.conversationId ? (
+                <ComposerSubmitButton
+                  kind="stop"
+                  label="Stop assistant"
+                  disabled={
+                    stopProtected ||
+                    assistant.mutating ||
+                    conversation?.active_turn?.stop_requested
+                  }
+                  onPress={() => {
+                    if (composerPress.current("stop")) void assistant.stop();
+                  }}
+                />
+              ) : voiceAvailable &&
+                (!voiceThread || voiceThread !== assistant.conversationId) ? (
+                <IconButton
+                  label="Open voice call"
+                  disabled={!canCompose || openingVoice}
+                  onPress={() => void openVoice()}
+                >
+                  {openingVoice ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <Mic
+                      size={21}
+                      color={canCompose ? colors.primary : colors.textTertiary}
+                    />
+                  )}
+                </IconButton>
               ) : (
-                <Mic
-                  size={21}
-                  color={canCompose ? colors.primary : colors.textTertiary}
+                <ComposerSubmitButton
+                  kind="send"
+                  label="Send message"
+                  disabled={!canSend}
+                  onPress={() => void sendDraft()}
                 />
               )}
-            </IconButton>
-          ) : (
-            <ComposerSubmitButton
-              kind="send"
-              label="Send message"
-              disabled={!canSend}
-              onPress={() => void sendDraft()}
-            />
+            </ChatComposerRow>
           )}
-        </ChatComposerRow>
+        />
         {assistant.recoveryRequired || uploads.blocked ? (
           <Label muted style={styles.composerHint}>
             {assistant.recoveryRequired
@@ -1638,7 +1647,8 @@ const styles = StyleSheet.create({
   },
   thinking: { alignSelf: "flex-start", marginVertical: 10 },
   cardTitle: { fontFamily: fonts.bodySemi },
-  composer: { marginBottom: 8 },
+  chatPage: { paddingHorizontal: 12, paddingTop: 0, paddingBottom: 4, gap: 8 },
+  composer: { marginBottom: 0 },
   composerHint: { fontSize: 11, lineHeight: 16, paddingHorizontal: 12 },
   errorRow: { gap: 8 },
   sheet: { flex: 1, paddingTop: 20 },

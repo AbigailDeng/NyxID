@@ -6,8 +6,7 @@ import {
   type SidebarAgents,
   type SidebarGroups,
 } from "@/components/assistant/assistant-sidebar";
-import { NewAgentDialog } from "@/components/assistant/nyxbot-agent-forms";
-import { NewGroupDialog } from "@/components/assistant/nyxbot-group-forms";
+import { CreateAgentDialog } from "@/components/assistant/create-agent-dialog";
 import { useFeature } from "@/hooks/use-feature-flag";
 import { useNyxAgentThreads } from "@/hooks/use-assistant-nyxagent";
 import { selectedAgentOf, useNyxBotAgents } from "@/hooks/use-nyxbot-agents";
@@ -41,7 +40,6 @@ export function AssistantEngineSidebar({
   const nyxagentEnabled = useFeature(FEATURE_FLAG.NYXAGENT_ENGINE);
   const groups = useNyxBotGroups(nyxagentEnabled);
   const [creatingAgent, setCreatingAgent] = useState(false);
-  const [creatingGroup, setCreatingGroup] = useState(false);
   const openThread = search.draft ? undefined : search.c;
   const openGroup = onChatRoute ? search.g : undefined;
   const home = onChatRoute && !search.c && !search.draft && !search.agent && !search.g;
@@ -114,7 +112,7 @@ export function AssistantEngineSidebar({
         // An agent lands on its latest thread (or a new one when it has none).
         onSelectAgent: (agentId) => goTo({ agent: agentId }),
         onNewThread: (agentId) => goTo({ draft: true, agent: agentId }),
-        onNewAgent: () => setCreatingAgent(true),
+        onCreateAgent: () => setCreatingAgent(true),
         homeActive: home,
         onHome: () => goTo({}),
       }
@@ -128,7 +126,6 @@ export function AssistantEngineSidebar({
         selectedGroupId: openGroup,
         loading: groups.isPending,
         onSelectGroup: (groupId) => goTo({ g: groupId }),
-        onNewGroup: () => setCreatingGroup(true),
       }
     : undefined;
   const loadError = agents.error
@@ -165,22 +162,17 @@ export function AssistantEngineSidebar({
           if (id === props.activeConversationId) props.onNewChat();
         }}
       />
-      {creatingGroup ? (
-        <NewGroupDialog
-          agents={agents.data?.agents ?? []}
-          onClose={() => setCreatingGroup(false)}
-          onCreated={(group) => {
-            setCreatingGroup(false);
-            goTo({ g: group.id });
-          }}
-        />
-      ) : null}
       {creatingAgent ? (
-        <NewAgentDialog
+        <CreateAgentDialog
+          agents={agents.data?.agents ?? []}
           onClose={() => setCreatingAgent(false)}
-          onCreated={(created) => {
+          onAgentCreated={(created) => {
             setCreatingAgent(false);
             goTo({ c: created.home_conversation_id });
+          }}
+          onCrewCreated={(group) => {
+            setCreatingAgent(false);
+            goTo({ g: group.id });
           }}
         />
       ) : null}

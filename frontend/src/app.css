@@ -1092,7 +1092,7 @@ html.theme-dark .assistant-halo--visible {
 
 /* Only the edge hiding more content fades. A short eased top fade avoids
    dimming the first readable lines; masks inherit every surface/theme color. */
-[data-scroll-fade],
+[data-scroll-fade]:not([data-scroll-fade="overlay"]),
 [data-chat-index-rail] {
   --scroll-fade-top: 0px;
   --scroll-fade-bottom: 0px;
@@ -1112,6 +1112,32 @@ html.theme-dark .assistant-halo--visible {
 [data-scroll-edges~="bottom"] { --scroll-fade-bottom: 28px; }
 [data-scroll-edges~="left"] { --scroll-fade-left: 20px; }
 [data-scroll-edges~="right"] { --scroll-fade-right: 20px; }
+
+/* Keep the sidebar scrollbar and focused controls crisp; only its content
+   edge is covered, without adding another scroll owner or blocking input. */
+.assistant-sidebar-scroll::before,
+.assistant-sidebar-scroll::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset-inline: 0 8px;
+  pointer-events: none;
+  opacity: 0;
+}
+.assistant-sidebar-scroll::before {
+  top: 0;
+  height: 24px;
+  background: linear-gradient(to bottom, var(--color-background), transparent);
+}
+.assistant-sidebar-scroll::after {
+  bottom: 0;
+  height: 32px;
+  background: linear-gradient(to top, var(--color-background), transparent);
+}
+.assistant-sidebar-scroll:has(> [data-scroll-edges~="top"])::before,
+.assistant-sidebar-scroll:has(> [data-scroll-edges~="bottom"])::after {
+  opacity: 1;
+}
 
 [data-chat-index-rail] {
   mask-image: linear-gradient(to bottom,

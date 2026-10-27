@@ -33,6 +33,7 @@ export function WorkspacePage({
   showHeading = true,
   refreshing = false,
   onRefresh,
+  contentStyle,
 }: PropsWithChildren<{
   title: string;
   titleNumberOfLines?: number;
@@ -41,6 +42,7 @@ export function WorkspacePage({
   showHeading?: boolean;
   refreshing?: boolean;
   onRefresh?: () => void;
+  contentStyle?: StyleProp<ViewStyle>;
 }>) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -83,7 +85,7 @@ export function WorkspacePage({
     <ScrollView
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, contentStyle]}
       alwaysBounceVertical={onRefresh ? true : undefined}
       refreshControl={
         onRefresh ? (
@@ -101,7 +103,7 @@ export function WorkspacePage({
       {content}
     </ScrollView>
   ) : (
-    <View style={[styles.content, styles.fill]}>{content}</View>
+    <View style={[styles.content, styles.fill, contentStyle]}>{content}</View>
   );
   return (
     <SafeAreaView

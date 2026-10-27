@@ -639,7 +639,8 @@ export function AppNavigator({
                   component={WorkspaceSheetRoute}
                   options={{
                     presentation: "transparentModal",
-                    animation: reducedMotion ? "none" : "slide_from_bottom",
+                    // The surface animates its panel and stationary scrim independently.
+                    animation: "none",
                     gestureEnabled: false,
                     headerShown: false,
                     contentStyle: { backgroundColor: "transparent" },

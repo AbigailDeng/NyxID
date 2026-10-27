@@ -3,7 +3,7 @@ import {
   ScrollEdgeFades,
   useScrollEdges,
 } from "../../components/workspace/ScrollEdgeFades";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Platform,
   Pressable,
@@ -47,6 +47,7 @@ export function AssistantMentionInput({
   accessibilityLabel,
   generation = 0,
   style,
+  renderActions,
 }: {
   value: string;
   onChangeText: (value: string) => void;
@@ -56,6 +57,8 @@ export function AssistantMentionInput({
   accessibilityLabel: string;
   generation?: number | string;
   style?: StyleProp<TextStyle>;
+  /** Put composer controls below the text so multiline drafts use its full width. */
+  renderActions?: (mentionAction: ReactNode) => ReactNode;
 }) {
   const { colors } = useTheme();
   const maxHeight = useComposerHeight();
@@ -152,8 +155,28 @@ export function AssistantMentionInput({
     write(text, { start: position, end: position });
   }
 
+  const mentionAction = mentions.length ? (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Mention an attachment or agent"
+      accessibilityState={{ disabled: !editable, expanded: !!trigger }}
+      disabled={!editable}
+      onPress={openMentions}
+      style={styles.mentionButton}
+    >
+      <Text
+        style={[
+          styles.at,
+          { color: editable ? colors.primaryOnTint : colors.textMuted },
+        ]}
+      >
+        @
+      </Text>
+    </Pressable>
+  ) : null;
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, renderActions && styles.fullWidth]}>
       {trigger && mentions.length ? (
         <View
           style={[
@@ -232,7 +255,7 @@ export function AssistantMentionInput({
           </ScrollView>
         </View>
       ) : null}
-      <View style={styles.inputFrame}>
+      <View style={[styles.inputFrame, renderActions && styles.fullWidthInput]}>
         <TextInput
           key={revision}
           ref={input}
@@ -318,33 +341,7 @@ export function AssistantMentionInput({
         />
         <ScrollEdgeFades edges={overflow.edges} color={colors.composerBg} />
       </View>
-      {mentions.length ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Mention an attachment or agent"
-          accessibilityState={{
-            disabled: !editable || !mentions.length,
-            expanded: !!trigger,
-          }}
-          disabled={!editable || !mentions.length}
-          onPress={openMentions}
-          style={styles.mentionButton}
-        >
-          <Text
-            style={[
-              styles.at,
-              {
-                color:
-                  editable && mentions.length
-                    ? colors.primaryOnTint
-                    : colors.textMuted,
-              },
-            ]}
-          >
-            @
-          </Text>
-        </Pressable>
-      ) : null}
+      {renderActions ? renderActions(mentionAction) : mentionAction}
     </View>
   );
 }
@@ -358,6 +355,8 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   inputFrame: { flex: 1, minWidth: 0 },
+  fullWidth: { flex: 0, flexDirection: "column", alignItems: "stretch" },
+  fullWidthInput: { flex: 0, paddingHorizontal: 12 },
   input: {
     minWidth: 0,
     minHeight: 44,

@@ -29,6 +29,7 @@ function setup(
   reduced = false,
   dimensions = { width: 390, height: 844 },
   insetTop = 47,
+  deferAnimation = false,
 ) {
   let handlers!: PanHandlers;
   let closeAttempts = 0;
@@ -38,6 +39,12 @@ function setup(
     toValue: number;
     useNativeDriver: boolean;
     started: boolean;
+  }[] = [];
+  const timings: {
+    from: number;
+    to: number;
+    value: Value;
+    complete: () => void;
   }[] = [];
   class Value {
     constructor(public value: number) {}
@@ -74,10 +81,20 @@ function setup(
       Animated: {
         Value,
         timing: (value: Value, config: { toValue: number }) => ({
-          start: (done: (event: { finished: boolean }) => void) => {
-            value.setValue(config.toValue);
-            done({ finished: true });
+          start: (done?: (event: { finished: boolean }) => void) => {
+            const complete = () => {
+              value.setValue(config.toValue);
+              done?.({ finished: true });
+            };
+            timings.push({
+              from: value.value,
+              to: config.toValue,
+              value,
+              complete,
+            });
+            if (!deferAnimation) complete();
           },
+          stop() {},
         }),
         View: "Animated.View",
         spring: (
@@ -160,7 +177,9 @@ function setup(
   );
   const all = () => elements(harness.value());
   const panel = () => {
-    const value = all().find((element) => element.type === "Animated.View");
+    const value = all().find(
+      (element) => element.props.accessibilityLabel === "Workspace drawer",
+    );
     assert.ok(value);
     return value;
   };
@@ -174,6 +193,7 @@ function setup(
     child,
     offset,
     springs,
+    timings,
     gesture,
     counts: () => ({ closeAttempts, allowedCloses }),
     blockClose: () => {
@@ -207,6 +227,74 @@ test("the handle claims a deliberate downward drag without claiming taps, horizo
     true,
   );
   assert.deepEqual(env.counts(), { closeAttempts: 0, allowedCloses: 0 });
+});
+
+test("the management scrim fades independently of the sliding panel and stays opaque when Close is blocked", async () => {
+  const env = setup();
+  const scrim = env
+    .all()
+    .find(
+      (node) =>
+        node.type === "Animated.View" && node.props.pointerEvents === "none",
+    );
+  assert.ok(scrim);
+  const scrimStyle = scrim.props.style[1];
+  assert.equal(
+    scrimStyle.transform,
+    undefined,
+    "the background never translates with the sheet",
+  );
+  assert.equal(env.timings[0]?.from, 844);
+  assert.equal(env.timings[0]?.to, 0);
+  assert.equal(env.timings[1]?.from, 0);
+  assert.equal(env.timings[1]?.to, 1);
+  assert.equal(env.timings[1]?.value, scrimStyle.opacity);
+  assert.notEqual(scrimStyle.opacity, env.offset());
+  env.blockClose();
+  env.backdrop().props.onPress();
+  await env.harness.settle();
+  assert.equal(scrimStyle.opacity.value, 1);
+  assert.equal(
+    env.timings.length,
+    2,
+    "a dirty or pending guard cannot fade out the background",
+  );
+  env.harness.unmount();
+
+  const allowed = setup();
+  allowed.backdrop().props.onPress();
+  await allowed.harness.settle();
+  assert.deepEqual(
+    allowed.timings.slice(2).map(({ from, to }) => [from, to]),
+    [
+      [1, 0],
+      [0, 844],
+    ],
+  );
+  assert.deepEqual(allowed.counts(), { closeAttempts: 1, allowedCloses: 1 });
+  allowed.harness.unmount();
+});
+
+test("an early Close retains the page until its slide finishes and a late animation cannot close an unmounted surface", async () => {
+  const env = setup(false, { width: 390, height: 844 }, 47, true);
+  env.backdrop().props.onPress();
+  env.backdrop().props.onPress();
+  await env.harness.settle();
+  assert.deepEqual(env.counts(), { closeAttempts: 1, allowedCloses: 0 });
+  const [fade, slide] = env.timings.slice(2);
+  assert.ok(fade && slide);
+  fade.complete();
+  assert.equal(env.counts().allowedCloses, 0);
+  slide.complete();
+  assert.equal(env.counts().allowedCloses, 1);
+  env.harness.unmount();
+
+  const removed = setup(false, { width: 390, height: 844 }, 47, true);
+  removed.backdrop().props.onPress();
+  await removed.harness.settle();
+  removed.harness.unmount();
+  removed.timings.forEach((animation) => animation.complete());
+  assert.equal(removed.counts().allowedCloses, 0);
 });
 
 test("gesture ownership is confined to the handle so nested pages keep their own scrolling", () => {

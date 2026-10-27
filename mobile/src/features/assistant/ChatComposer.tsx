@@ -37,7 +37,7 @@ export function ChatComposerFrame({
   );
 }
 
-/** The input row inside the pill: attach, text, then the trailing action. */
+/** Controls sit below the full-width text area, with Send/Stop at the trailing edge. */
 export function ChatComposerRow({ children }: { children: ReactNode }) {
   return <View style={styles.row}>{children}</View>;
 }

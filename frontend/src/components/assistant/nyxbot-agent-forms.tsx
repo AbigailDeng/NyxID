@@ -217,7 +217,7 @@ export function NewAgentDialog({
     >
       <DialogContent scrollMode="body" className="md:max-w-lg">
         <DialogHeader className="shrink-0 pr-6">
-          <DialogTitle>New agent</DialogTitle>
+          <DialogTitle>Create agent</DialogTitle>
           <DialogDescription>
             A specialist keeps its own memory and threads and uses only the
             services you grant here. When you talk to it directly it handles

@@ -397,3 +397,56 @@ test("draft replacement resets measured height and rejects stale size events whi
   assert.equal(inputStyle(view.input()).height, 70);
   view.harness.unmount();
 });
+
+test("the full-width composer keeps mention and action controls below its live input while typing and growing", () => {
+  const view = setup({
+    renderActions: (mention: Element) => ({
+      type: "Toolbar",
+      props: { children: [mention, { type: "Send", props: {} }] },
+    }),
+  });
+  const root = view.harness.value();
+  const toolbar = elements(root).find((node) => node.type === "Toolbar");
+  assert.ok(toolbar);
+  assert.ok(
+    elements(toolbar).some(
+      (node) =>
+        node.props.accessibilityLabel === "Mention an attachment or agent",
+    ),
+  );
+  assert.equal(
+    elements(toolbar).some((node) => node.type === "TextInput"),
+    false,
+  );
+  const key = view.input().key;
+  view
+    .input()
+    .props.onChangeText("A draft that uses the width above the controls");
+  view.harness.render();
+  view
+    .input()
+    .props.onContentSizeChange({
+      nativeEvent: { contentSize: { height: 96 } },
+    });
+  view.harness.flush();
+  assert.equal(inputStyle(view.input()).height, 96);
+  assert.equal(view.input().key, key);
+  view.focus();
+  view.button().props.onPress();
+  view.harness.render();
+  assert.equal(
+    view.props.value,
+    "A draft that uses the width above the controls @ ",
+  );
+  view.choose("research");
+  assert.equal(
+    view.props.value,
+    "A draft that uses the width above the controls @research ",
+  );
+  assert.equal(
+    view.input().key,
+    key,
+    "toolbar actions preserve the native input and selection owner",
+  );
+  view.harness.unmount();
+});

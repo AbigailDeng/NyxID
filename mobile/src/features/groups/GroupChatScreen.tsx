@@ -458,6 +458,7 @@ function GroupChat({
       title={group?.name ?? "Group"}
       showHeading={false}
       scroll={false}
+      contentStyle={styles.chatPage}
     >
       {!chat.online && (
         <Notice message="You're offline. Reconnect to read new messages and send." />
@@ -751,12 +752,7 @@ function GroupChat({
         </ScrollView>
       )}
       {group && (
-        <View
-          style={[
-            styles.composerArea,
-            chatColumn,
-          ]}
-        >
+        <View style={[styles.composerArea, chatColumn]}>
           {!recipients.ids.length && (
             <Label style={[styles.small, { color: colors.danger }]}>
               Choose at least one recipient.
@@ -796,7 +792,9 @@ function GroupChat({
                     accessibilityRole="button"
                     accessibilityLabel={`Remove recipient ${title(id, member.name)}`}
                     disabled={blocked}
-                    onPress={() => editRecipients((old) => withRemoved(old, id))}
+                    onPress={() =>
+                      editRecipients((old) => withRemoved(old, id))
+                    }
                     style={[
                       styles.recipient,
                       {
@@ -821,7 +819,9 @@ function GroupChat({
                   style={styles.addRecipient}
                 >
                   <Plus size={14} color={colors.primaryOnTint} />
-                  <Label style={[styles.small, { color: colors.primaryOnTint }]}>
+                  <Label
+                    style={[styles.small, { color: colors.primaryOnTint }]}
+                  >
                     Add
                   </Label>
                 </Pressable>
@@ -832,38 +832,42 @@ function GroupChat({
               remove={removeAttachment}
               disabled={chat.sending || uploads.session.sending}
             />
-            <ChatComposerRow>
-              <ComposerAttachButton
-                label="Attach a file to group"
-                busy={uploads.picking}
-                disabled={
-                  blocked ||
-                  !liveMembers.length ||
-                  uploads.picking ||
-                  uploads.session.sending
-                }
-                onPress={() => void uploads.pick()}
-              />
-              <AssistantMentionInput
-                generation={composerGeneration}
-                accessibilityLabel="Message the group"
-                placeholder="Message the group"
-                value={draft}
-                mentions={mentions}
-                onChangeText={(value) => {
-                  if (currentComposer.current === composerGeneration) edit(value);
-                }}
-                editable={!blocked && !!liveMembers.length}
-                style={[styles.input, { color: colors.textPrimary }]}
-              />
-              <ComposerSubmitButton
-                kind="send"
-                label="Send group message"
-                busy={chat.sending}
-                disabled={!canSend}
-                onPress={() => void send()}
-              />
-            </ChatComposerRow>
+            <AssistantMentionInput
+              generation={composerGeneration}
+              accessibilityLabel="Message the group"
+              placeholder="Message the group"
+              value={draft}
+              mentions={mentions}
+              onChangeText={(value) => {
+                if (currentComposer.current === composerGeneration) edit(value);
+              }}
+              editable={!blocked && !!liveMembers.length}
+              style={[styles.input, { color: colors.textPrimary }]}
+              renderActions={(mentionAction) => (
+                <ChatComposerRow>
+                  <ComposerAttachButton
+                    label="Attach a file to group"
+                    busy={uploads.picking}
+                    disabled={
+                      blocked ||
+                      !liveMembers.length ||
+                      uploads.picking ||
+                      uploads.session.sending
+                    }
+                    onPress={() => void uploads.pick()}
+                  />
+                  {mentionAction}
+                  <View style={{ flex: 1 }} />
+                  <ComposerSubmitButton
+                    kind="send"
+                    label="Send group message"
+                    busy={chat.sending}
+                    disabled={!canSend}
+                    onPress={() => void send()}
+                  />
+                </ChatComposerRow>
+              )}
+            />
           </ChatComposerFrame>
           {[...resolvedDraft].length > 32768 && (
             <Label style={[styles.small, { color: colors.danger }]}>
@@ -1236,10 +1240,7 @@ function Icon({
       accessibilityState={{ disabled: !!disabled }}
       disabled={disabled}
       onPress={onPress}
-      style={[
-        styles.icon,
-        { opacity: disabled ? 0.4 : 1 },
-      ]}
+      style={[styles.icon, { opacity: disabled ? 0.4 : 1 }]}
     >
       {children}
     </Pressable>
@@ -1300,7 +1301,8 @@ const styles = StyleSheet.create({
   pending: { maxHeight: 180 },
   pendingCard: { padding: 12, gap: 8 },
   actions: { flexDirection: "row", gap: 8 },
-  composerArea: { gap: 6, paddingTop: 4, paddingBottom: 8 },
+  chatPage: { paddingHorizontal: 12, paddingTop: 0, paddingBottom: 4, gap: 8 },
+  composerArea: { gap: 6, paddingTop: 4 },
   recipients: { gap: 6, alignItems: "center", paddingHorizontal: 10 },
   recipient: {
     flexDirection: "row",

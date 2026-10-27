@@ -276,8 +276,7 @@ export function NyxBotHome({
   onChat,
   onOpenConversation,
   onOpenGroup,
-  onNewGroup,
-  onNewAgent,
+  onCreateAgent,
   onManageMemory,
 }: {
   readonly userName: string | undefined;
@@ -288,8 +287,7 @@ export function NyxBotHome({
   readonly onChat: (agent: AssistantAgent) => void;
   readonly onOpenConversation: (conversationId: string) => void;
   readonly onOpenGroup: (groupId: string) => void;
-  readonly onNewGroup: () => void;
-  readonly onNewAgent: () => void;
+  readonly onCreateAgent: () => void;
   readonly onManageMemory: () => void;
 }) {
   const [now] = useState(() => new Date());
@@ -339,9 +337,9 @@ export function NyxBotHome({
           id="nyxbot-home-agents"
           title="Your agents"
           action={
-            <Button size="sm" variant="ghost" onClick={onNewAgent}>
+            <Button size="sm" variant="ghost" onClick={onCreateAgent}>
               <Plus aria-hidden="true" />
-              New agent
+              Create agent
             </Button>
           }
         >
@@ -374,12 +372,6 @@ export function NyxBotHome({
         <Section
           id="nyxbot-home-groups"
           title="Groups"
-          action={
-            <Button size="sm" variant="ghost" onClick={onNewGroup}>
-              <Plus aria-hidden="true" />
-              New group
-            </Button>
-          }
         >
           {groups.length ? (
             <ul aria-label="Groups" className="grid gap-3 sm:grid-cols-2">

@@ -54,7 +54,9 @@ The [native route inventory](NATIVE_WORKSPACE_ROUTES.md) enumerates every module
 management stack registration, shared auth/legal entry, cold fallback and
 challenge path. One retained management drawer adopts safe-area-top +10pt,
 24pt corners, a 36×4pt handle in a 44pt drag target, left-aligned 18pt title,
-44pt circular Close, nested Back and a dedicated translucent scrim. Everything
+44pt circular Close, nested Back and a dedicated translucent scrim.
+The scrim remains stationary and fades in/out independently of the sliding
+panel; the native transparent route adds no second slide transition. Everything
 inside the drawer uses an elevated drawer palette (surface, cards and quieter
 text tones step up together) with a hairline top edge, so the drawer stays
 distinct from the dimmed chat in dark mode, where the chat background alone
@@ -65,15 +67,19 @@ accessibility descendants are hidden while management is open.
 
 Private user bubbles and compact group/private headers follow the native
 reference while preserving real speaker attribution. Private, contextual and
-group chats share one ChatGPT-style composer: a filled borderless pill with a
-leading "+" for attachments, a fixed trailing send/stop circle, and group
-recipient chips and pending files inside the pill above the text line. iOS sizes
+group chats share one ChatGPT-style composer: a filled pill with full-width text
+above a toolbar containing "+" for attachments, optional mentions and a trailing
+send/stop circle. Group recipient chips and pending files stay inside the pill
+above the text. Chat pages use 12pt horizontal and 4pt bottom padding plus the
+system safe area. The side-navigation footer combines its bottom padding with
+the safe-area clearance instead of stacking both. iOS sizes
 the multiline input to its text under the shared cap; Android applies the
 measured height. Display
 preferences use AsyncStorage on this device: default column maximum 758pt,
 wide-window-only width controls and the existing 120pt native composer maximum,
 clamped to keyboard/window space. Reset changes layout only. Shared conditional
-fades use measured overflow/edges, with transcript follow handlers called first.
+fades cover side navigation and measured chat overflow/edges, with transcript
+follow handlers called first.
 Settings identity, label/value and control rows stack at narrow effective widths
 while preserving system text scaling. Settings and Display labels refresh their
 native text measurements when system text size changes, retaining page, scroll
@@ -81,4 +87,4 @@ and control state. Display uses fixed-size step icons in
 labelled 44pt targets, with scalable labels/values and wrapping control rows.
 The native semantic text palette now meets 4.5:1 on base/card/cardSoft surfaces.
 No iOS orientation/tablet support, RN-web, native rail, machine capability or
-native voice admission was added. Web UI lift is inherited unchanged from main.
+native voice admission was added.

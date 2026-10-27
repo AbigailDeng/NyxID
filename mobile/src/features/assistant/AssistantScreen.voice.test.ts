@@ -277,7 +277,10 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
       AssistantPendingUploads: "AssistantPendingUploads",
     },
     "./AssistantMentionInput": {
-      AssistantMentionInput: "AssistantMentionInput",
+      AssistantMentionInput: (props: { renderActions?: (mention: null) => unknown }) => ({
+        type: "AssistantMentionInput",
+        props: { ...props, children: props.renderActions?.(null) },
+      }),
     },
     "./ChatComposer": {
       ChatComposerFrame: ({ children }: { children: unknown }) => ({

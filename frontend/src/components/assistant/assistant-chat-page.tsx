@@ -18,8 +18,7 @@ import {
   WaitingNote,
 } from "./nyxbot-agent-panels";
 import { AgentDetailsSheet } from "./nyxbot-agent-details";
-import { NewAgentDialog } from "./nyxbot-agent-forms";
-import { NewGroupDialog } from "./nyxbot-group-forms";
+import { CreateAgentDialog } from "./create-agent-dialog";
 import { NyxAgentGroupPage } from "./nyxbot-group-view";
 import { VoiceCaptionText } from "./voice-captions";
 import {
@@ -706,7 +705,7 @@ function NyxAgentThreadPage() {
   const groups = useNyxBotGroups();
   // The agent whose details sheet is open (the thread's agent, or NyxBot from home).
   const [detailsAgentId, setDetailsAgentId] = useState<string>();
-  const [creating, setCreating] = useState<"agent" | "group">();
+  const [creating, setCreating] = useState(false);
   // The open thread's agent, else the agent in the URL, else NyxBot.
   const threadAgent = nyxAgentTransport.getConversation(selectedId)?.agent ?? undefined;
   const selectedAgent = selectedAgentOf(agents.data?.agents, threadAgent?.id, search.agent);
@@ -957,21 +956,16 @@ function NyxAgentThreadPage() {
             navigateTo({});
           }}
         />
-        {creating === "agent" ? (
-          <NewAgentDialog
-            onClose={() => setCreating(undefined)}
-            onCreated={(created) => {
-              setCreating(undefined);
+        {creating ? (
+          <CreateAgentDialog
+            agents={agents.data?.agents ?? []}
+            onClose={() => setCreating(false)}
+            onAgentCreated={(created) => {
+              setCreating(false);
               navigateTo({ c: created.home_conversation_id });
             }}
-          />
-        ) : null}
-        {creating === "group" ? (
-          <NewGroupDialog
-            agents={agents.data?.agents ?? []}
-            onClose={() => setCreating(undefined)}
-            onCreated={(group) => {
-              setCreating(undefined);
+            onCrewCreated={(group) => {
+              setCreating(false);
               navigateTo({ g: group.id });
             }}
           />
@@ -993,8 +987,7 @@ function NyxAgentThreadPage() {
             onChat={(agent) => navigateTo({ agent: agent.id })}
             onOpenConversation={(id) => go(id)}
             onOpenGroup={(id) => navigateTo({ g: id })}
-            onNewGroup={() => setCreating("group")}
-            onNewAgent={() => setCreating("agent")}
+            onCreateAgent={() => setCreating(true)}
             onManageMemory={() => {
               const nyxbot = nyxBotOf(agents.data?.agents);
               if (nyxbot) setDetailsAgentId(nyxbot.id);

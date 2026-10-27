@@ -112,10 +112,10 @@ it("preselects NyxBot, offers live agents only, and creates the group", async ()
       <NewGroupDialog agents={AGENTS} onClose={vi.fn()} onCreated={onCreated} />
     </QueryClientProvider>,
   );
-  const dialog = screen.getByRole("dialog", { name: "New group" });
+  const dialog = screen.getByRole("dialog", { name: "Create crew" });
   expect(within(dialog).getByRole("checkbox", { name: /NyxBot/ })).toBeChecked();
   expect(within(dialog).queryByRole("checkbox", { name: /old/ })).not.toBeInTheDocument();
-  const create = within(dialog).getByRole("button", { name: "Create group" });
+  const create = within(dialog).getByRole("button", { name: "Create crew" });
   expect(create).toBeDisabled();
   await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "Launch crew");
   await user.click(within(dialog).getByRole("checkbox", { name: /researcher/ }));
@@ -138,7 +138,7 @@ it("shows the server's refusal", async () => {
     </QueryClientProvider>,
   );
   await user.type(screen.getByRole("textbox", { name: "Name" }), "Crew");
-  await user.click(screen.getByRole("button", { name: "Create group" }));
+  await user.click(screen.getByRole("button", { name: "Create crew" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("researcher was destroyed");
 });
 
@@ -247,7 +247,7 @@ it("creates an organization group with only its agents and eligible participants
   expect(within(participants).queryByText("Revoked")).not.toBeInTheDocument();
   await user.click(within(participants).getByRole("checkbox", { name: "Blair" }));
   await user.type(screen.getByLabelText("Name"), "Org group");
-  await user.click(screen.getByRole("button", { name: "Create group" }));
+  await user.click(screen.getByRole("button", { name: "Create crew" }));
   await waitFor(() => expect(onCreated).toHaveBeenCalled());
   expect(requests.find((r) => r.method === "POST")?.body).toEqual({ name: "Org group", org: "org-a", member_agent_ids: ["org-agent"], participant_user_ids: ["owner", "blair"] });
 });
@@ -279,4 +279,41 @@ it("preserves organization agents as choices in personal groups", () => {
   const orgAgent = agent({ id: "org-agent", name: "Org specialist", kind: "specialist", owner_id: "org-a", owner_kind: "org" });
   render(<QueryClientProvider client={client}><NewGroupDialog agents={[...AGENTS, orgAgent]} onClose={vi.fn()} onCreated={vi.fn()} /></QueryClientProvider>);
   expect(within(screen.getByRole("list", { name: "Agents" })).getByText("Org specialist")).toBeInTheDocument();
+});
+
+it("creates a crew from the shared Create agent entry and returns its actual group", async () => {
+  const { CreateAgentDialog } = await import("./create-agent-dialog");
+  const onCrewCreated = vi.fn();
+  const onAgentCreated = vi.fn();
+  const user = userEvent.setup();
+  render(
+    <QueryClientProvider client={client}>
+      <CreateAgentDialog
+        agents={AGENTS}
+        onClose={vi.fn()}
+        onAgentCreated={onAgentCreated}
+        onCrewCreated={onCrewCreated}
+      />
+    </QueryClientProvider>,
+  );
+  await user.click(screen.getByRole("button", { name: /^Crew / }));
+  const dialog = screen.getByRole("dialog", { name: "Create crew" });
+  await user.type(
+    within(dialog).getByRole("textbox", { name: "Name" }),
+    "Launch crew",
+  );
+  await user.click(
+    within(dialog).getByRole("checkbox", { name: /researcher/ }),
+  );
+  await user.click(within(dialog).getByRole("button", { name: "Create crew" }));
+  await waitFor(() => expect(onCrewCreated).toHaveBeenCalledWith(GROUP));
+  expect(onAgentCreated).not.toHaveBeenCalled();
+  expect(requests).toContainEqual({
+    method: "POST",
+    endpoint: "/assistant/nyxagent/groups",
+    body: {
+      name: "Launch crew",
+      member_agent_ids: ["agent-nyxbot", "agent-researcher"],
+    },
+  });
 });

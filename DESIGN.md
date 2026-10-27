@@ -540,17 +540,22 @@ full-screen. See
 
 - Drawer top is the window's safe-area top plus 10pt. Top corners are 24pt; the
   centered 36×4pt handle has a 44pt drag region. A dedicated translucent scrim
-  leaves retained chat visible in the top strip and during transitions. Headers
-  use a left-aligned 18pt title and circular 44pt Close; nested routes add Back.
+  stays fixed over retained chat and fades independently while the panel slides.
+  Headers use a left-aligned 18pt title and circular 44pt Close; nested routes
+  add Back.
   Forms retain async dirty/pending guards across every dismissal path. Reduced
   motion removes stack travel and springs. No fake home indicator or native rail.
 - Native private-user messages have neutral card fill, a 1pt border, 38pt leading
   inset and corners 12/12/3/12. Private chat omits redundant “You”; group speakers,
   real specialist attribution, orchestration, updates, via and guidance remain.
-  Assistant prose stays unboxed. Composers have 20pt corners, transparent attach,
-  circular 44pt foreground-filled Send with a background-colored glyph, and
-  distinct Stop. The existing one-row private header stays compact; group name,
-  ownership context and settings share one header, with member details retained.
+  Assistant prose stays unboxed. All chat composers share a filled 26pt pill:
+  full-width text sits above a toolbar with Attach, optional mentions and a
+  trailing Send/Stop circle inside a 44pt target. Chat pages use 12pt horizontal
+  padding and 4pt bottom padding in addition to the system safe area. The
+  navigation account footer absorbs its bottom clearance into the safe-area
+  inset rather than adding a second padded strip. The one-row private header
+  stays compact; group name, ownership context and settings share one header,
+  with member details retained.
 - Settings → Display stores chat layout on this device with AsyncStorage. Column
   maximum defaults to 758pt, clamps to actual space, and is adjustable only on
   windows at least 600pt wide (360–1200pt range). Composer maximum defaults to the
@@ -565,8 +570,8 @@ full-screen. See
   Avatar initials retain enough space at the selected text size. Display step
   controls use fixed-size icons in labelled 44pt targets while labels and values
   continue to scale; the controls can wrap onto another line.
-- Transcript, multiline input and horizontal attachment/recipient/member strips
-  show fades only at measured overflowing edges. Top/start cues are gentler.
+- Navigation, transcript, multiline input and horizontal attachment, recipient
+  and member strips show fades only at measured overflowing edges. Top/start cues are gentler.
   Fades ignore pointer/accessibility input and disappear at revealed edges.
   Transcript measurement calls the existing follow handlers first and retains
   their drag/momentum behavior and anchors.
@@ -581,3 +586,17 @@ full-screen. See
 Native support remains portrait iPhone on iOS and Android phone, with wide
 Android windows as a secondary layout. This change does not enable iPad,
 additional orientations, RN-web, machines, backend capabilities or native voice.
+
+### Assistant sidebar density and creation
+
+Agent rows use one 32px line with an avatar, name, status and compact channel or
+pending indicators. Full names, handles and channel context remain available to
+assistive technology and in the row tooltip. Expanded conversation rows use
+28px lines and a shallow nested indent. Coarse pointers receive at least 40px
+targets. Ownership headings separate personal and organization resources without
+repeating metadata on every row.
+
+One **Create agent** entry opens the existing personal/organization agent form or
+the crew form. Groups remain navigable without a separate creation CTA. The
+roster retains its own scroll position; theme-colored overlays appear only at
+edges with hidden content and ignore pointer input.

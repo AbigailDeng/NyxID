@@ -7,7 +7,10 @@ import {
   Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import {
   Bot,
   CalendarClock,
@@ -27,6 +30,7 @@ import type { WorkspaceChatTarget } from "../../app/workspaceChatNavigation";
 import { getAuthEpoch } from "../../lib/auth/authEpoch";
 import { WorkspaceChatList } from "./WorkspaceChatList";
 import { WorkspaceDrawerModal } from "./WorkspaceDrawerModal";
+import { ScrollEdgeFades, useScrollEdges } from "./ScrollEdgeFades";
 
 export type WorkspaceRoute =
   | "Assistant"
@@ -70,6 +74,8 @@ export function WorkspaceDrawer({
   onCreateGroup: () => void;
 }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const scroll = useScrollEdges();
   const closeButton = useRef<View>(null);
   const profile = useQuery({
     queryKey: ["account", "profile"],
@@ -86,6 +92,7 @@ export function WorkspaceDrawer({
       initialFocusTarget={() => findNodeHandle(closeButton.current)}
     >
       <SafeAreaView
+        edges={["top", "left", "right"]}
         style={[
           styles.panel,
           { backgroundColor: colors.cardSoft, borderColor: colors.border },
@@ -105,67 +112,81 @@ export function WorkspaceDrawer({
             <X color={colors.textSecondary} size={20} />
           </Pressable>
         </View>
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.body}>
-          <Text style={[styles.section, { color: colors.textMuted }]}>
-            QUICK ACTIONS
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            onPress={onScan}
-            style={styles.row}
+        <View style={styles.scroll}>
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.body}
+            scrollEventThrottle={32}
+            onLayout={(event) => scroll.layout(event.nativeEvent.layout.height)}
+            onContentSizeChange={(_width, height) => scroll.content(height)}
+            onScroll={(event) =>
+              scroll.scroll(event.nativeEvent.contentOffset.y)
+            }
           >
-            <ScanQrCode color={colors.textSecondary} size={19} />
-            <Text style={[styles.rowText, { color: colors.textPrimary }]}>
-              Scan QR code
+            <Text style={[styles.section, { color: colors.textMuted }]}>
+              QUICK ACTIONS
             </Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            onPress={onLoginCode}
-            style={styles.row}
-          >
-            <KeyRound color={colors.textSecondary} size={19} />
-            <Text style={[styles.rowText, { color: colors.textPrimary }]}>
-              Terminal login code
-            </Text>
-          </Pressable>
-          <Text style={[styles.section, { color: colors.textMuted }]}>
-            YOUR WORKSPACE
-          </Text>
-          {destinations.map(({ route, label, Icon }) => (
             <Pressable
-              key={route}
               accessibilityRole="button"
-              accessibilityState={{ selected: currentRoute === route }}
-              onPress={() => onNavigate(route)}
-              style={[
-                styles.row,
-                {
-                  backgroundColor:
-                    currentRoute === route ? colors.navActive : "transparent",
-                },
-              ]}
+              onPress={onScan}
+              style={styles.row}
             >
-              <Icon
-                color={
-                  currentRoute === route ? colors.primary : colors.textSecondary
-                }
-                size={19}
-              />
+              <ScanQrCode color={colors.textSecondary} size={19} />
               <Text style={[styles.rowText, { color: colors.textPrimary }]}>
-                {label}
+                Scan QR code
               </Text>
             </Pressable>
-          ))}
-          <WorkspaceChatList
-            key={getAuthEpoch()}
-            visible={visible}
-            current={currentChat}
-            onSelect={onOpenChat}
-            onCreateAgent={onCreateAgent}
-            onCreateGroup={onCreateGroup}
-          />
-        </ScrollView>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onLoginCode}
+              style={styles.row}
+            >
+              <KeyRound color={colors.textSecondary} size={19} />
+              <Text style={[styles.rowText, { color: colors.textPrimary }]}>
+                Terminal login code
+              </Text>
+            </Pressable>
+            <Text style={[styles.section, { color: colors.textMuted }]}>
+              YOUR WORKSPACE
+            </Text>
+            {destinations.map(({ route, label, Icon }) => (
+              <Pressable
+                key={route}
+                accessibilityRole="button"
+                accessibilityState={{ selected: currentRoute === route }}
+                onPress={() => onNavigate(route)}
+                style={[
+                  styles.row,
+                  {
+                    backgroundColor:
+                      currentRoute === route ? colors.navActive : "transparent",
+                  },
+                ]}
+              >
+                <Icon
+                  color={
+                    currentRoute === route
+                      ? colors.primary
+                      : colors.textSecondary
+                  }
+                  size={19}
+                />
+                <Text style={[styles.rowText, { color: colors.textPrimary }]}>
+                  {label}
+                </Text>
+              </Pressable>
+            ))}
+            <WorkspaceChatList
+              key={getAuthEpoch()}
+              visible={visible}
+              current={currentChat}
+              onSelect={onOpenChat}
+              onCreateAgent={onCreateAgent}
+              onCreateGroup={onCreateGroup}
+            />
+          </ScrollView>
+          <ScrollEdgeFades edges={scroll.edges} color={colors.cardSoft} />
+        </View>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Open account settings"
@@ -177,6 +198,7 @@ export function WorkspaceDrawer({
           style={({ pressed }) => [
             styles.account,
             {
+              paddingBottom: Math.max(insets.bottom, 12),
               borderColor: colors.border,
               backgroundColor:
                 pressed || currentRoute === "AccountSettings"
@@ -262,7 +284,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 12,
-    paddingVertical: 16,
+    paddingTop: 12,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
@@ -275,6 +297,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   initial: { fontFamily: fonts.displaySemi, fontSize: 17 },
-  accountText: { flex: 1, gap: 4 },
+  accountText: { flex: 1, gap: 2 },
   email: { fontFamily: fonts.bodyRegular, fontSize: 11 },
 });

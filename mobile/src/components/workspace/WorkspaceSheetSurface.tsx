@@ -47,13 +47,40 @@ export function WorkspaceSheetSurface({
   const { height, width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const reduced = useReducedMotion();
-  const offset = useRef(new Animated.Value(0)).current;
+  const offset = useRef(new Animated.Value(reduced ? 0 : height)).current;
+  const scrimOpacity = useRef(new Animated.Value(reduced ? 1 : 0)).current;
   const closing = useRef(false);
   const [interacting, setInteracting] = useState(true);
   const mounted = useRef(true);
   const { primaryKey } = useWorkspaceAccessibility();
   const [focusReturn] = useState(() => workspaceFocus.capture(primaryKey));
   const dismissed = useRef(false);
+  const entranceStarted = useRef(false);
+  const entranceAnimations = useRef<Animated.CompositeAnimation[]>([]);
+  useEffect(() => {
+    if (closing.current) return;
+    if (reduced) {
+      offset.setValue(0);
+      scrimOpacity.setValue(1);
+      entranceStarted.current = true;
+      return;
+    }
+    if (entranceStarted.current) return;
+    entranceStarted.current = true;
+    const panelEntrance = Animated.timing(offset, {
+      toValue: 0,
+      duration: 250,
+      useNativeDriver: true,
+    });
+    const scrimEntrance = Animated.timing(scrimOpacity, {
+      toValue: 1,
+      duration: 180,
+      useNativeDriver: true,
+    });
+    entranceAnimations.current = [panelEntrance, scrimEntrance];
+    panelEntrance.start();
+    scrimEntrance.start();
+  }, [offset, reduced, scrimOpacity]);
   const reset = useCallback(() => {
     if (reduced) offset.setValue(0);
     else
@@ -85,6 +112,11 @@ export function WorkspaceSheetSurface({
       onClose();
       return;
     }
+    Animated.timing(scrimOpacity, {
+      toValue: 0,
+      duration: 180,
+      useNativeDriver: true,
+    }).start();
     Animated.timing(offset, {
       toValue: height,
       duration: 180,
@@ -95,7 +127,7 @@ export function WorkspaceSheetSurface({
         onClose();
       }
     });
-  }, [canClose, height, offset, onClose, reduced, reset]);
+  }, [canClose, height, offset, onClose, reduced, reset, scrimOpacity]);
   useEffect(() => {
     if (controller) controller.current = { dismiss: () => void dismiss() };
     return () => {
@@ -106,6 +138,7 @@ export function WorkspaceSheetSurface({
     mounted.current = true;
     return () => {
       mounted.current = false;
+      entranceAnimations.current.forEach((animation) => animation.stop());
       if (dismissed.current) workspaceFocus.restore(focusReturn);
     };
   }, []);
@@ -147,11 +180,11 @@ export function WorkspaceSheetSurface({
       accessibilityViewIsModal
       onAccessibilityEscape={() => void dismiss()}
     >
-      <View
+      <Animated.View
         pointerEvents="none"
         style={[
           StyleSheet.absoluteFill,
-          { backgroundColor: colors.sheetScrim },
+          { backgroundColor: colors.sheetScrim, opacity: scrimOpacity },
         ]}
       />
       <Pressable
