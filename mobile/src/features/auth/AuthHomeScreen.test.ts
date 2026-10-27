@@ -47,17 +47,21 @@ function textContent(root: Element): string {
 function setup({
   state = "ready",
   providers = [],
+  emailEnabled = true,
 }: {
   state?: "ready" | "loading" | "error";
   providers?: PublicAuthConfig["socialProviders"];
+  emailEnabled?: boolean;
 } = {}) {
   const config: PublicAuthConfig = {
-    emailAuthEnabled: false,
+    emailAuthEnabled: emailEnabled,
     socialProviders: providers,
   };
   const calls: LoginInput[] = [];
   const sessions: Session[] = [];
   const socialUrls: string[] = [];
+  const navigations: string[] = [];
+  const urlListeners: Array<(event: { url: string }) => void> = [];
   let login = async (_input: LoginInput) => signedIn;
   let refetch = async () => ({ data: config, error: null as Error | null });
   let configRefetches = 0;
@@ -72,7 +76,6 @@ function setup({
   });
   const harness = hookHarness<Element>({
     "react/jsx-runtime": { jsx, jsxs: jsx, Fragment: "Fragment" },
-    "@expo/vector-icons/FontAwesome": { default: "FontAwesome" },
     "expo-web-browser": {
       openAuthSessionAsync: async (url: string) => {
         socialUrls.push(url);
@@ -118,7 +121,10 @@ function setup({
       },
       Linking: {
         getInitialURL: async () => null,
-        addEventListener: () => ({ remove: () => {} }),
+        addEventListener: (_event: string, listener: (event: { url: string }) => void) => {
+          urlListeners.push(listener);
+          return { remove: () => { urlListeners.splice(urlListeners.indexOf(listener), 1); } };
+        },
       },
     },
     "react-native-svg": {
@@ -164,7 +170,7 @@ function setup({
   const { AuthHomeScreen } = harness.load(
     fileURLToPath(new URL("./AuthHomeScreen.tsx", import.meta.url)),
   ) as { AuthHomeScreen: (props: unknown) => Element };
-  harness.mount(() => AuthHomeScreen({ navigation: { navigate: () => {} } }));
+  harness.mount(() => AuthHomeScreen({ navigation: { navigate: (route: string) => navigations.push(route) } }));
 
   function input(label: string) {
     const element = elements(harness.value()).find(
@@ -203,12 +209,21 @@ function setup({
     calls,
     sessions,
     socialUrls,
+    navigations,
     configRefetches: () => configRefetches,
     setLogin: (handler: typeof login) => {
       login = handler;
     },
     setRefetch: (handler: typeof refetch) => {
       refetch = handler;
+    },
+    setEmailEnabled: (enabled: boolean) => {
+      config.emailAuthEnabled = enabled;
+      harness.render();
+    },
+    openUrl: (url: string) => {
+      for (const listener of [...urlListeners]) listener({ url });
+      harness.flush();
     },
     background: () => {
       for (const listener of appStateListeners) listener("background");
@@ -217,47 +232,132 @@ function setup({
   };
 }
 
-for (const state of ["ready", "loading", "error"] as const) {
-  test(`existing-account email login stays usable with ${state} social configuration`, async (t) => {
-    const screen = setup({ state });
+test("server-enabled email login adopts the session without changing credentials", async (t) => {
+  const screen = setup();
+  t.after(screen.harness.unmount);
+  assert.equal(screen.input("Password").props.secureTextEntry, true);
+  assert.equal(screen.social().length, 0);
+  assert.equal(screen.submit().props.disabled, true);
+  screen.change("Email", " reviewer@example.test ");
+  screen.change("Password", " review password ");
+  assert.equal(screen.submit().props.disabled, false);
+  const started = Date.now();
+  screen.submit().props.onPress();
+  await screen.harness.settle();
+  assert.deepEqual(screen.calls, [
+    {
+      email: "reviewer@example.test",
+      password: " review password ",
+    },
+  ]);
+  assert.equal(screen.sessions.length, 1);
+  assert.deepEqual(
+    {
+      accessToken: screen.sessions[0]!.accessToken,
+      refreshToken: screen.sessions[0]!.refreshToken,
+    },
+    {
+      accessToken: signedIn.accessToken,
+      refreshToken: signedIn.refreshToken,
+    },
+  );
+  assert.ok(screen.sessions[0]!.accessTokenExpiresAt >= started + 3_600_000);
+  assert.ok(
+    screen.sessions[0]!.accessTokenExpiresAt <= Date.now() + 3_600_000,
+  );
+  assert.equal(
+    screen.configRefetches(),
+    0,
+    "Email does not start another config request",
+  );
+});
+
+for (const emailEnabled of [false, true]) {
+  for (let subset = 0; subset < 8; subset++) {
+    const order = ["google", "github", "apple"] as const;
+    const providers = order.filter((_, i) => (subset & (1 << i)) !== 0);
+    test(`sign-in renders provider subset ${subset} with email ${emailEnabled ? "on" : "off"}`, (t) => {
+      const screen = setup({ emailEnabled, providers: [...providers].reverse() });
+      t.after(screen.harness.unmount);
+      assert.deepEqual(screen.social().map((element) => element.props.provider), providers);
+      assert.deepEqual(
+        screen.social().map((element) => element.props.label),
+        providers.map((provider) => `Continue with ${{ google: "Google", github: "GitHub", apple: "Apple" }[provider]}`),
+      );
+      const tree = elements(screen.harness.value());
+      for (const label of ["Email", "Password"]) {
+        assert.equal(tree.some((element) => element.props.accessibilityLabel === label), emailEnabled);
+      }
+      assert.equal(tree.some((element) => element.type === "Pressable" && textContent(element) === "Sign In"), emailEnabled);
+      assert.equal(tree.some((element) => element.type === "Text" && textContent(element) === "or"), emailEnabled && providers.length > 0);
+      if (emailEnabled && providers.length > 0) {
+        assert.ok(tree.indexOf(screen.social().at(-1)!) < tree.indexOf(screen.input("Email")), "provider rows precede email, matching the web");
+      }
+    });
+  }
+}
+
+for (const state of ["loading", "error"] as const) {
+  test(`unavailable ${state} config does not offer undiscovered login methods`, async (t) => {
+    const screen = setup({ state, providers: ["google", "github", "apple"], emailEnabled: true });
     t.after(screen.harness.unmount);
-    assert.equal(screen.input("Password").props.secureTextEntry, true);
-    assert.equal(screen.social().length, 0);
-    assert.equal(screen.submit().props.disabled, true);
-    screen.change("Email", " reviewer@example.test ");
-    screen.change("Password", " review password ");
-    assert.equal(screen.submit().props.disabled, false);
-    const started = Date.now();
-    screen.submit().props.onPress();
-    await screen.harness.settle();
-    assert.deepEqual(screen.calls, [
-      {
-        email: "reviewer@example.test",
-        password: " review password ",
-      },
-    ]);
-    assert.equal(screen.sessions.length, 1);
-    assert.deepEqual(
-      {
-        accessToken: screen.sessions[0]!.accessToken,
-        refreshToken: screen.sessions[0]!.refreshToken,
-      },
-      {
-        accessToken: signedIn.accessToken,
-        refreshToken: signedIn.refreshToken,
-      },
-    );
-    assert.ok(screen.sessions[0]!.accessTokenExpiresAt >= started + 3_600_000);
-    assert.ok(
-      screen.sessions[0]!.accessTokenExpiresAt <= Date.now() + 3_600_000,
-    );
-    assert.equal(
-      screen.configRefetches(),
-      0,
-      "Email does not wait for social discovery",
-    );
+    assert.deepEqual(screen.social(), []);
+    assert.equal(elements(screen.harness.value()).some((element) => element.type === "TextInput"), false);
+    if (state === "error") {
+      const retry = elements(screen.harness.value()).find((element) => element.type === "Pressable" && textContent(element) === "Retry sign-in options");
+      assert.ok(retry);
+      retry.props.onPress();
+      await screen.harness.settle();
+      assert.equal(screen.configRefetches(), 1);
+      assert.doesNotMatch(textContent(screen.harness.value()), /still sign in with email/);
+    } else {
+      assert.match(textContent(screen.harness.value()), /Loading sign-in options/);
+    }
   });
 }
+
+test("email form disappears when refreshed configuration disables it", (t) => {
+  const screen = setup();
+  t.after(screen.harness.unmount);
+  screen.change("Email", "reviewer@example.test");
+  screen.change("Password", "password");
+  screen.setEmailEnabled(false);
+  assert.equal(elements(screen.harness.value()).some((element) => element.type === "TextInput"), false);
+});
+
+test("social-only sign-in still verifies MFA, supports recovery and keeps legal links", async (t) => {
+  const screen = setup({ emailEnabled: false, providers: ["google"] });
+  t.after(screen.harness.unmount);
+  screen.openUrl("nyxid://auth/social/callback#status=mfa_required&provider=google&mfa_token=synthetic-challenge");
+  assert.match(textContent(screen.harness.value()), /Verify your Google sign-in/);
+  assert.equal(elements(screen.harness.value()).some((element) => element.props.accessibilityLabel === "Email" || element.props.accessibilityLabel === "Password"), false);
+  const recovery = elements(screen.harness.value()).find((element) => element.type === "Pressable" && textContent(element) === "Use a recovery code");
+  assert.ok(recovery);
+  recovery.props.onPress();
+  screen.harness.flush();
+  screen.change("Recovery code", "abcdef12");
+  assert.equal(screen.submit().props.disabled, false);
+  screen.submit().props.onPress();
+  await screen.harness.settle();
+  assert.deepEqual(screen.calls, [{ mfaCode: "abcdef12" }]);
+  assert.equal(screen.sessions.length, 1);
+  assert.equal(elements(screen.harness.value()).some((element) => element.type === "TextInput"), false);
+  for (const label of ["Terms", "Privacy"]) {
+    const link = elements(screen.harness.value()).find((element) => element.type === "Text" && textContent(element) === label);
+    assert.ok(link);
+    link.props.onPress();
+  }
+  assert.deepEqual(screen.navigations, ["TermsOfService", "PrivacyPolicy"]);
+});
+
+test("social-only configuration preserves provider error mapping", (t) => {
+  const screen = setup({ emailEnabled: false, providers: ["github"] });
+  t.after(screen.harness.unmount);
+  screen.openUrl("nyxid://auth/social/callback?status=error&provider=github&error=social_auth_conflict");
+  assert.match(textContent(screen.harness.value()), /This email is linked to another login method\./);
+  assert.equal(screen.sessions.length, 0);
+  assert.equal(elements(screen.harness.value()).some((element) => element.type === "TextInput"), false);
+});
 
 test("email authentication handles the actual MFA challenge before adopting a session", async (t) => {
   const screen = setup();

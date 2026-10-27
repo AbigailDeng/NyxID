@@ -5,6 +5,28 @@ import {
   requireSocialProvider,
 } from "./publicAuthConfig";
 
+for (const emailEnabled of [false, true]) {
+  for (let subset = 0; subset < 8; subset++) {
+    const providers = (["google", "github", "apple"] as const)
+      .filter((_, i) => (subset & (1 << i)) !== 0)
+      .reverse();
+    test(`public config parses provider subset ${subset} and email ${emailEnabled ? "on" : "off"}`, () => {
+      const config = parsePublicAuthConfig({
+        email_auth_enabled: emailEnabled,
+        social_providers: providers,
+      });
+      assert.deepEqual(config, { emailAuthEnabled: emailEnabled, socialProviders: providers });
+      for (const provider of ["google", "github", "apple"] as const) {
+        if (config.socialProviders.includes(provider)) {
+          assert.doesNotThrow(() => requireSocialProvider(config, provider));
+        } else {
+          assert.throws(() => requireSocialProvider(config, provider), /not enabled on this server/);
+        }
+      }
+    });
+  }
+}
+
 test("a local email-only deployment does not enable social login", () => {
   const config = parsePublicAuthConfig({
     email_auth_enabled: true,
