@@ -715,7 +715,7 @@ const createStyles = (c: ThemeColors) =>
       lineHeight: 18,
     },
     errorLink: {
-      color: c.primary,
+      color: c.primaryOnTint,
       textDecorationLine: "underline" as const,
     },
     dividerRow: {

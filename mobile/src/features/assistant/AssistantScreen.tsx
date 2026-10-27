@@ -1,3 +1,8 @@
+import { useChatColumn } from "../display/ChatLayoutContext";
+import {
+  ScrollEdgeFades,
+  useScrollEdges,
+} from "../../components/workspace/ScrollEdgeFades";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -34,7 +39,10 @@ import type {
   AssistantParams,
   WorkspaceNavigationProp,
 } from "../../app/navigationTypes";
-import { useWorkspaceBack } from "../../app/WorkspaceHeader";
+import {
+  useWorkspaceBack,
+  WorkspaceHeaderVisibility,
+} from "../../app/WorkspaceHeader";
 import {
   openWorkspaceSheetAction,
   workspaceNavigateAction,
@@ -101,7 +109,8 @@ type AssistantScreenProps = {
 
 // Both persisted and streamed replies share Web's automatic URL recognition.
 const assistantMarkdown = MarkdownIt(assistantMarkdownOptions);
-assistantMarkdown.validateLink = (url: string) => safeAssistantLinkUrl(url) !== null;
+assistantMarkdown.validateLink = (url: string) =>
+  safeAssistantLinkUrl(url) !== null;
 
 export function AssistantScreen({
   route,
@@ -109,6 +118,8 @@ export function AssistantScreen({
 }: AssistantScreenProps) {
   const navigation = useNavigation<WorkspaceNavigationProp>();
   const { colors } = useTheme();
+  const chatColumn = useChatColumn();
+  const transcriptEdges = useScrollEdges();
   const adoptedId = useRef<string | undefined>(undefined);
   const assistant = useAssistant(
     route?.params?.conversationId,
@@ -431,51 +442,55 @@ export function AssistantScreen({
   headerHandlers.current = { newChat };
   const headerOptions = useMemo<NativeStackNavigationOptions>(() => {
     const actions = () => (
-      <View style={styles.headerActions}>
-        <IconButton
-          label="New chat"
-          disabled={newChatDisabled}
-          onPress={() => headerHandlers.current.newChat()}
-        >
-          <SquarePen size={21} color={colors.textPrimary} />
-        </IconButton>
-        <IconButton
-          label="Chat options"
-          onPress={() => {
-            setTitle(conversation?.title ?? "");
-            setSheet("details");
-          }}
-        >
-          <MoreHorizontal size={23} color={colors.textPrimary} />
-        </IconButton>
-      </View>
+      <WorkspaceHeaderVisibility>
+        <View style={styles.headerActions}>
+          <IconButton
+            label="New chat"
+            disabled={newChatDisabled}
+            onPress={() => headerHandlers.current.newChat()}
+          >
+            <SquarePen size={21} color={colors.textPrimary} />
+          </IconButton>
+          <IconButton
+            label="Chat options"
+            onPress={() => {
+              setTitle(conversation?.title ?? "");
+              setSheet("details");
+            }}
+          >
+            <MoreHorizontal size={23} color={colors.textPrimary} />
+          </IconButton>
+        </View>
+      </WorkspaceHeaderVisibility>
     );
     return {
       headerTitle: () => (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Chatting with ${agentName}. Choose agent`}
-          accessibilityState={{ disabled: headerDisabled }}
-          disabled={headerDisabled}
-          onPress={() => setSheet("agents")}
-          style={styles.headerIdentity}
-        >
-          <View style={styles.headerName}>
+        <WorkspaceHeaderVisibility>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Chatting with ${agentName}. Choose agent`}
+            accessibilityState={{ disabled: headerDisabled }}
+            disabled={headerDisabled}
+            onPress={() => setSheet("agents")}
+            style={styles.headerIdentity}
+          >
+            <View style={styles.headerName}>
+              <Text
+                numberOfLines={1}
+                style={[styles.agentName, { color: colors.textPrimary }]}
+              >
+                {agentName}
+              </Text>
+              <ChevronDown size={14} color={colors.textSecondary} />
+            </View>
             <Text
               numberOfLines={1}
-              style={[styles.agentName, { color: colors.textPrimary }]}
+              style={[styles.headerSubtitle, { color: colors.textSecondary }]}
             >
-              {agentName}
+              {chatTitle}
             </Text>
-            <ChevronDown size={14} color={colors.textSecondary} />
-          </View>
-          <Text
-            numberOfLines={1}
-            style={[styles.headerSubtitle, { color: colors.textSecondary }]}
-          >
-            {chatTitle}
-          </Text>
-        </Pressable>
+          </Pressable>
+        </WorkspaceHeaderVisibility>
       ),
       headerRight: actions,
       unstable_headerRightItems: () => [
@@ -602,6 +617,21 @@ export function AssistantScreen({
   }) {
     const isUser = item.role === "user";
     const input = retryInput(assistant.history, item);
+    const attribution = [
+      isUser
+        ? ""
+        : item.role === "assistant"
+          ? (conversation?.agent?.display_name ??
+            conversation?.agent?.name ??
+            "NyxBot")
+          : item.role === "orchestrator"
+            ? "NyxBot · instruction"
+            : "Update",
+      item.via,
+      item.steering ? "guidance" : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
     return (
       <View
         style={[
@@ -616,19 +646,11 @@ export function AssistantScreen({
         {index > 0 && item.seq > (messages[index - 1]?.seq ?? item.seq) + 1 ? (
           <Notice message="Messages between these pages haven't loaded yet. Load missing messages to restore them." />
         ) : null}
-        <Label muted style={styles.messageLabel}>
-          {isUser
-            ? "You"
-            : item.role === "assistant"
-              ? (conversation?.agent?.display_name ??
-                conversation?.agent?.name ??
-                "NyxBot")
-              : item.role === "orchestrator"
-                ? "NyxBot · instruction"
-                : "Update"}
-          {item.via ? ` · ${item.via}` : ""}
-          {item.steering ? " · guidance" : ""}
-        </Label>
+        {attribution ? (
+          <Label muted style={styles.messageLabel}>
+            {attribution}
+          </Label>
+        ) : null}
         <AssistantActivityDisclosure
           key={item.id}
           activities={item.activities}
@@ -723,7 +745,9 @@ export function AssistantScreen({
         }
       >
         {row.id === route?.params?.acknowledgementId && (
-          <Label style={{ color: colors.primary }}>Selected confirmation</Label>
+          <Label style={{ color: colors.primaryOnTint }}>
+            Selected confirmation
+          </Label>
         )}
         <Label style={styles.cardTitle}>{acknowledgementTitle(row)}</Label>
         <Label>{row.summary}</Label>
@@ -846,194 +870,216 @@ export function AssistantScreen({
       {route?.params?.openLatest ? (
         <Notice message={`Opening ${agentName}'s latest chat…`} />
       ) : null}
-      <FlatList
-        key={assistant.conversationId ?? "new-chat"}
-        ref={transcript}
-        style={styles.fill}
-        data={messages}
-        keyExtractor={(item) => item.id}
-        renderItem={renderMessage}
-        ItemSeparatorComponent={TranscriptSeparator}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        contentContainerStyle={styles.transcript}
-        // Anchor stable history only while reading it. Native row anchoring
-        // competes with keeping the newest live or newly saved reply visible.
-        maintainVisibleContentPosition={
-          stableTranscript && !transcriptScroll.following
-            ? { minIndexForVisible: 0 }
-            : undefined
-        }
-        {...transcriptScroll.listProps}
-        ListHeaderComponent={
-          assistant.history?.before_seq ? (
-            <ActionButton
-              label={
-                hasHistoryGap
-                  ? "Load missing messages"
-                  : "Load earlier messages"
-              }
-              variant="secondary"
-              loading={assistant.loadingOlder}
-              // Page a stable transcript so dynamic footer changes cannot
-              // interfere with the native reading anchor.
-              disabled={
-                running ||
-                assistant.loading ||
-                !assistant.online ||
-                !!assistant.deciding ||
-                assistant.mutating
-              }
-              onPress={() => {
-                transcriptScroll.pause();
-                void assistant.loadOlder();
-              }}
-            />
-          ) : null
-        }
-        ListHeaderComponentStyle={styles.transcriptHeader}
-        ListEmptyComponent={
-          assistant.loading ? (
-            <ActivityIndicator color={colors.primary} />
-          ) : !assistant.sending ? (
-            <View style={styles.welcome}>
-              <Text
-                style={[styles.welcomeTitle, { color: colors.textPrimary }]}
-              >
-                How can I help?
-              </Text>
-            </View>
-          ) : null
-        }
-        ListFooterComponent={
-          <View style={styles.footer}>
-            {(assistant.inputText || assistant.inputAttachments.length > 0) &&
-            !optimisticUserPersisted ? (
-              <View
-                style={[
-                  styles.message,
-                  styles.userMessage,
-                  { backgroundColor: colors.card, borderColor: colors.border },
-                ]}
-              >
-                <Label muted style={styles.messageLabel}>
-                  You · sending
-                </Label>
-                {assistant.inputText ? (
-                  <Text
-                    selectable
-                    style={[styles.messageText, { color: colors.textPrimary }]}
-                  >
-                    {assistant.inputText}
-                  </Text>
-                ) : null}
-                {assistant.inputAttachments.map((attachment) => (
-                  <AssistantAttachmentView
-                    key={attachment.id}
-                    attachment={attachment}
-                    conversationId={
-                      assistant.conversationId ?? assistant.live?.conversationId
+      <View key="transcript-column" style={[styles.fill, chatColumn]}>
+        <FlatList
+          key={assistant.conversationId ?? "new-chat"}
+          ref={transcript}
+          style={styles.fill}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          renderItem={renderMessage}
+          ItemSeparatorComponent={TranscriptSeparator}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          contentContainerStyle={styles.transcript}
+          // Anchor stable history only while reading it. Native row anchoring
+          // competes with keeping the newest live or newly saved reply visible.
+          maintainVisibleContentPosition={
+            stableTranscript && !transcriptScroll.following
+              ? { minIndexForVisible: 0 }
+              : undefined
+          }
+          {...transcriptScroll.listProps}
+          onLayout={(event) => {
+            transcriptScroll.listProps.onLayout(event);
+            transcriptEdges.layout(event.nativeEvent.layout.height);
+          }}
+          onContentSizeChange={(width, height) => {
+            transcriptScroll.listProps.onContentSizeChange(width, height);
+            transcriptEdges.content(height);
+          }}
+          onScroll={(event) => {
+            transcriptScroll.listProps.onScroll(event);
+            transcriptEdges.scroll(event.nativeEvent.contentOffset.y);
+          }}
+          ListHeaderComponent={
+            assistant.history?.before_seq ? (
+              <ActionButton
+                label={
+                  hasHistoryGap
+                    ? "Load missing messages"
+                    : "Load earlier messages"
+                }
+                variant="secondary"
+                loading={assistant.loadingOlder}
+                // Page a stable transcript so dynamic footer changes cannot
+                // interfere with the native reading anchor.
+                disabled={
+                  running ||
+                  assistant.loading ||
+                  !assistant.online ||
+                  !!assistant.deciding ||
+                  assistant.mutating
+                }
+                onPress={() => {
+                  transcriptScroll.pause();
+                  void assistant.loadOlder();
+                }}
+              />
+            ) : null
+          }
+          ListHeaderComponentStyle={styles.transcriptHeader}
+          ListEmptyComponent={
+            assistant.loading ? (
+              <ActivityIndicator color={colors.primary} />
+            ) : !assistant.sending ? (
+              <View style={styles.welcome}>
+                <Text
+                  style={[styles.welcomeTitle, { color: colors.textPrimary }]}
+                >
+                  How can I help?
+                </Text>
+              </View>
+            ) : null
+          }
+          ListFooterComponent={
+            <View style={styles.footer}>
+              {(assistant.inputText || assistant.inputAttachments.length > 0) &&
+              !optimisticUserPersisted ? (
+                <View
+                  style={[
+                    styles.message,
+                    styles.userMessage,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Label muted style={styles.messageLabel}>
+                    Sending…
+                  </Label>
+                  {assistant.inputText ? (
+                    <Text
+                      selectable
+                      style={[
+                        styles.messageText,
+                        { color: colors.textPrimary },
+                      ]}
+                    >
+                      {assistant.inputText}
+                    </Text>
+                  ) : null}
+                  {assistant.inputAttachments.map((attachment) => (
+                    <AssistantAttachmentView
+                      key={attachment.id}
+                      attachment={attachment}
+                      conversationId={
+                        assistant.conversationId ??
+                        assistant.live?.conversationId
+                      }
+                    />
+                  ))}
+                </View>
+              ) : null}
+              {running && !streamPersisted ? (
+                <View style={styles.message}>
+                  <Label muted style={styles.messageLabel}>
+                    {conversation?.agent?.display_name ??
+                      conversation?.agent?.name ??
+                      "NyxBot"}{" "}
+                    ·{" "}
+                    {conversation?.active_turn?.stop_requested
+                      ? "Stopping"
+                      : "Working"}
+                  </Label>
+                  <AssistantActivityDisclosure
+                    key={
+                      conversation?.active_turn?.turn_id ??
+                      assistant.live?.turnId ??
+                      "pending-turn"
+                    }
+                    activities={liveActivities}
+                    onToggle={() => {
+                      transcriptScroll.pause();
+                    }}
+                  />
+                  {liveText ? (
+                    <Markdown
+                      markdownit={assistantMarkdown}
+                      style={markdownStyle}
+                      rules={markdownRules}
+                      onLinkPress={openSafeLink}
+                    >
+                      {liveText}
+                    </Markdown>
+                  ) : (
+                    <View style={[styles.row, styles.thinking]}>
+                      <ActivityIndicator size="small" color={colors.primary} />
+                      {waitingActivity ? (
+                        <Label
+                          muted
+                          numberOfLines={1}
+                          style={styles.runningActivity}
+                        >
+                          {describeToolActivity(
+                            waitingActivity.label,
+                            waitingActivity.status === "completed"
+                              ? "done"
+                              : waitingActivity.status,
+                          )}
+                          {waitingActivity.status === "running" ? "…" : ""}
+                        </Label>
+                      ) : null}
+                    </View>
+                  )}
+                  {assistant.live?.notice ? (
+                    <Label muted>{assistant.live.notice}</Label>
+                  ) : null}
+                  <AssistantCopyButton text={liveText} partial />
+                </View>
+              ) : null}
+              {assistant.history?.waiting.map((waiting, index) => (
+                <Notice
+                  key={`${waiting.title}:${index}`}
+                  message={`${waiting.title}${waiting.detail ? ` · ${waiting.detail}` : ""}`}
+                />
+              ))}
+              <AssistantAcknowledgements
+                key={conversation?.id ?? "draft"}
+                acknowledgements={assistant.history?.acknowledgements ?? []}
+                selectedId={route?.params?.acknowledgementId}
+                renderPending={renderAcknowledgement}
+                renderAuthoredReview={renderAuthoredReview}
+                onToggle={() => transcriptScroll.pause()}
+              />
+              {assistant.history?.approvals.map((approval) => (
+                <Card key={approval.id}>
+                  <Label style={styles.cardTitle}>
+                    {approval.service_name} · Approval needed
+                  </Label>
+                  <Label>{approval.summary}</Label>
+                  <Label muted mono>
+                    Expires {formatDate(approval.expires_at)}
+                  </Label>
+                  <ActionButton
+                    label="Review request"
+                    variant="secondary"
+                    onPress={() =>
+                      navigation.dispatch(
+                        openWorkspaceSheetAction("ActivityDetail", {
+                          challengeId: approval.id,
+                        }),
+                      )
                     }
                   />
-                ))}
-              </View>
-            ) : null}
-            {running && !streamPersisted ? (
-              <View style={styles.message}>
-                <Label muted style={styles.messageLabel}>
-                  {conversation?.agent?.display_name ??
-                    conversation?.agent?.name ??
-                    "NyxBot"}{" "}
-                  ·{" "}
-                  {conversation?.active_turn?.stop_requested
-                    ? "Stopping"
-                    : "Working"}
-                </Label>
-                <AssistantActivityDisclosure
-                  key={
-                    conversation?.active_turn?.turn_id ??
-                    assistant.live?.turnId ??
-                    "pending-turn"
-                  }
-                  activities={liveActivities}
-                  onToggle={() => {
-                    transcriptScroll.pause();
-                  }}
-                />
-                {liveText ? (
-                  <Markdown
-                    markdownit={assistantMarkdown}
-                    style={markdownStyle}
-                    rules={markdownRules}
-                    onLinkPress={openSafeLink}
-                  >
-                    {liveText}
-                  </Markdown>
-                ) : (
-                  <View style={[styles.row, styles.thinking]}>
-                    <ActivityIndicator size="small" color={colors.primary} />
-                    {waitingActivity ? (
-                      <Label
-                        muted
-                        numberOfLines={1}
-                        style={styles.runningActivity}
-                      >
-                        {describeToolActivity(
-                          waitingActivity.label,
-                          waitingActivity.status === "completed"
-                            ? "done"
-                            : waitingActivity.status,
-                        )}
-                        {waitingActivity.status === "running" ? "…" : ""}
-                      </Label>
-                    ) : null}
-                  </View>
-                )}
-                {assistant.live?.notice ? (
-                  <Label muted>{assistant.live.notice}</Label>
-                ) : null}
-                <AssistantCopyButton text={liveText} partial />
-              </View>
-            ) : null}
-            {assistant.history?.waiting.map((waiting, index) => (
-              <Notice
-                key={`${waiting.title}:${index}`}
-                message={`${waiting.title}${waiting.detail ? ` · ${waiting.detail}` : ""}`}
-              />
-            ))}
-            <AssistantAcknowledgements
-              key={conversation?.id ?? "draft"}
-              acknowledgements={assistant.history?.acknowledgements ?? []}
-              selectedId={route?.params?.acknowledgementId}
-              renderPending={renderAcknowledgement}
-              renderAuthoredReview={renderAuthoredReview}
-              onToggle={() => transcriptScroll.pause()}
-            />
-            {assistant.history?.approvals.map((approval) => (
-              <Card key={approval.id}>
-                <Label style={styles.cardTitle}>
-                  {approval.service_name} · Approval needed
-                </Label>
-                <Label>{approval.summary}</Label>
-                <Label muted mono>
-                  Expires {formatDate(approval.expires_at)}
-                </Label>
-                <ActionButton
-                  label="Review request"
-                  variant="secondary"
-                  onPress={() =>
-                    navigation.dispatch(
-                      openWorkspaceSheetAction("ActivityDetail", {
-                        challengeId: approval.id,
-                      }),
-                    )
-                  }
-                />
-              </Card>
-            ))}
-          </View>
-        }
-      />
+                </Card>
+              ))}
+            </View>
+          }
+        />
+        <ScrollEdgeFades edges={transcriptEdges.edges} color={colors.bg} />
+      </View>
       {voiceThread && voiceThread === assistant.conversationId ? (
         <AssistantVoiceConversation
           key={`voice:${voiceThread}`}
@@ -1054,7 +1100,8 @@ export function AssistantScreen({
       <View
         style={[
           styles.composer,
-          { backgroundColor: colors.card, borderColor: colors.border },
+          chatColumn,
+          { backgroundColor: colors.card, borderColor: colors.textMuted },
         ]}
       >
         <AssistantPendingUploads
@@ -1137,10 +1184,7 @@ export function AssistantScreen({
               disabled={!canSend}
               onPress={() => void sendDraft()}
             >
-              <ArrowUp
-                size={21}
-                color={canSend ? colors.primary : colors.textTertiary}
-              />
+              <ArrowUp size={21} color={colors.bg} />
             </IconButton>
           )}
         </View>
@@ -1478,6 +1522,9 @@ function IconButton({
   onPress: () => void;
   disabled?: boolean;
 }) {
+  const { colors } = useTheme();
+  const send = label === "Send message";
+  const stop = label === "Stop assistant";
   return (
     <Pressable
       accessibilityRole="button"
@@ -1487,6 +1534,12 @@ function IconButton({
       onPress={onPress}
       style={({ pressed }) => [
         styles.iconButton,
+        (send || stop) && {
+          borderRadius: 22,
+          backgroundColor: send ? colors.textPrimary : colors.dangerSoftBg,
+          borderWidth: stop ? 1 : 0,
+          borderColor: colors.danger,
+        },
         { opacity: disabled ? 0.4 : pressed ? 0.65 : 1 },
       ]}
     >
@@ -1582,8 +1635,12 @@ const styles = StyleSheet.create({
   userMessage: {
     padding: 14,
     borderWidth: 1,
-    borderRadius: radius.lg,
-    marginLeft: 26,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+    borderBottomRightRadius: 3,
+    borderBottomLeftRadius: 12,
+    marginLeft: 38,
+    alignSelf: "flex-end",
   },
   messageLabel: { fontSize: 11, fontFamily: fonts.bodySemi },
   messageText: { fontFamily: fonts.bodyRegular, fontSize: 14, lineHeight: 23 },
@@ -1600,7 +1657,7 @@ const styles = StyleSheet.create({
   },
   thinking: { alignSelf: "flex-start", marginVertical: 10 },
   cardTitle: { fontFamily: fonts.bodySemi },
-  composer: { borderWidth: 1, borderRadius: radius.lg, padding: 6, gap: 6 },
+  composer: { borderWidth: 1, borderRadius: 20, padding: 6, gap: 6 },
   composerActions: { flexDirection: "row", alignItems: "flex-end", gap: 2 },
   composerHint: { fontSize: 11, lineHeight: 16, paddingHorizontal: 8 },
   errorRow: { gap: 8 },

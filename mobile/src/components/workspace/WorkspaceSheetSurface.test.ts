@@ -25,7 +25,11 @@ function elements(root: Element): Element[] {
   ];
 }
 
-function setup() {
+function setup(
+  reduced = false,
+  dimensions = { width: 390, height: 844 },
+  insetTop = 47,
+) {
   let handlers!: PanHandlers;
   let closeAttempts = 0;
   let allowedCloses = 0;
@@ -47,18 +51,44 @@ function setup() {
     props,
   });
   const harness = hookHarness<Element>({
+    "../../lib/accessibility/workspaceAccessibility": {
+      useWorkspaceAccessibility: () => ({
+        primaryKey: "chat",
+        sheetOpen: true,
+      }),
+    },
+    "../../lib/accessibility/workspaceFocus": {
+      workspaceFocus: { capture() {}, restore() {} },
+    },
+    "../../lib/accessibility/useReducedMotion": {
+      useReducedMotion: () => reduced,
+    },
     "react/jsx-runtime": { jsx, jsxs: jsx },
     "react-native": {
       View: "View",
+      useWindowDimensions: () => dimensions,
+      BackHandler: { addEventListener: () => ({ remove() {} }) },
+      AccessibilityInfo: { setAccessibilityFocus() {} },
+      findNodeHandle: () => null,
       Pressable: "Pressable",
       Animated: {
         Value,
+        timing: (value: Value, config: { toValue: number }) => ({
+          start: (done: (event: { finished: boolean }) => void) => {
+            value.setValue(config.toValue);
+            done({ finished: true });
+          },
+        }),
         View: "Animated.View",
         spring: (
           value: Value,
           config: { toValue: number; useNativeDriver: boolean },
         ) => {
-          const entry = { ...config, started: false };
+          const entry = {
+            toValue: config.toValue,
+            useNativeDriver: config.useNativeDriver,
+            started: false,
+          };
           springs.push(entry);
           return {
             start: () => {
@@ -79,10 +109,22 @@ function setup() {
         absoluteFill: { position: "absolute" },
       },
     },
-    "react-native-safe-area-context": { SafeAreaProvider: "SafeAreaProvider" },
+    "react-native-safe-area-context": {
+      SafeAreaProvider: "SafeAreaProvider",
+      useSafeAreaInsets: () => ({
+        top: insetTop,
+        bottom: 34,
+        left: 0,
+        right: 0,
+      }),
+    },
     "../../theme/ThemeContext": {
       useTheme: () => ({
-        colors: { bg: "white", overlayBg: "black", textMuted: "gray" },
+        colors: {
+          bg: "#ffffff",
+          sheetScrim: "rgba(0,0,0,0.42)",
+          textMuted: "#746981",
+        },
       }),
     },
     "@react-navigation/native": {
@@ -100,14 +142,18 @@ function setup() {
     fileURLToPath(new URL("./WorkspaceSheetSurface.tsx", import.meta.url)),
   ).WorkspaceSheetSurface as (props: {
     onClose: () => void;
+    canClose: () => Promise<boolean>;
     children: Element;
   }) => Element;
   harness.mount(() =>
     component({
       children: child,
-      onClose: () => {
+      canClose: async () => {
         closeAttempts++;
-        if (canClose) allowedCloses++;
+        return canClose;
+      },
+      onClose: () => {
+        allowedCloses++;
       },
     }),
   );
@@ -120,6 +166,7 @@ function setup() {
   const offset = () => panel().props.style[1].transform[0].translateY as Value;
   const gesture = (dy: number, vy = 0, dx = 0): Gesture => ({ dx, dy, vy });
   return {
+    panel,
     harness,
     handlers: () => handlers,
     all,
@@ -204,7 +251,7 @@ test("a cancelled drag always springs back, including past the dismissal thresho
   );
 });
 
-test("distance or downward velocity asks guarded onClose exactly once for each released gesture", () => {
+test("distance or downward velocity asks guarded onClose exactly once for each released gesture", async () => {
   for (const release of [
     { dy: 81, vy: 0 },
     { dy: 15, vy: 0.9 },
@@ -214,31 +261,65 @@ test("distance or downward velocity asks guarded onClose exactly once for each r
     env
       .handlers()
       .onPanResponderRelease(null, env.gesture(release.dy, release.vy));
+    await env.harness.settle();
     assert.deepEqual(env.counts(), { closeAttempts: 1, allowedCloses: 1 });
-    assert.equal(env.offset().value, 0);
-    assert.equal(env.springs.length, 1);
+    assert.equal(env.offset().value, 844);
+    assert.equal(env.springs.length, 0);
   }
   const boundary = setup();
   boundary.handlers().onPanResponderRelease(null, boundary.gesture(80, 0.8));
   assert.equal(boundary.counts().closeAttempts, 0);
 });
 
-test("a navigation guard rejecting a drag dismissal leaves the panel at rest and mounted", () => {
+test("a navigation guard rejecting a drag dismissal leaves the panel at rest and mounted", async () => {
   const env = setup();
   env.blockClose();
   env.handlers().onPanResponderMove(null, env.gesture(150));
   env.handlers().onPanResponderRelease(null, env.gesture(150, 1));
+  await env.harness.settle();
   assert.deepEqual(env.counts(), { closeAttempts: 1, allowedCloses: 0 });
   assert.equal(env.offset().value, 0);
   assert.equal(env.all().includes(env.child), true);
 });
 
-test("the accessible backdrop delegates dismissal through the same guarded onClose", () => {
+test("the accessible backdrop delegates dismissal through the same guarded onClose", async () => {
   const env = setup();
   assert.equal(env.backdrop().props.accessibilityRole, "button");
   env.blockClose();
   env.backdrop().props.onPress();
+  await env.harness.settle();
   assert.deepEqual(env.counts(), { closeAttempts: 1, allowedCloses: 0 });
   assert.equal(env.all().includes(env.child), true);
-  assert.deepEqual(env.springs, []);
+  assert.equal(env.springs.length, 1);
+});
+
+test("drawer geometry clears the top safe area at small, large, short and wide native sizes", () => {
+  for (const [width, height, top] of [
+    [320, 568, 20],
+    [390, 844, 47],
+    [430, 932, 59],
+    [640, 360, 24],
+    [1024, 768, 24],
+  ]) {
+    const env = setup(false, { width: width!, height: height! }, top!);
+    assert.equal(env.panel().props.style[1].height, height! - top! - 10);
+    const handle = env
+      .all()
+      .find((node) => node.props.onMoveShouldSetPanResponder);
+    assert.ok(handle);
+    assert.equal(handle.props.style.height, 44);
+    assert.equal(env.panel().props.style[0].borderTopLeftRadius, 24);
+    env.harness.unmount();
+  }
+});
+test("reduced motion dismisses without travelling or springing and accessibility escape shares the guard", async () => {
+  const env = setup(true);
+  env.handlers().onPanResponderMove(null, env.gesture(150));
+  assert.equal(env.offset().value, 0);
+  env.blockClose();
+  env.all()[0]!.props.onAccessibilityEscape();
+  await env.harness.settle();
+  assert.deepEqual(env.counts(), { closeAttempts: 1, allowedCloses: 0 });
+  assert.equal(env.springs.length, 0);
+  assert.equal(env.all()[0]!.props.accessibilityViewIsModal, true);
 });

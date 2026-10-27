@@ -1,70 +1,199 @@
-import { useMemo, useRef, type PropsWithChildren } from "react";
+import { useWorkspaceAccessibility } from "../../lib/accessibility/workspaceAccessibility";
+import { workspaceFocus } from "../../lib/accessibility/workspaceFocus";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PropsWithChildren,
+  type RefObject,
+} from "react";
 import {
   Animated,
+  BackHandler,
   PanResponder,
   Pressable,
   StyleSheet,
+  useWindowDimensions,
   View,
 } from "react-native";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import {
+  SafeAreaProvider,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
+import { useReducedMotion } from "../../lib/accessibility/useReducedMotion";
 import { useTheme } from "../../theme/ThemeContext";
 
-/** A shared pull-up surface keeps dragging and guarded dismissal consistent. */
+export type WorkspaceSheetHandle = { dismiss: () => void };
+
+/** Handle gestures never compete with form scrolling or text selection. */
 export function WorkspaceSheetSurface({
   children,
   onClose,
-}: PropsWithChildren<{ onClose: () => void }>) {
+  canClose,
+  controller,
+  canHandleHardwareBack,
+}: PropsWithChildren<{
+  onClose: () => void;
+  canClose?: () => Promise<boolean>;
+  canHandleHardwareBack?: () => boolean;
+  controller?: RefObject<WorkspaceSheetHandle | null>;
+}>) {
   const { colors } = useTheme();
+  const { height, width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const reduced = useReducedMotion();
   const offset = useRef(new Animated.Value(0)).current;
+  const closing = useRef(false);
+  const [interacting, setInteracting] = useState(true);
+  const mounted = useRef(true);
+  const { primaryKey } = useWorkspaceAccessibility();
+  const [focusReturn] = useState(() => workspaceFocus.capture(primaryKey));
+  const dismissed = useRef(false);
+  const reset = useCallback(() => {
+    if (reduced) offset.setValue(0);
+    else
+      Animated.spring(offset, {
+        toValue: 0,
+        useNativeDriver: true,
+        overshootClamping: true,
+      }).start();
+  }, [offset, reduced]);
+  const dismiss = useCallback(async () => {
+    if (closing.current) return;
+    closing.current = true;
+    setInteracting(false);
+    let allowed = false;
+    try {
+      allowed = canClose ? await canClose() : true;
+    } catch {
+      /* A failed guard keeps the editor mounted. */
+    }
+    if (!mounted.current) return;
+    if (!allowed) {
+      closing.current = false;
+      setInteracting(true);
+      reset();
+      return;
+    }
+    if (reduced) {
+      dismissed.current = true;
+      onClose();
+      return;
+    }
+    Animated.timing(offset, {
+      toValue: height,
+      duration: 180,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished && mounted.current) {
+        dismissed.current = true;
+        onClose();
+      }
+    });
+  }, [canClose, height, offset, onClose, reduced, reset]);
+  useEffect(() => {
+    if (controller) controller.current = { dismiss: () => void dismiss() };
+    return () => {
+      if (controller) controller.current = null;
+    };
+  }, [controller, dismiss]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (dismissed.current) workspaceFocus.restore(focusReturn);
+    };
+  }, []);
+  // Register before passive child handlers so local form Back takes precedence.
+  useLayoutEffect(() => {
+    const subscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      () => {
+        if (canHandleHardwareBack && !canHandleHardwareBack()) return false;
+        void dismiss();
+        return true;
+      },
+    );
+    return () => subscription.remove();
+  }, [canHandleHardwareBack, dismiss]);
   const pan = useMemo(
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponder: (_, gesture) =>
-          gesture.dy > 8 && gesture.dy > Math.abs(gesture.dx),
-        onPanResponderMove: (_, gesture) =>
-          offset.setValue(Math.max(0, gesture.dy)),
-        onPanResponderRelease: (_, gesture) => {
-          Animated.spring(offset, {
-            toValue: 0,
-            useNativeDriver: true,
-          }).start();
-          if (gesture.dy > 80 || gesture.vy > 0.8) onClose();
+          !closing.current &&
+          gesture.dy > 8 &&
+          gesture.dy > Math.abs(gesture.dx),
+        onPanResponderMove: (_, gesture) => {
+          if (!closing.current && !reduced)
+            offset.setValue(Math.max(0, gesture.dy));
         },
-        onPanResponderTerminate: () =>
-          Animated.spring(offset, {
-            toValue: 0,
-            useNativeDriver: true,
-          }).start(),
+        onPanResponderRelease: (_, gesture) => {
+          if (gesture.dy > 80 || gesture.vy > 0.8) void dismiss();
+          else reset();
+        },
+        onPanResponderTerminate: reset,
       }),
-    [offset, onClose],
+    [dismiss, offset, reduced, reset],
   );
-  const content = (
-    <SafeAreaProvider style={styles.fill}>
-      <View {...pan.panHandlers} accessible={false} style={styles.handleArea}>
-        <View style={[styles.handle, { backgroundColor: colors.textMuted }]} />
-      </View>
-      <View style={styles.fill}>{children}</View>
-    </SafeAreaProvider>
-  );
+  const gap = insets.top + 10;
   return (
-    <View style={styles.overlay}>
+    <View
+      style={styles.overlay}
+      accessibilityViewIsModal
+      onAccessibilityEscape={() => void dismiss()}
+    >
       <View
         pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { backgroundColor: colors.overlayBg }]}
+        style={[
+          StyleSheet.absoluteFill,
+          { backgroundColor: colors.sheetScrim },
+        ]}
       />
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Dismiss drawer"
-        onPress={onClose}
-        style={styles.dismissArea}
+        onPress={() => void dismiss()}
+        style={[styles.dismissArea, { height: gap }]}
       />
       <Animated.View
+        pointerEvents={interacting ? "auto" : "none"}
+        accessible={false}
+        accessibilityLabel="Workspace drawer"
         style={[
           styles.panel,
-          { backgroundColor: colors.bg, transform: [{ translateY: offset }] },
+          {
+            height: Math.max(0, height - gap),
+            backgroundColor: colors.bg,
+            transform: [{ translateY: offset }],
+          },
         ]}
       >
-        {content}
+        <SafeAreaProvider
+          style={styles.fill}
+          initialMetrics={{
+            frame: { x: 0, y: gap, width, height: Math.max(0, height - gap) },
+            insets: {
+              top: 0,
+              left: insets.left,
+              right: insets.right,
+              bottom: insets.bottom,
+            },
+          }}
+        >
+          <View
+            {...pan.panHandlers}
+            accessible={false}
+            style={styles.handleArea}
+          >
+            <View
+              style={[styles.handle, { backgroundColor: colors.textMuted }]}
+            />
+          </View>
+          <View style={styles.fill}>{children}</View>
+        </SafeAreaProvider>
       </Animated.View>
     </View>
   );
@@ -73,25 +202,12 @@ export function WorkspaceSheetSurface({
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   overlay: { flex: 1, justifyContent: "flex-end" },
-  dismissArea: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: "8%",
-    zIndex: 1,
-  },
+  dismissArea: { position: "absolute", top: 0, left: 0, right: 0 },
   panel: {
-    height: "92%",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     overflow: "hidden",
   },
-  handleArea: {
-    height: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 1,
-  },
-  handle: { width: 36, height: 4, borderRadius: 2, opacity: 0.45 },
+  handleArea: { height: 44, alignItems: "center", justifyContent: "center" },
+  handle: { width: 36, height: 4, borderRadius: 2 },
 });

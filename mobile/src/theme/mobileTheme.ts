@@ -1,7 +1,8 @@
 // NyxID design system tokens — mobile adaptation.
 //
 // Source of truth: DESIGN.md at repo root.
-// Web (Tailwind/CSS) and mobile (StyleSheet) share the same hex values.
+// Web and mobile share semantic roles; native text tones account for the
+// native base/card backgrounds and accessibility contrast.
 // Layout-only tokens that don't apply to mobile (sidebar widths, top-bar
 // height, right-panel width) are intentionally not represented here.
 
@@ -58,6 +59,7 @@ export type ThemeColors = {
   fabBorder: string;
   overlayBg: string;
   handleBg: string;
+  sheetScrim: string;
   navActive: string;     // active nav row background — neutral white/black alpha, NEVER purple-tinted
   shadowColor: string;
   /**
@@ -94,10 +96,10 @@ const DANGER_DARK = "#f87171";
 const INFO_DARK = "#60a5fa";
 
 // ── Semantic status — light theme equivalents (saturated for white surfaces) ──
-const SUCCESS_LIGHT = "#10B981";
-const WARNING_LIGHT = "#D97706";
-const DANGER_LIGHT = "#DC2626";
-const INFO_LIGHT = "#3B82F6";
+const SUCCESS_LIGHT = "#08734d";
+const WARNING_LIGHT = "#875300";
+const DANGER_LIGHT = "#b91c1c";
+const INFO_LIGHT = "#205ab4";
 
 export const darkColors: ThemeColors = {
   // 3-layer depth — sidebar / base / surface
@@ -110,8 +112,8 @@ export const darkColors: ThemeColors = {
   // 4-level text hierarchy
   textPrimary: "#e8e4f0",
   textSecondary: "#9e96b0",
-  textMuted: "#7a7490",
-  textTertiary: "#4a4460",
+  textMuted: "#8b839f",
+  textTertiary: "#827a96",
   // Semantic
   success: SUCCESS_DARK,
   successSoft: "rgba(52, 211, 153, 0.18)",
@@ -140,6 +142,7 @@ export const darkColors: ThemeColors = {
   fabBg: "rgba(7, 6, 14, 1)",
   fabBorder: "rgba(151, 117, 250, 0.35)",
   overlayBg: "#000",
+  sheetScrim: "rgba(0,0,0,0.42)",
   handleBg: "rgba(255, 255, 255, 0.15)",
   // DESIGN.md §Usage Rules: "Hover stays neutral (bg-white/[0.03] / bg-white/[0.06])".
   navActive: "rgba(255, 255, 255, 0.06)",
@@ -163,8 +166,8 @@ export const lightColors: ThemeColors = {
   borderSoft: "#ECEAF3",
   textPrimary: "#1A1730",
   textSecondary: "#5E5875",
-  textMuted: "#8F88AB",
-  textTertiary: "#A8A0BC",
+  textMuted: "#746981",
+  textTertiary: "#746981",
   success: SUCCESS_LIGHT,
   successSoft: "rgba(16, 185, 129, 0.18)",
   info: INFO_LIGHT,
@@ -180,7 +183,7 @@ export const lightColors: ThemeColors = {
   primaryGlow: "rgba(151, 117, 250, 0.08)",
   // On light, use the saturated brand purple as text — the pale wordmark hex
   // disappears on a white card behind a 15% purple tint.
-  primaryOnTint: PRIMARY,
+  primaryOnTint: "#6d45b5",
   gradientStart: GRADIENT_START,
   gradientEnd: GRADIENT_END,
   gradientStartPressed: GRADIENT_START_PRESSED,
@@ -191,6 +194,7 @@ export const lightColors: ThemeColors = {
   fabBg: "rgba(80, 78, 93, 1)",
   fabBorder: "rgba(151, 117, 250, 0.35)",
   overlayBg: "rgba(0, 0, 0, 0.3)",
+  sheetScrim: "rgba(26,23,48,0.24)",
   handleBg: "rgba(0, 0, 0, 0.12)",
   // DESIGN.md §Usage Rules: idle/hover stays neutral. Light-mode = black-alpha,
   // matching the web pattern of `bg-black/[0.06]` on hover surfaces.
@@ -200,7 +204,7 @@ export const lightColors: ThemeColors = {
   warningTone: { bg: "rgba(217, 119, 6, 0.10)",  text: WARNING_LIGHT, border: "rgba(217, 119, 6, 0.30)" },
   dangerTone:  { bg: "rgba(220, 38, 38, 0.08)",  text: DANGER_LIGHT,  border: "rgba(220, 38, 38, 0.25)" },
   infoTone:    { bg: "rgba(59, 130, 246, 0.10)", text: INFO_LIGHT,    border: "rgba(59, 130, 246, 0.30)" },
-  primaryTone: { bg: "rgba(151, 117, 250, 0.12)", text: PRIMARY, border: "rgba(151, 117, 250, 0.30)" },
+  primaryTone: { bg: "rgba(151, 117, 250, 0.12)", text: "#6d45b5", border: "rgba(151, 117, 250, 0.30)" },
   riskHigh:   { bg: "rgba(220, 38, 38, 0.08)",  text: DANGER_LIGHT,  border: "rgba(220, 38, 38, 0.20)" },
   riskMedium: { bg: "rgba(217, 119, 6, 0.08)",  text: WARNING_LIGHT, border: "rgba(217, 119, 6, 0.20)" },
   riskLow:    { bg: "rgba(16, 185, 129, 0.08)", text: SUCCESS_LIGHT, border: "rgba(16, 185, 129, 0.20)" },

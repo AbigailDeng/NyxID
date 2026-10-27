@@ -1,3 +1,6 @@
+import { WorkspaceInteractionSurface } from "../lib/accessibility/WorkspaceInteractionSurface";
+import { useWorkspaceAccessibility } from "../lib/accessibility/workspaceAccessibility";
+import { workspaceFocus } from "../lib/accessibility/workspaceFocus";
 import {
   createContext,
   useCallback,
@@ -17,13 +20,26 @@ import type {
   NativeStackNavigationOptions,
   NativeStackNavigationProp,
 } from "@react-navigation/native-stack";
-import { Alert, BackHandler, Pressable, StyleSheet } from "react-native";
+import {
+  Alert,
+  BackHandler,
+  findNodeHandle,
+  Pressable,
+  StyleSheet,
+  View,
+} from "react-native";
 import { ChevronLeft, Menu, X } from "lucide-react-native";
 import { useTheme } from "../theme/ThemeContext";
 import type { RootStackParamList } from "./AppNavigator";
 import type { AssistantParams } from "./navigationTypes";
 
+export const WorkspaceSessionContext = createContext(true);
 export const WorkspaceSheetContext = createContext<{
+  registerDismissGuard?: (
+    id: symbol,
+    guard: () => Promise<boolean>,
+  ) => () => void;
+  dismissAuthorized?: boolean;
   rootKey: string;
   sheetKey: string;
   onClose: () => void;
@@ -54,6 +70,19 @@ export type WorkspaceNavigationGuardChange = (
 export const WorkspaceNavigationGuardContext =
   createContext<WorkspaceNavigationGuardChange>(() => {});
 
+export function WorkspaceHeaderVisibility({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const sheet = useContext(WorkspaceSheetContext);
+  return (
+    <WorkspaceInteractionSurface inSheet={Boolean(sheet)}>
+      {children}
+    </WorkspaceInteractionSurface>
+  );
+}
+
 export type WorkspaceHeaderRole = "menu" | "back";
 
 function WorkspaceHeaderButton({
@@ -70,14 +99,49 @@ function WorkspaceHeaderButton({
   label: string;
 }) {
   const { colors } = useTheme();
+  const sheet = useContext(WorkspaceSheetContext);
+  const control = useRef<View>(null);
+  const focused = useIsFocused();
+  const owner = useRef(Symbol("primary-header-control")).current;
+  useEffect(() => () => workspaceFocus.release(owner), [owner]);
+  const { sheetOpen, primaryKey } = useWorkspaceAccessibility();
+  const hidden = !focused || (sheetOpen && !sheet);
+  const primaryScope = useRef(primaryKey);
+  if (focused && !sheet && !sheetOpen) primaryScope.current = primaryKey;
+  useLayoutEffect(() => {
+    if (sheet) return;
+    workspaceFocus.register(
+      owner,
+      () => findNodeHandle(control.current),
+      !hidden,
+      primaryScope.current,
+    );
+  }, [owner, hidden, primaryKey, Boolean(sheet)]);
   return (
     <Pressable
-      onPress={onPress}
+      ref={control}
+      accessibilityElementsHidden={hidden}
+      importantForAccessibility={hidden ? "no-hide-descendants" : "auto"}
+      accessible={!hidden}
+      onPress={() => {
+        if (!sheet) workspaceFocus.invoked(owner);
+        onPress();
+      }}
+      onLayout={() => {
+        if (sheet && close)
+          workspaceFocus.focusDrawerOnce(sheet.sheetKey, () =>
+            findNodeHandle(control.current),
+          );
+      }}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled }}
       disabled={disabled}
-      style={[styles.button, disabled && styles.disabled]}
+      style={[
+        styles.button,
+        close && { borderRadius: 22, backgroundColor: colors.navActive },
+        disabled && styles.disabled,
+      ]}
     >
       {close ? (
         <X color={colors.textPrimary} size={22} />
@@ -177,6 +241,7 @@ export function useWorkspaceBack({
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const focused = useIsFocused();
+  const sessionActive = useContext(WorkspaceSessionContext);
   const onOpenMenu = useContext(WorkspaceMenuContext);
   const sheet = useContext(WorkspaceSheetContext);
   const onNavigationGuardChange = useContext(WorkspaceNavigationGuardContext);
@@ -223,8 +288,51 @@ export function useWorkspaceBack({
     sheet,
   ]);
 
+  useEffect(() => {
+    if (
+      !sessionActive ||
+      !sheet?.registerDismissGuard ||
+      (!discardOnClose && !(focused && disabled))
+    )
+      return;
+    return sheet.registerDismissGuard(guardId.current, async () => {
+      if (current.current.disabled) return false;
+      if (!discardOnClose) return true;
+      return new Promise<boolean>((resolve) => {
+        Alert.alert(
+          discardOnClose.title,
+          discardOnClose.message,
+          [
+            {
+              text: "Keep editing",
+              style: "cancel",
+              onPress: () => resolve(false),
+            },
+            {
+              text: "Discard",
+              style: "destructive",
+              onPress: () =>
+                resolve(mounted.current && !current.current.disabled),
+            },
+          ],
+          { cancelable: true, onDismiss: () => resolve(false) },
+        );
+      });
+    });
+  }, [
+    sessionActive,
+    sheet?.registerDismissGuard,
+    Boolean(discardOnClose),
+    discardOnClose?.title,
+    discardOnClose?.message,
+    disabled,
+    focused,
+  ]);
+
   usePreventRemove(
-    ((focused && (active || disabled)) || Boolean(discardOnClose)) &&
+    sessionActive &&
+      !sheet?.dismissAuthorized &&
+      ((focused && (active || disabled)) || Boolean(discardOnClose)) &&
       (!allowedRemoval || disabled),
     ({ data }) => {
       const outerDismiss =
@@ -294,6 +402,7 @@ export function useWorkspaceBack({
 const styles = StyleSheet.create({
   button: {
     minWidth: 44,
+    width: 44,
     height: 44,
     justifyContent: "center",
     alignItems: "center",

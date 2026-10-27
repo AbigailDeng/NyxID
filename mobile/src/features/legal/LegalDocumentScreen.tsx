@@ -234,7 +234,7 @@ const createMarkdownStyles = (c: ThemeColors) => ({
     color: c.textPrimary,
   },
   link: {
-    color: c.primary,
+    color: c.primaryOnTint,
   },
   code_inline: {
     color: c.textPrimary,

@@ -49,6 +49,7 @@ function setup({
   const listeners = new Set<BeforeRemove>();
   const hardware = new Set<() => boolean>();
   const guards = new Map<string, boolean>();
+  const dismissGuards = new Map<symbol, () => Promise<boolean>>();
   const guardChanges: boolean[] = [];
   const dispatched: NavigationAction[] = [];
   const dispatchPrevention: boolean[] = [];
@@ -156,6 +157,23 @@ function setup({
   });
   const mocks: Record<string, unknown> = {
     react,
+    "../lib/accessibility/WorkspaceInteractionSurface": {
+      WorkspaceInteractionSurface: "WorkspaceInteractionSurface",
+    },
+    "../lib/accessibility/workspaceAccessibility": {
+      useWorkspaceAccessibility: () => ({
+        sheetOpen: inSheet,
+        primaryKey: "chat",
+      }),
+    },
+    "../lib/accessibility/workspaceFocus": {
+      workspaceFocus: {
+        release() {},
+        invoked() {},
+        focusDrawerOnce() {},
+        register() {},
+      },
+    },
     "react/jsx-runtime": { jsx, jsxs: jsx },
     "react-native": {
       Alert: {
@@ -239,11 +257,18 @@ function setup({
     useWorkspaceBack: typeof useWorkspaceBack;
     workspaceHeaderOptions: typeof workspaceHeaderOptions;
     WorkspaceSheetContext: Context;
+    WorkspaceSessionContext: Context;
     WorkspaceMenuContext: Context;
     WorkspaceNavigationGuardContext: Context;
   };
   module.WorkspaceSheetContext.value = inSheet
     ? {
+        registerDismissGuard: (id: symbol, guard: () => Promise<boolean>) => {
+          dismissGuards.set(id, guard);
+          return () => {
+            dismissGuards.delete(id);
+          };
+        },
         rootKey: "root-stack",
         sheetKey: "workspace-sheet",
         onClose: () => {
@@ -299,6 +324,16 @@ function setup({
   dirty = true;
   flush();
   return {
+    preflight: async () => {
+      for (const guard of dismissGuards.values())
+        if (!(await guard())) return false;
+      return true;
+    },
+    setSessionActive: (active: boolean) => {
+      module.WorkspaceSessionContext.value = active;
+      dirty = true;
+      flush();
+    },
     alerts,
     dispatched,
     dispatchPrevention,
@@ -646,4 +681,44 @@ test("losing focus and unmounting release critical-write and hardware guards", (
   assert.equal(env.blocked(), false);
   assert.equal(env.hardwareBack(), false);
   assert.deepEqual(env.guardChanges, [true, false, true, false]);
+});
+
+test("surface preflight awaits the existing dirty confirmation and rejects pending writes", async () => {
+  const env = setup({
+    discardOnClose: { title: "Discard draft?", message: "Unsaved changes" },
+  });
+  const cancelled = env.preflight();
+  env.choose("Keep editing");
+  assert.equal(await cancelled, false);
+  const discarded = env.preflight();
+  env.choose("Discard");
+  assert.equal(await discarded, true);
+  env.update({ disabled: true });
+  assert.equal(await env.preflight(), false);
+  assert.equal(env.counts().localBacks, 0);
+  env.unmount();
+});
+test("a write starting while the discard alert is open blocks the pending dismissal", async () => {
+  const env = setup({
+    discardOnClose: { title: "Discard draft?", message: "Unsaved changes" },
+  });
+  const result = env.preflight();
+  env.update({ disabled: true });
+  env.choose("Discard");
+  assert.equal(await result, false);
+  env.unmount();
+});
+test("forced sign-out releases dirty and pending removal guards without a discard alert", async () => {
+  const env = setup({
+    disabled: true,
+    discardOnClose: { title: "Discard draft?", message: "Unsaved changes" },
+  });
+  env.setSessionActive(false);
+  assert.equal(env.blocked(), false);
+  assert.equal(await env.preflight(), true);
+  env.attempt(env.rootAction);
+  env.flush();
+  assert.equal(env.alerts.length, 0);
+  assert.equal(env.dispatched.length, 1);
+  env.unmount();
 });

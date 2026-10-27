@@ -1,4 +1,14 @@
-import { useCallback, useContext, useLayoutEffect, useMemo } from "react";
+import { WorkspaceInteractionSurface } from "../lib/accessibility/WorkspaceInteractionSurface";
+import { workspaceFocus } from "../lib/accessibility/workspaceFocus";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import {
   createNativeStackNavigator,
@@ -32,10 +42,15 @@ import {
 import { TermsOfServiceScreen } from "../features/legal/TermsOfServiceScreen";
 import { PrivacyPolicyScreen } from "../features/legal/PrivacyPolicyScreen";
 import { FullScreenLoading } from "../components/FullScreenLoading";
-import { WorkspaceSheetSurface } from "../components/workspace/WorkspaceSheetSurface";
+import { useReducedMotion } from "../lib/accessibility/useReducedMotion";
+import {
+  WorkspaceSheetSurface,
+  type WorkspaceSheetHandle,
+} from "../components/workspace/WorkspaceSheetSurface";
 import { useTheme } from "../theme/ThemeContext";
 import { fonts } from "../theme/designTokens";
 import {
+  WorkspaceSessionContext,
   WorkspaceMenuContext,
   WorkspaceSheetContext,
   useOpenWorkspaceChat,
@@ -103,26 +118,28 @@ function GroupChatRoute({
   route,
 }: NativeStackScreenProps<RootStackParamList, "GroupChat">) {
   return (
-    <GroupChatScreen
-      key={route.params.groupId}
-      groupId={route.params.groupId}
-      onBack={() => navigation.goBack()}
-      onSettings={() =>
-        navigation.dispatch(
-          openWorkspaceSheetAction("GroupEditor", {
-            groupId: route.params.groupId,
-          }),
-        )
-      }
-      onOpenConversation={(params) =>
-        navigation.push("AssistantContext", params)
-      }
-      onOpenAgent={(agentId) =>
-        navigation.dispatch(
-          openWorkspaceSheetAction("AgentDetail", { agentId }),
-        )
-      }
-    />
+    <WorkspaceInteractionSurface style={{ flex: 1 }}>
+      <GroupChatScreen
+        key={route.params.groupId}
+        groupId={route.params.groupId}
+        onBack={() => navigation.goBack()}
+        onSettings={() =>
+          navigation.dispatch(
+            openWorkspaceSheetAction("GroupEditor", {
+              groupId: route.params.groupId,
+            }),
+          )
+        }
+        onOpenConversation={(params) =>
+          navigation.push("AssistantContext", params)
+        }
+        onOpenAgent={(agentId) =>
+          navigation.dispatch(
+            openWorkspaceSheetAction("AgentDetail", { agentId }),
+          )
+        }
+      />
+    </WorkspaceInteractionSurface>
   );
 }
 
@@ -188,7 +205,11 @@ function AgentCreateRoute({
 function AssistantContextRoute({
   route,
 }: NativeStackScreenProps<RootStackParamList, "AssistantContext">) {
-  return <AssistantScreen contextual route={route} />;
+  return (
+    <WorkspaceInteractionSurface style={{ flex: 1 }}>
+      <AssistantScreen contextual route={route} />
+    </WorkspaceInteractionSurface>
+  );
 }
 
 function PluginsRoute({ route }: WorkspaceScreenProps<"Plugins">) {
@@ -231,27 +252,29 @@ function WorkspaceNavigator() {
   const { colors } = useTheme();
   const header = workspaceHeaderOptions({ role: "menu", onOpenMenu });
   return (
-    <ChatTabs.Navigator
-      {...workspaceRouterOptions}
-      tabBar={hideTabBar}
-      screenOptions={{
-        headerShown: true,
-        headerLeft: () => header.headerLeft?.({ canGoBack: false }),
-        headerLeftContainerStyle: { paddingLeft: 16 },
-        headerStyle: { backgroundColor: colors.bg },
-        headerTintColor: colors.textPrimary,
-        headerTitleStyle: { fontFamily: fonts.displaySemi, fontSize: 18 },
-        headerTitleAlign: "center",
-        headerShadowVisible: false,
-        sceneStyle: { backgroundColor: colors.bg },
-      }}
-    >
-      <ChatTabs.Screen
-        name="Assistant"
-        component={AssistantScreen}
-        options={{ title: "NyxID" }}
-      />
-    </ChatTabs.Navigator>
+    <WorkspaceInteractionSurface style={{ flex: 1 }}>
+      <ChatTabs.Navigator
+        {...workspaceRouterOptions}
+        tabBar={hideTabBar}
+        screenOptions={{
+          headerShown: true,
+          headerLeft: () => header.headerLeft?.({ canGoBack: false }),
+          headerLeftContainerStyle: { paddingLeft: 16 },
+          headerStyle: { backgroundColor: colors.bg },
+          headerTintColor: colors.textPrimary,
+          headerTitleStyle: { fontFamily: fonts.displaySemi, fontSize: 18 },
+          headerTitleAlign: "center",
+          headerShadowVisible: false,
+          sceneStyle: { backgroundColor: colors.bg },
+        }}
+      >
+        <ChatTabs.Screen
+          name="Assistant"
+          component={AssistantScreen}
+          options={{ title: "NyxID" }}
+        />
+      </ChatTabs.Navigator>
+    </WorkspaceInteractionSurface>
   );
 }
 
@@ -278,7 +301,7 @@ function WorkspacePages() {
         headerStyle: { backgroundColor: colors.bg },
         headerTintColor: colors.textPrimary,
         headerTitleStyle: { fontFamily: fonts.displaySemi, fontSize: 18 },
-        headerTitleAlign: "center",
+        headerTitleAlign: "left",
         headerShadowVisible: false,
         sceneStyle: { backgroundColor: colors.bg },
         lazy: true,
@@ -324,10 +347,36 @@ function WorkspaceSheetRoute({
 }: NativeStackScreenProps<RootStackParamList, "WorkspaceSheet">) {
   const { colors } = useTheme();
   const onOpenMenu = useContext(WorkspaceMenuContext);
+  const controller = useRef<WorkspaceSheetHandle | null>(null);
+  const guards = useRef(new Map<symbol, () => Promise<boolean>>());
+  const [dismissAuthorized, setDismissAuthorized] = useState(false);
+  const reducedMotion = useReducedMotion();
+  useEffect(() => () => workspaceFocus.releaseDrawer(route.key), [route.key]);
+  const registerDismissGuard = useCallback(
+    (id: symbol, guard: () => Promise<boolean>) => {
+      guards.current.set(id, guard);
+      return () => {
+        guards.current.delete(id);
+      };
+    },
+    [],
+  );
+  const canClose = useCallback(async () => {
+    for (const guard of [...guards.current.values()])
+      if (!(await guard())) return false;
+    setDismissAuthorized(true);
+    return true;
+  }, []);
   const onClose = useCallback(() => {
+    controller.current?.dismiss();
+  }, []);
+  const [finishRequested, setFinishRequested] = useState(false);
+  const finishClose = useCallback(() => setFinishRequested(true), []);
+  useEffect(() => {
+    if (!dismissAuthorized || !finishRequested) return;
     const action = dismissWorkspaceSheetAction(navigation.getState());
     if (action) navigation.dispatch(action);
-  }, [navigation]);
+  }, [navigation, dismissAuthorized, finishRequested]);
   const onOpenChat = useCallback(
     (params?: AssistantParams) => {
       const action = workspaceContextChatNavigationAction(
@@ -348,19 +397,40 @@ function WorkspaceSheetRoute({
     },
     [navigation],
   );
+  const canHandleHardwareBack = useCallback(() => {
+    const sheet = navigation
+      .getState()
+      .routes.find((item) => item.key === route.key);
+    return (sheet?.state?.routes.length ?? 1) <= 1;
+  }, [navigation, route.key]);
   const context = useMemo(
     () => ({
+      registerDismissGuard,
+      dismissAuthorized,
       rootKey: navigation.getState().key,
       sheetKey: route.key,
       onClose,
       onOpenChat,
       onOpenGroup,
     }),
-    [navigation, route.key, onClose, onOpenChat, onOpenGroup],
+    [
+      navigation,
+      route.key,
+      onClose,
+      onOpenChat,
+      onOpenGroup,
+      registerDismissGuard,
+      dismissAuthorized,
+    ],
   );
   return (
     <WorkspaceSheetContext.Provider value={context}>
-      <WorkspaceSheetSurface onClose={onClose}>
+      <WorkspaceSheetSurface
+        onClose={finishClose}
+        canClose={canClose}
+        controller={controller}
+        canHandleHardwareBack={canHandleHardwareBack}
+      >
         <SheetStack.Navigator
           initialRouteName="Pages"
           screenOptions={({ navigation }) => ({
@@ -373,7 +443,8 @@ function WorkspaceSheetRoute({
             headerStyle: { backgroundColor: colors.bg },
             headerTintColor: colors.textPrimary,
             headerTitleStyle: { fontFamily: fonts.displaySemi, fontSize: 18 },
-            headerTitleAlign: "center",
+            animation: reducedMotion ? "none" : "default",
+            headerTitleAlign: "left",
             headerShadowVisible: false,
             headerBackButtonDisplayMode: "minimal",
             contentStyle: { backgroundColor: colors.bg },
@@ -500,6 +571,7 @@ export function AppNavigator({
   onNavigationGuardChange: WorkspaceNavigationGuardChange;
 }) {
   const { isAuthenticated, isRestoring } = useAuthSession();
+  const reducedMotion = useReducedMotion();
   const { colors } = useTheme();
   if (isRestoring)
     return (
@@ -509,99 +581,105 @@ export function AppNavigator({
       />
     );
   return (
-    <WorkspaceMenuContext.Provider value={onOpenMenu}>
-      <WorkspaceNavigationGuardContext.Provider value={onNavigationGuardChange}>
-        <Stack.Navigator
-          initialRouteName={isAuthenticated ? "Workspace" : "Auth"}
-          screenOptions={{
-            headerShown: false,
-            headerStyle: { backgroundColor: colors.bg },
-            headerTintColor: colors.textPrimary,
-            headerTitleStyle: { fontFamily: fonts.displaySemi, fontSize: 18 },
-            headerShadowVisible: false,
-            contentStyle: { backgroundColor: colors.bg },
-            headerBackButtonDisplayMode: "minimal",
-          }}
+    <WorkspaceSessionContext.Provider value={isAuthenticated}>
+      <WorkspaceMenuContext.Provider value={onOpenMenu}>
+        <WorkspaceNavigationGuardContext.Provider
+          value={onNavigationGuardChange}
         >
-          {isAuthenticated ? (
-            <Stack.Group navigationKey="workspace">
-              <Stack.Screen name="Workspace" component={WorkspaceNavigator} />
+          <Stack.Navigator
+            initialRouteName={isAuthenticated ? "Workspace" : "Auth"}
+            screenOptions={{
+              headerShown: false,
+              headerStyle: { backgroundColor: colors.bg },
+              headerTintColor: colors.textPrimary,
+              headerTitleStyle: { fontFamily: fonts.displaySemi, fontSize: 18 },
+              headerShadowVisible: false,
+              contentStyle: { backgroundColor: colors.bg },
+              headerBackButtonDisplayMode: "minimal",
+            }}
+          >
+            {isAuthenticated ? (
+              <Stack.Group navigationKey="workspace">
+                <Stack.Screen name="Workspace" component={WorkspaceNavigator} />
+                <Stack.Screen
+                  name="AssistantContext"
+                  component={AssistantContextRoute}
+                  options={({ navigation }) => ({
+                    ...workspaceHeaderOptions({
+                      role: "back",
+                      onOpenMenu,
+                      onBack: navigation.goBack,
+                    }),
+                    title: "NyxID",
+                  })}
+                />
+                <Stack.Screen
+                  name="GroupChat"
+                  component={GroupChatRoute}
+                  options={({ navigation }) => ({
+                    ...workspaceHeaderOptions({
+                      role: "back",
+                      onOpenMenu,
+                      onBack: navigation.goBack,
+                    }),
+                    title: "Group",
+                  })}
+                />
+                <Stack.Screen
+                  name="WorkspaceSheet"
+                  component={WorkspaceSheetRoute}
+                  options={{
+                    presentation: "transparentModal",
+                    animation: reducedMotion ? "none" : "slide_from_bottom",
+                    gestureEnabled: false,
+                    headerShown: false,
+                    contentStyle: { backgroundColor: "transparent" },
+                  }}
+                />
+              </Stack.Group>
+            ) : (
               <Stack.Screen
-                name="AssistantContext"
-                component={AssistantContextRoute}
-                options={({ navigation }) => ({
-                  ...workspaceHeaderOptions({
-                    role: "back",
-                    onOpenMenu,
-                    onBack: navigation.goBack,
-                  }),
-                  title: "NyxID",
-                })}
+                name="Auth"
+                navigationKey="auth"
+                component={AuthHomeScreen}
+                options={{ title: "NyxID Sign In" }}
+              />
+            )}
+            <Stack.Group
+              navigationKey={isAuthenticated ? "signed-in" : "signed-out"}
+            >
+              <Stack.Screen
+                name="TermsOfService"
+                component={
+                  isAuthenticated ? SheetEntryRoute : TermsOfServiceScreen
+                }
+                options={{ title: "Terms of Service" }}
               />
               <Stack.Screen
-                name="GroupChat"
-                component={GroupChatRoute}
-                options={({ navigation }) => ({
-                  ...workspaceHeaderOptions({
-                    role: "back",
-                    onOpenMenu,
-                    onBack: navigation.goBack,
-                  }),
-                  title: "Group",
-                })}
+                name="PrivacyPolicy"
+                component={
+                  isAuthenticated ? SheetEntryRoute : PrivacyPolicyScreen
+                }
+                options={{ title: "Privacy Policy" }}
               />
               <Stack.Screen
-                name="WorkspaceSheet"
-                component={WorkspaceSheetRoute}
-                options={{
-                  presentation: "transparentModal",
-                  animation: "slide_from_bottom",
-                  gestureEnabled: false,
-                  headerShown: false,
-                  contentStyle: { backgroundColor: "transparent" },
-                }}
+                name="DeviceLogin"
+                component={
+                  isAuthenticated ? SheetEntryRoute : DeviceLoginScreen
+                }
+                options={{ title: "Approve Device Login" }}
+              />
+              <Stack.Screen
+                name="AgentKeyLogin"
+                component={
+                  isAuthenticated ? SheetEntryRoute : AgentKeyLoginScreen
+                }
+                options={{ title: "Agent Key Login" }}
               />
             </Stack.Group>
-          ) : (
-            <Stack.Screen
-              name="Auth"
-              navigationKey="auth"
-              component={AuthHomeScreen}
-              options={{ title: "NyxID Sign In" }}
-            />
-          )}
-          <Stack.Group
-            navigationKey={isAuthenticated ? "signed-in" : "signed-out"}
-          >
-            <Stack.Screen
-              name="TermsOfService"
-              component={
-                isAuthenticated ? SheetEntryRoute : TermsOfServiceScreen
-              }
-              options={{ title: "Terms of Service" }}
-            />
-            <Stack.Screen
-              name="PrivacyPolicy"
-              component={
-                isAuthenticated ? SheetEntryRoute : PrivacyPolicyScreen
-              }
-              options={{ title: "Privacy Policy" }}
-            />
-            <Stack.Screen
-              name="DeviceLogin"
-              component={isAuthenticated ? SheetEntryRoute : DeviceLoginScreen}
-              options={{ title: "Approve Device Login" }}
-            />
-            <Stack.Screen
-              name="AgentKeyLogin"
-              component={
-                isAuthenticated ? SheetEntryRoute : AgentKeyLoginScreen
-              }
-              options={{ title: "Agent Key Login" }}
-            />
-          </Stack.Group>
-        </Stack.Navigator>
-      </WorkspaceNavigationGuardContext.Provider>
-    </WorkspaceMenuContext.Provider>
+          </Stack.Navigator>
+        </WorkspaceNavigationGuardContext.Provider>
+      </WorkspaceMenuContext.Provider>
+    </WorkspaceSessionContext.Provider>
   );
 }

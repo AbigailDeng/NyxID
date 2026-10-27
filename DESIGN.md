@@ -530,3 +530,47 @@ Tooltips use at least 1000 and stay above their parent. Embedded raw Radix modal
 must provide their content layer to descendants. Avoid per-instance z-index
 classes on these primitives; date pickers and comboboxes inherit through their
 Popover/Select surface.
+
+### Native assistant workspace
+
+The React Native workspace presents supported signed-in management destinations
+in one retained pull-up stack. Personal, contextual and group conversations stay
+full-screen. See
+[the complete native route inventory](mobile/docs/NATIVE_WORKSPACE_ROUTES.md).
+
+- Drawer top is the window's safe-area top plus 10pt. Top corners are 24pt; the
+  centered 36×4pt handle has a 44pt drag region. A dedicated translucent scrim
+  leaves retained chat visible in the top strip and during transitions. Headers
+  use a left-aligned 18pt title and circular 44pt Close; nested routes add Back.
+  Forms retain async dirty/pending guards across every dismissal path. Reduced
+  motion removes stack travel and springs. No fake home indicator or native rail.
+- Native private-user messages have neutral card fill, a 1pt border, 38pt leading
+  inset and corners 12/12/3/12. Private chat omits redundant “You”; group speakers,
+  real specialist attribution, orchestration, updates, via and guidance remain.
+  Assistant prose stays unboxed. Composers have 20pt corners, transparent attach,
+  circular 44pt foreground-filled Send with a background-colored glyph, and
+  distinct Stop. The existing one-row private header stays compact; group name,
+  ownership context and settings share one header, with member details retained.
+- Settings → Display stores chat layout on this device with AsyncStorage. Column
+  maximum defaults to 758pt, clamps to actual space, and is adjustable only on
+  windows at least 600pt wide (360–1200pt range). Composer maximum defaults to the
+  existing native 120pt (80–320pt preference range) and caps against available
+  keyboard/window space, reserving transcript space down to a 44pt input. It
+  grows with content; the setting never forces blank height. Reset changes only
+  these layout values. Web storage and width/index behavior are unchanged.
+- Transcript, multiline input and horizontal attachment/recipient/member strips
+  show fades only at measured overflowing edges. Top/start cues are gentler.
+  Fades ignore pointer/accessibility input and disappear at revealed edges.
+  Transcript measurement calls the existing follow handlers first and retains
+  their drag/momentum behavior and anchors.
+- Mobile muted/tertiary tokens were corrected across their shared consumers:
+  dark `#8b839f`/`#827a96`, light `#746981` for both. Light status and tinted-brand
+  text were darkened. These affect timestamps, metadata, placeholders, section
+  labels and icon affordances throughout native management/chat; they no longer
+  rely on faint text to express secondary hierarchy. Primary branding and web
+  tokens are unchanged. Text colors have at least 4.5:1 against the native
+  base/card/cardSoft surfaces; essential drawer/composer controls meet 3:1.
+
+Native support remains portrait iPhone on iOS and Android phone, with wide
+Android windows as a secondary layout. This change does not enable iPad,
+additional orientations, RN-web, machines, backend capabilities or native voice.

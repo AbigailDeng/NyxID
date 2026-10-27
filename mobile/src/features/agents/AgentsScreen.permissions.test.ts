@@ -115,7 +115,7 @@ function setup(
         refetch: async () => {},
         data:
           queryKey[2] === "detail"
-            ? { agent, memory: [], threads: [] }
+            ? { agent: latest, memory: [], threads: [] }
             : queryKey[2] === "list"
               ? {
                   agents: [agent],
@@ -360,9 +360,9 @@ test("a new agent draft confirms Back and protects outer drawer dismissal", asyn
   state.guard().onBack();
   assert.equal(closed, 0);
   assert.equal(state.alerts[0]!.title, "Discard new agent?");
-  state.alerts[0]!.buttons
-    .find((button) => button.text === "Discard")
-    ?.onPress?.();
+  state.alerts[0]!.buttons.find(
+    (button) => button.text === "Discard",
+  )?.onPress?.();
   await state.harness.settle();
   assert.equal(closed, 1);
   assert.equal(state.calls.length, 0);
@@ -441,4 +441,22 @@ test("agent filters open in a sheet and apply only after confirmation", () => {
   state.harness.flush();
   assert.deepEqual(plain(sheet().props.value), ["destroyed"]);
   assert.equal(state.calls.length, 0);
+});
+
+test("agent details retain their actual name and personal or organization ownership heading", () => {
+  const state = setup();
+  const page = () => state.one((row) => row.type === "WorkspacePage");
+  assert.notEqual(page().props.showHeading, false);
+  assert.equal(page().props.title, "researcher");
+  assert.equal(page().props.subtitle, "Personal agent");
+  state.latest({
+    display_name: "Research specialist",
+    owner_kind: "org",
+    owner_name: "Design review",
+    org_role: "admin",
+  });
+  state.harness.render();
+  assert.equal(page().props.title, "Research specialist");
+  assert.equal(page().props.subtitle, "Design review · admin");
+  state.harness.unmount();
 });

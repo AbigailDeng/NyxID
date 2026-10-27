@@ -32,6 +32,8 @@ export function hookHarness<T>(mocks: Record<string, unknown>) {
   let renderHook: () => T;
   let value: T;
   const react = {
+    createContext: <V>(value: V) => ({ value, Provider: "ContextProvider" }),
+    useContext: <V>(context: { value: V }) => context.value,
     useRef: <V>(initial: V) => {
       const i = cursor++;
       slots[i] ??= { current: initial };
@@ -130,6 +132,8 @@ export function hookHarness<T>(mocks: Record<string, unknown>) {
           AbortController,
           URL,
           queueMicrotask,
+          requestAnimationFrame: (callback: () => void) => setTimeout(callback, 0),
+          cancelAnimationFrame: clearTimeout,
           setTimeout,
           clearTimeout,
           // Polling is not advanced by these lifecycle/terminal-refresh tests.

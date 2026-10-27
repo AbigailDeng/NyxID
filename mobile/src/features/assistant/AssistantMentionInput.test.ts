@@ -55,6 +55,23 @@ function setup(initial: Record<string, unknown> = {}) {
     ...initial,
   };
   const harness = hookHarness<Element>({
+    "../display/ChatLayoutContext": {
+      useComposerHeight: () => 120,
+      useChatColumn: () => ({
+        width: "100%",
+        maxWidth: 758,
+        alignSelf: "center",
+      }),
+    },
+    "../../components/workspace/ScrollEdgeFades": {
+      ScrollEdgeFades: "ScrollEdgeFades",
+      useScrollEdges: () => ({
+        edges: { start: false, end: false },
+        layout() {},
+        content() {},
+        scroll() {},
+      }),
+    },
     "react/jsx-runtime": {
       jsx: (type: unknown, props: unknown, key?: unknown) => ({
         type,

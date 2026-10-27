@@ -1,10 +1,10 @@
+import { OverflowScrollView } from "../../components/workspace/ScrollEdgeFades";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   View,
 } from "react-native";
@@ -33,7 +33,8 @@ export function AssistantPendingUploads({
   return (
     <>
       {files.length ? (
-        <ScrollView
+        <OverflowScrollView
+          fadeColor={colors.card}
           horizontal
           showsHorizontalScrollIndicator={false}
           style={styles.list}
@@ -121,7 +122,7 @@ export function AssistantPendingUploads({
               </View>
             );
           })}
-        </ScrollView>
+        </OverflowScrollView>
       ) : null}
       <Modal
         visible={!!preview}

@@ -1,3 +1,4 @@
+import { ChatDisplaySettings } from "../display/ChatDisplaySettings";
 import { approvalDeliveryWarning } from "./approvalDeliveryPolicy";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
@@ -641,6 +642,8 @@ export function AccountSettingsScreen({ navigation }: Props) {
             </>
           )}
         </View>
+
+        <ChatDisplaySettings />
 
         {/* Appearance card */}
         <View style={styles.card}>

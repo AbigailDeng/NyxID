@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import type { NativeStackNavigationOptions } from "@react-navigation/native-stack";
+import { useChatColumn } from "../display/ChatLayoutContext";
+import {
+  ScrollEdgeFades,
+  useScrollEdges,
+  OverflowScrollView,
+} from "../../components/workspace/ScrollEdgeFades";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -36,7 +43,10 @@ import {
   WorkspacePage,
 } from "../../components/workspace/WorkspaceUI";
 import { accountApi } from "../../lib/api/accountApi";
-import { useWorkspaceBack } from "../../app/WorkspaceHeader";
+import {
+  useWorkspaceBack,
+  WorkspaceHeaderVisibility,
+} from "../../app/WorkspaceHeader";
 import { agentsApi } from "../../lib/api/agentsApi";
 import { groupsApi } from "../../lib/api/groupsApi";
 import { getAuthEpoch } from "../../lib/auth/authEpoch";
@@ -110,6 +120,8 @@ function GroupChat({
   onOpenAgent,
 }: GroupChatScreenProps) {
   const { colors } = useTheme();
+  const chatColumn = useChatColumn();
+  const transcriptEdges = useScrollEdges();
   const chat = useGroupChat(groupId);
   const [draft, setDraft] = useState("");
   const [composerGeneration, setComposerGeneration] = useState(0);
@@ -216,7 +228,53 @@ function GroupChat({
       mounted.current = false;
     };
   }, []);
+  const groupHeaderOptions = useMemo<NativeStackNavigationOptions>(() => {
+    const settings = () => (
+      <WorkspaceHeaderVisibility>
+        <Icon
+          label="Group settings"
+          onPress={onSettings}
+          disabled={!group || chat.sending || uploads.session.sending}
+        >
+          <Settings2 size={20} color={colors.textSecondary} />
+        </Icon>
+      </WorkspaceHeaderVisibility>
+    );
+    return {
+      headerTitle: () => (
+        <WorkspaceHeaderVisibility>
+          <View style={styles.headerIdentity}>
+            <Text
+              numberOfLines={1}
+              style={[styles.headerTitle, { color: colors.textPrimary }]}
+            >
+              {group?.name ?? "Group"}
+            </Text>
+            <Text
+              numberOfLines={1}
+              style={[styles.headerSubtitle, { color: colors.textSecondary }]}
+            >
+              {group?.owner?.name ?? "Personal"} · Group
+            </Text>
+          </View>
+        </WorkspaceHeaderVisibility>
+      ),
+      headerRight: settings,
+      unstable_headerRightItems: () => [
+        { type: "custom", element: settings(), hidesSharedBackground: true },
+      ],
+    };
+  }, [
+    group?.name,
+    group?.owner?.name,
+    Boolean(group),
+    chat.sending,
+    uploads.session.sending,
+    onSettings,
+    colors,
+  ]);
   useWorkspaceBack({
+    options: groupHeaderOptions,
     active: chat.sending || uploads.session.sending,
     disabled: chat.sending || uploads.session.sending,
     defaultRole: "back",
@@ -397,23 +455,6 @@ function GroupChat({
       showHeading={false}
       scroll={false}
     >
-      <View style={styles.header}>
-        <View style={styles.fill}>
-          <Label numberOfLines={1} style={styles.heading}>
-            {group?.name ?? "Group"}
-          </Label>
-          <Label muted style={styles.small}>
-            {group?.owner?.name ?? "Personal"} · Group
-          </Label>
-        </View>
-        <Icon
-          label="Group settings"
-          onPress={onSettings}
-          disabled={!group || chat.sending || uploads.session.sending}
-        >
-          <Settings2 size={20} color={colors.textSecondary} />
-        </Icon>
-      </View>
       {!chat.online && (
         <Notice message="You're offline. Reconnect to read new messages and send." />
       )}
@@ -451,7 +492,8 @@ function GroupChat({
         </View>
       )}
       {group && (
-        <ScrollView
+        <OverflowScrollView
+          fadeColor={colors.bg}
           horizontal
           style={styles.horizontalStrip}
           showsHorizontalScrollIndicator={false}
@@ -482,92 +524,109 @@ function GroupChat({
               </Label>
             </Pressable>
           ))}
-        </ScrollView>
+        </OverflowScrollView>
       )}
-      <FlatList
-        ref={list}
-        style={styles.fill}
-        data={group ? (chat.data?.messages ?? []) : []}
-        keyExtractor={(item) => item.id}
-        ItemSeparatorComponent={GroupSeparator}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        maintainVisibleContentPosition={
-          stableTranscript && !transcriptScroll.following
-            ? { minIndexForVisible: 0 }
-            : undefined
-        }
-        contentContainerStyle={styles.transcript}
-        {...transcriptScroll.listProps}
-        ListHeaderComponent={
-          chat.data?.before_seq ? (
-            <ActionButton
-              label="Load earlier messages"
-              variant="secondary"
-              loading={chat.loadingOlder}
-              disabled={blocked}
-              onPress={() => {
+      <View style={[styles.fill, chatColumn]}>
+        <FlatList
+          ref={list}
+          style={styles.fill}
+          data={group ? (chat.data?.messages ?? []) : []}
+          keyExtractor={(item) => item.id}
+          ItemSeparatorComponent={GroupSeparator}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          maintainVisibleContentPosition={
+            stableTranscript && !transcriptScroll.following
+              ? { minIndexForVisible: 0 }
+              : undefined
+          }
+          contentContainerStyle={styles.transcript}
+          {...transcriptScroll.listProps}
+          onLayout={(event) => {
+            transcriptScroll.listProps.onLayout(event);
+            transcriptEdges.layout(event.nativeEvent.layout.height);
+          }}
+          onContentSizeChange={(width, height) => {
+            transcriptScroll.listProps.onContentSizeChange(width, height);
+            transcriptEdges.content(height);
+          }}
+          onScroll={(event) => {
+            transcriptScroll.listProps.onScroll(event);
+            transcriptEdges.scroll(event.nativeEvent.contentOffset.y);
+          }}
+          ListHeaderComponent={
+            chat.data?.before_seq ? (
+              <ActionButton
+                label="Load earlier messages"
+                variant="secondary"
+                loading={chat.loadingOlder}
+                disabled={blocked}
+                onPress={() => {
+                  transcriptScroll.pause();
+                  void chat.loadOlder();
+                }}
+              />
+            ) : null
+          }
+          ListHeaderComponentStyle={styles.historyHeader}
+          ListEmptyComponent={
+            chat.isPending ? (
+              <ActivityIndicator
+                accessibilityLabel="Loading group"
+                color={colors.primary}
+              />
+            ) : group ? (
+              <View style={styles.empty}>
+                <Users size={32} color={colors.primaryOnTint} />
+                <Label style={styles.heading}>Work together</Label>
+                <Label muted>
+                  Say hello. @mention an agent to ask it directly.
+                </Label>
+              </View>
+            ) : null
+          }
+          renderItem={({ item }) => (
+            <GroupMessage
+              group={group}
+              message={item}
+              title={title}
+              onOpenAgent={
+                chat.sending || uploads.session.sending
+                  ? undefined
+                  : onOpenAgent
+              }
+              feedbackEnabled={feedbackEnabled}
+              onFeedback={(vote) => void feedback(item.id, vote)}
+              onComment={() => {
+                if (!feedbackEnabled || !chat.available()) return;
                 transcriptScroll.pause();
-                void chat.loadOlder();
+                setFeedbackDraft({
+                  messageId: item.id,
+                  vote: item.feedback?.vote,
+                  comment: item.feedback?.comment ?? "",
+                });
+              }}
+              onDisclosure={() => {
+                transcriptScroll.pause();
               }}
             />
-          ) : null
-        }
-        ListHeaderComponentStyle={styles.historyHeader}
-        ListEmptyComponent={
-          chat.isPending ? (
-            <ActivityIndicator
-              accessibilityLabel="Loading group"
-              color={colors.primary}
-            />
-          ) : group ? (
-            <View style={styles.empty}>
-              <Users size={32} color={colors.primaryOnTint} />
-              <Label style={styles.heading}>Work together</Label>
-              <Label muted>
-                Say hello. @mention an agent to ask it directly.
-              </Label>
-            </View>
-          ) : null
-        }
-        renderItem={({ item }) => (
-          <GroupMessage
-            group={group}
-            message={item}
-            title={title}
-            onOpenAgent={
-              chat.sending || uploads.session.sending ? undefined : onOpenAgent
-            }
-            feedbackEnabled={feedbackEnabled}
-            onFeedback={(vote) => void feedback(item.id, vote)}
-            onComment={() => {
-              if (!feedbackEnabled || !chat.available()) return;
-              transcriptScroll.pause();
-              setFeedbackDraft({
-                messageId: item.id,
-                vote: item.feedback?.vote,
-                comment: item.feedback?.comment ?? "",
-              });
-            }}
-            onDisclosure={() => {
-              transcriptScroll.pause();
-            }}
-          />
-        )}
-        ListFooterComponent={
-          working.length ? (
-            <View style={styles.working}>
-              <ActivityIndicator size="small" color={colors.primary} />
-              <Label muted>
-                {working
-                  .map((member) => title(member.id, member.name))
-                  .join(", ")}{" "}
-                working…
-              </Label>
-            </View>
-          ) : null
-        }
-      />
+          )}
+          ListFooterComponent={
+            working.length ? (
+              <View style={styles.working}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Label muted>
+                  {working
+                    .map((member) => title(member.id, member.name))
+                    .join(", ")}{" "}
+                  working…
+                </Label>
+              </View>
+            ) : null
+          }
+        />
+        <ScrollEdgeFades edges={transcriptEdges.edges} color={colors.bg} />
+      </View>
       {!!group && !!chat.data?.pending_actions.length && (
         <ScrollView
           style={styles.pending}
@@ -688,8 +747,15 @@ function GroupChat({
         </ScrollView>
       )}
       {group && (
-        <View style={[styles.composerArea, { borderColor: colors.border }]}>
-          <ScrollView
+        <View
+          style={[
+            styles.composerArea,
+            chatColumn,
+            { borderColor: colors.border },
+          ]}
+        >
+          <OverflowScrollView
+            fadeColor={colors.bg}
             horizontal
             style={styles.horizontalStrip}
             keyboardShouldPersistTaps="handled"
@@ -737,7 +803,7 @@ function GroupChat({
                 </Label>
               </Pressable>
             )}
-          </ScrollView>
+          </OverflowScrollView>
           {!recipients.ids.length && (
             <Label style={[styles.small, { color: colors.danger }]}>
               Choose at least one recipient.
@@ -800,10 +866,7 @@ function GroupChat({
               {chat.sending ? (
                 <ActivityIndicator color={colors.primary} />
               ) : (
-                <Send
-                  size={20}
-                  color={canSend ? colors.primaryOnTint : colors.textMuted}
-                />
+                <Send size={20} color={colors.bg} />
               )}
             </Icon>
           </View>
@@ -1013,7 +1076,11 @@ function GroupMessage({
           backgroundColor: colors.card,
           borderColor: colors.border,
           borderWidth: 1,
-          borderRadius: radius.lg,
+          borderTopLeftRadius: 12,
+          borderTopRightRadius: 12,
+          borderBottomRightRadius: 3,
+          borderBottomLeftRadius: 12,
+          marginLeft: 38,
           alignSelf: "flex-end",
         },
       ]}
@@ -1167,6 +1234,8 @@ function Icon({
   onPress: () => void;
   children: React.ReactNode;
 }) {
+  const { colors } = useTheme();
+  const send = label === "Send group message";
   return (
     <Pressable
       accessibilityRole="button"
@@ -1174,7 +1243,11 @@ function Icon({
       accessibilityState={{ disabled: !!disabled }}
       disabled={disabled}
       onPress={onPress}
-      style={[styles.icon, { opacity: disabled ? 0.4 : 1 }]}
+      style={[
+        styles.icon,
+        send && { backgroundColor: colors.textPrimary, borderRadius: 22 },
+        { opacity: disabled ? 0.4 : 1 },
+      ]}
     >
       {children}
     </Pressable>
@@ -1193,6 +1266,14 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
   fill: { flex: 1, minWidth: 0 },
+  headerIdentity: {
+    maxWidth: 220,
+    minHeight: 44,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  headerTitle: { fontFamily: fonts.bodySemi, fontSize: 16 },
+  headerSubtitle: { fontFamily: fonts.bodyRegular, fontSize: 10 },
   header: { flexDirection: "row", alignItems: "center", gap: 8 },
   heading: { fontFamily: fonts.displaySemi, fontSize: 18 },
   small: { fontSize: 11, lineHeight: 17 },

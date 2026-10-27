@@ -137,6 +137,23 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     },
   };
   const harness = hookHarness<Element>({
+    "../display/ChatLayoutContext": {
+      useComposerHeight: () => 120,
+      useChatColumn: () => ({
+        width: "100%",
+        maxWidth: 758,
+        alignSelf: "center",
+      }),
+    },
+    "../../components/workspace/ScrollEdgeFades": {
+      ScrollEdgeFades: "ScrollEdgeFades",
+      useScrollEdges: () => ({
+        edges: { start: false, end: false },
+        layout: (height: number) => events.push(["fade-layout", height]),
+        content: (height: number) => events.push(["fade-content", height]),
+        scroll: (offset: number) => events.push(["fade-scroll", offset]),
+      }),
+    },
     "react/jsx-runtime": {
       Fragment: "Fragment",
       jsx: (type: unknown, props: unknown, key?: unknown) => ({
@@ -200,7 +217,10 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
         "Mic",
       ].map((name) => [name, name]),
     ),
-    "../../app/WorkspaceHeader": { useWorkspaceBack: () => {} },
+    "../../app/WorkspaceHeader": {
+      useWorkspaceBack: () => {},
+      WorkspaceHeaderVisibility: "WorkspaceHeaderVisibility",
+    },
     "../../app/navigationHierarchy": {},
     "../../components/workspace/WorkspaceUI": Object.fromEntries(
       ["WorkspacePage", "ActionButton", "Card", "Field", "Label", "Notice"].map(
@@ -213,7 +233,15 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     "./useTranscriptScrollFollow": {
       useTranscriptScrollFollow: () => ({
         following: true,
-        listProps: {},
+        listProps: {
+          onLayout: (event: any) =>
+            events.push(["follow-layout", event.nativeEvent.layout.height]),
+          onContentSizeChange: (_width: number, height: number) =>
+            events.push(["follow-content", height]),
+          onScroll: (event: any) =>
+            events.push(["follow-scroll", event.nativeEvent.contentOffset.y]),
+          onScrollBeginDrag: () => events.push(["follow-drag"]),
+        },
         follow: () => {},
         pause: () => {},
       }),
@@ -406,7 +434,7 @@ test("voice and transcript retain distinct sibling identities for both adopted d
     await x.harness.settle();
     const children = x.harness.value().props.children as Element[];
     const keyed = children.filter((child) => child?.key != null);
-    assert.ok(keyed.some((child) => child.type === "FlatList"));
+    assert.ok(keyed.some((child) => child.key === "transcript-column"));
     assert.ok(
       keyed.some((child) => child.type === "AssistantVoiceConversation"),
     );
@@ -668,5 +696,59 @@ test("changing the selected chat removes its previous voice surface", async () =
   x.harness.render();
   assert.equal(x.voice(), undefined);
   assert.ok(x.button("Open voice call"));
+  x.harness.unmount();
+});
+
+test("edge measurements run after transcript follow handlers and preserve drag ownership", () => {
+  const x = setup(A);
+  const list = x.all().find((node) => node.type === "FlatList")!;
+  list.props.onLayout({ nativeEvent: { layout: { height: 500 } } });
+  list.props.onContentSizeChange(350, 900);
+  list.props.onScroll({ nativeEvent: { contentOffset: { y: 100 } } });
+  list.props.onScrollBeginDrag();
+  assert.deepEqual(
+    x.events.filter(
+      ([name]) =>
+        typeof name === "string" &&
+        (name.startsWith("follow-") || name.startsWith("fade-")),
+    ),
+    [
+      ["follow-layout", 500],
+      ["fade-layout", 500],
+      ["follow-content", 900],
+      ["fade-content", 900],
+      ["follow-scroll", 100],
+      ["fade-scroll", 100],
+      ["follow-drag"],
+    ],
+  );
+  x.harness.unmount();
+});
+
+test("private user attribution joins only real via and steering context", () => {
+  const x = setup(A, false);
+  const render = x.all().find((node) => node.type === "FlatList")!.props
+    .renderItem;
+  const base = {
+    id: "message",
+    seq: 1,
+    role: "user",
+    text: "Continue",
+    activities: [],
+    attachments: [],
+    created_at: "2026-10-27T00:00:00Z",
+  };
+  for (const [extra, expected] of [
+    [{}, undefined],
+    [{ steering: true }, "guidance"],
+    [{ via: "Slack", steering: true }, "Slack · guidance"],
+    [{ via: "Slack" }, "Slack"],
+  ] as const) {
+    const row = expand(render({ item: { ...base, ...extra }, index: 0 }));
+    const labels = elements(row)
+      .filter((node) => node.type === "Label" && !node.props.mono)
+      .map((node) => node.props.children.join(""));
+    assert.deepEqual(labels, expected ? [expected] : []);
+  }
   x.harness.unmount();
 });

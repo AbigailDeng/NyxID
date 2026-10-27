@@ -133,7 +133,7 @@ export function AgentModelField({
                   onPress={close}
                   style={styles.cancel}
                 >
-                  <Label style={{ color: colors.primary }}>Cancel</Label>
+                  <Label style={{ color: colors.primaryOnTint }}>Cancel</Label>
                 </Pressable>
               </View>
               <View style={styles.search}>

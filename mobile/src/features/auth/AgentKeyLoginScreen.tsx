@@ -98,15 +98,18 @@ export function AgentKeyLoginScreen({ navigation, route }: Props) {
   const [now, setNow] = useState(Date.now);
   const [pending, setPending] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const stepUp = useMfaStepUp(
+    `${flow}:${mint}:${code}:${isAuthenticated}:${step}`,
+  );
   useWorkspaceBack({
     active: inWorkspaceSheet && scanning,
+    disabled: pending || stepUp.busy,
     defaultRole: "back",
     options: { headerShown: inWorkspaceSheet },
     label: "Back to login",
     onBack: () => setScanning(false),
   });
   const [error, setError] = useState<string | null>(null);
-  const stepUp = useMfaStepUp(`${flow}:${mint}:${code}:${isAuthenticated}:${step}`);
   const lastAction = useRef(0);
   const generation = useRef(0);
   const previousMode = useRef({ flow, mint });
@@ -165,7 +168,8 @@ export function AgentKeyLoginScreen({ navigation, route }: Props) {
     return () => clearInterval(timer);
   }, [deadline, pending, finish]);
   async function act(action: () => Promise<void>, verifiedRetry = false) {
-    if (pending || (!verifiedRetry && Date.now() - lastAction.current < 750)) return;
+    if (pending || (!verifiedRetry && Date.now() - lastAction.current < 750))
+      return;
     lastAction.current = Date.now();
     setPending(true);
     setError(null);
@@ -294,7 +298,21 @@ export function AgentKeyLoginScreen({ navigation, route }: Props) {
       )
     : null;
   if (stepUp.prompt) {
-    return <ScreenContainer><ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">{stepUp.prompt}</ScrollView></ScreenContainer>;
+    return (
+      <ScreenContainer>
+        <KeyboardAvoidingView
+          style={styles.fill}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <ScrollView
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+          >
+            {stepUp.prompt}
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </ScreenContainer>
+    );
   }
   return (
     <ScreenContainer>

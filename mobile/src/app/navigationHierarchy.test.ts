@@ -22,7 +22,9 @@ import {
   workspaceSharedEntryNavigationAction,
 } from "./navigationHierarchy";
 
-const rootRouter = hydratedTestRouter(StackRouter({ initialRouteName: "Workspace" }));
+const rootRouter = hydratedTestRouter(
+  StackRouter({ initialRouteName: "Workspace" }),
+);
 const rootOptions = {
   routeNames: Object.keys(navigationLinkingConfig.screens ?? {}),
   routeParamList: {},
@@ -47,13 +49,18 @@ const panelOptions = {
   routeParamList: {},
   routeGetIdList: {},
 };
-const sheetRouter = hydratedTestRouter(StackRouter({ initialRouteName: "Pages" }));
+const sheetRouter = hydratedTestRouter(
+  StackRouter({ initialRouteName: "Pages" }),
+);
 const sheetOptions = {
   routeNames: [
     "Pages",
     "AgentCreate",
     "AgentDetail",
     "GroupEditor",
+    "ServiceSetup",
+    "AgentSkills",
+    "ActivityDetail",
     "AutomationDetail",
     "AutomationEditor",
     "AutomationRuns",
@@ -660,4 +667,56 @@ test("shared-entry redirection ignores signed-out or already-consumed root entri
     workspaceSharedEntryNavigationAction(signedOut, "DeviceLogin", {}),
     null,
   );
+});
+
+test("every registered management screen opens one drawer above the exact retained chat", () => {
+  const caller = fixture();
+  const entries = [
+    ["AgentCreate", undefined],
+    ["AgentDetail", { agentId: "specialist" }],
+    ["GroupEditor", { groupId: "group" }],
+    ["ServiceSetup", { catalogSlug: "docs" }],
+    ["AgentSkills", { agentId: "specialist" }],
+    ["AutomationDetail", { id: "watch" }],
+    ["AutomationEditor", { agentId: "specialist" }],
+    ["AutomationRuns", { id: "watch" }],
+    ["AutomationPreferences", undefined],
+    ["ActivityDetail", { challengeId: "challenge" }],
+    ["AccountSecurity", undefined],
+    ["DeviceLogin", { user_code: "ABCD-EFGH" }],
+    ["AgentKeyLogin", { user_code: "ABCD-EFGH" }],
+    ["TermsOfService", undefined],
+    ["PrivacyPolicy", undefined],
+  ] as const;
+  for (const [name, params] of entries) {
+    const opened = apply(caller, openWorkspaceSheetAction(name, params));
+    assert.equal(
+      opened.routes.filter((route) => route.name === "WorkspaceSheet").length,
+      1,
+    );
+    assert.equal(opened.routes[0], caller.routes[0]);
+    assert.deepEqual(
+      apply(opened, dismissWorkspaceSheetAction(opened)).routes,
+      caller.routes,
+    );
+  }
+});
+test("a cold ServiceSetup drawer returns to Plugins with the retained chat underneath", () => {
+  const partial = withWorkspaceFallback({
+    routes: [
+      {
+        name: "WorkspaceSheet",
+        state: {
+          routes: [
+            { name: "Pages" },
+            { name: "ServiceSetup", params: { catalogSlug: "docs" } },
+          ],
+        },
+      },
+    ],
+  });
+  assert.ok(partial);
+  const sheet = partial.routes.find((route) => route.name === "WorkspaceSheet");
+  assert.equal(sheet?.state?.routes[0]?.state?.routes[0]?.name, "Plugins");
+  assert.equal(partial.routes[0]?.name, "Workspace");
 });

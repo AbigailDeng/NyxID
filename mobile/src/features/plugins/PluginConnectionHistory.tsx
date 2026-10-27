@@ -116,7 +116,7 @@ export function PluginConnectionHistory({ serviceId }: { serviceId: string }) {
   return (
     <View style={styles.stack}>
       <Card>
-        <Label style={{ color: colors.primary, fontFamily: fonts.bodySemi }}>
+        <Label style={{ color: colors.primaryOnTint, fontFamily: fonts.bodySemi }}>
           ● Metadata only
         </Label>
         <Label style={styles.title}>Connection history</Label>

@@ -1,4 +1,10 @@
 import "react-native-gesture-handler";
+import {
+  WorkspaceAccessibilityContext,
+  workspaceAccessibilityState,
+  type WorkspaceAccessibility,
+} from "../lib/accessibility/workspaceAccessibility";
+import { workspaceFocus } from "../lib/accessibility/workspaceFocus";
 import { StatusBar } from "expo-status-bar";
 import * as Notifications from "expo-notifications";
 import * as SplashScreen from "expo-splash-screen";
@@ -80,6 +86,7 @@ import {
   WorkspaceDrawer,
   type WorkspaceRoute,
 } from "../components/workspace/WorkspaceDrawer";
+import { ChatLayoutProvider } from "../features/display/ChatLayoutContext";
 import { ThemeProvider, useTheme } from "../theme/ThemeContext";
 import {
   activeWorkspaceChatTarget,
@@ -427,20 +434,22 @@ export default function App() {
         <SafeAreaProvider>
           <QueryClientProvider client={queryClient}>
             <ThemeProvider>
-              <MobileConsentProvider>
-                <AuthSessionProvider>
-                  <ThemedAppShell
-                    navigationRef={navigationRef}
-                    currentRouteName={currentRouteName}
-                    setCurrentRouteName={setCurrentRouteName}
-                    flushPendingChallengeTapNavigation={
-                      flushPendingChallengeTapNavigation
-                    }
-                    onNavigationGuardChange={onNavigationGuardChange}
-                    pushToast={pushToast}
-                  />
-                </AuthSessionProvider>
-              </MobileConsentProvider>
+              <ChatLayoutProvider>
+                <MobileConsentProvider>
+                  <AuthSessionProvider>
+                    <ThemedAppShell
+                      navigationRef={navigationRef}
+                      currentRouteName={currentRouteName}
+                      setCurrentRouteName={setCurrentRouteName}
+                      flushPendingChallengeTapNavigation={
+                        flushPendingChallengeTapNavigation
+                      }
+                      onNavigationGuardChange={onNavigationGuardChange}
+                      pushToast={pushToast}
+                    />
+                  </AuthSessionProvider>
+                </MobileConsentProvider>
+              </ChatLayoutProvider>
             </ThemeProvider>
           </QueryClientProvider>
         </SafeAreaProvider>
@@ -472,7 +481,13 @@ function ThemedAppShell({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const pendingDrawerNavigation = useRef<(() => void) | undefined>(undefined);
   const [currentChat, setCurrentChat] = useState<WorkspaceChatTarget>();
+  const [accessibility, setAccessibility] = useState<WorkspaceAccessibility>({
+    sheetOpen: false,
+  });
   const trackCurrentRoute = () => {
+    const next = workspaceAccessibilityState(navigationRef.getRootState());
+    workspaceFocus.context(next.primaryKey, next.sheetOpen);
+    setAccessibility(next);
     setCurrentRouteName(getActiveRouteName(navigationRef.getRootState()));
     setCurrentChat(activeWorkspaceChatTarget(navigationRef.getCurrentRoute()));
   };
@@ -480,6 +495,7 @@ function ThemedAppShell({
     if (!isAuthenticated) {
       pendingDrawerNavigation.current = undefined;
       setDrawerOpen(false);
+      workspaceFocus.context(undefined, false);
     }
   }, [isAuthenticated]);
   // Finish dismissing the menu's native modal before presenting another one.
@@ -529,10 +545,12 @@ function ThemedAppShell({
         }}
       >
         <StatusBar style={mode === "dark" ? "light" : "dark"} />
-        <AppNavigator
-          onOpenMenu={() => setDrawerOpen(true)}
-          onNavigationGuardChange={onNavigationGuardChange}
-        />
+        <WorkspaceAccessibilityContext.Provider value={accessibility}>
+          <AppNavigator
+            onOpenMenu={() => setDrawerOpen(true)}
+            onNavigationGuardChange={onNavigationGuardChange}
+          />
+        </WorkspaceAccessibilityContext.Provider>
       </NavigationContainer>
       {/* ToastOverlay anchors to `top: 0` of its parent and relies on the
           screen's SafeAreaView for inset. Mounted globally it has no such

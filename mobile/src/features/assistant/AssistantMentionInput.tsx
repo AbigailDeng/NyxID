@@ -1,3 +1,8 @@
+import { useComposerHeight } from "../display/ChatLayoutContext";
+import {
+  ScrollEdgeFades,
+  useScrollEdges,
+} from "../../components/workspace/ScrollEdgeFades";
 import { useEffect, useRef, useState } from "react";
 import {
   Pressable,
@@ -52,6 +57,8 @@ export function AssistantMentionInput({
   style?: StyleProp<TextStyle>;
 }) {
   const { colors } = useTheme();
+  const maxHeight = useComposerHeight();
+  const overflow = useScrollEdges();
   const input = useRef<TextInput>(null);
   const mounted = useRef(true);
   const end = { start: value.length, end: value.length };
@@ -216,65 +223,80 @@ export function AssistantMentionInput({
           </ScrollView>
         </View>
       ) : null}
-      <TextInput
-        key={revision}
-        ref={input}
-        accessibilityLabel={accessibilityLabel}
-        value={value}
-        editable={editable}
-        placeholder={placeholder}
-        placeholderTextColor={colors.textMuted}
-        selectionColor={colors.primary}
-        multiline
-        maxLength={32768}
-        autoFocus={focused && editable}
-        selection={
-          forcedCursor?.revision === revision
-            ? forcedCursor.selection
-            : undefined
-        }
-        onFocus={() => {
-          if (current()) setFocused(true);
-        }}
-        onBlur={() => {
-          if (mounted.current && scope.current.revision === revision)
-            setFocused(false);
-        }}
-        onChangeText={(text) => {
-          if (!current()) return;
-          const previous = scope.current.value;
-          const previousSelection = scope.current.selection;
-          const position = Math.min(
-            text.length,
-            Math.max(
-              0,
-              previousSelection.start +
-                text.length -
-                (previous.length -
-                  (previousSelection.end - previousSelection.start)),
-            ),
-          );
-          const nextSelection = { start: position, end: position };
-          scope.current.emitted = text;
-          scope.current.selection = nextSelection;
-          setCursor({ revision, selection: nextSelection });
-          setForcedCursor(null);
-          live.current.onChangeText(text);
-        }}
-        onSelectionChange={({ nativeEvent }) => {
-          if (!current()) return;
-          const nextSelection = nativeEvent.selection;
-          scope.current.selection = nextSelection;
-          setCursor({ revision, selection: nextSelection });
-          if (
-            forcedCursor?.revision === revision &&
-            forcedCursor.selection.start === nextSelection.start &&
-            forcedCursor.selection.end === nextSelection.end
-          )
+      <View style={styles.inputFrame}>
+        <TextInput
+          key={revision}
+          ref={input}
+          accessibilityLabel={accessibilityLabel}
+          value={value}
+          editable={editable}
+          placeholder={placeholder}
+          placeholderTextColor={colors.textMuted}
+          selectionColor={colors.primary}
+          multiline
+          maxLength={32768}
+          autoFocus={focused && editable}
+          selection={
+            forcedCursor?.revision === revision
+              ? forcedCursor.selection
+              : undefined
+          }
+          onFocus={() => {
+            if (current()) setFocused(true);
+          }}
+          onBlur={() => {
+            if (mounted.current && scope.current.revision === revision)
+              setFocused(false);
+          }}
+          onChangeText={(text) => {
+            if (!current()) return;
+            const previous = scope.current.value;
+            const previousSelection = scope.current.selection;
+            const position = Math.min(
+              text.length,
+              Math.max(
+                0,
+                previousSelection.start +
+                  text.length -
+                  (previous.length -
+                    (previousSelection.end - previousSelection.start)),
+              ),
+            );
+            const nextSelection = { start: position, end: position };
+            scope.current.emitted = text;
+            scope.current.selection = nextSelection;
+            setCursor({ revision, selection: nextSelection });
             setForcedCursor(null);
-        }}
-        style={[styles.input, { color: colors.textPrimary }, style]}
-      />
+            live.current.onChangeText(text);
+          }}
+          onSelectionChange={({ nativeEvent }) => {
+            if (!current()) return;
+            const nextSelection = nativeEvent.selection;
+            scope.current.selection = nextSelection;
+            setCursor({ revision, selection: nextSelection });
+            if (
+              forcedCursor?.revision === revision &&
+              forcedCursor.selection.start === nextSelection.start &&
+              forcedCursor.selection.end === nextSelection.end
+            )
+              setForcedCursor(null);
+          }}
+          onLayout={(event) => overflow.layout(event.nativeEvent.layout.height)}
+          onContentSizeChange={(event) =>
+            overflow.content(event.nativeEvent.contentSize.height)
+          }
+          onScroll={(event) =>
+            overflow.scroll(event.nativeEvent.contentOffset.y)
+          }
+          style={[
+            styles.input,
+            { color: colors.textPrimary },
+            style,
+            { maxHeight },
+          ]}
+        />
+        <ScrollEdgeFades edges={overflow.edges} color={colors.card} />
+      </View>
       {mentions.length ? (
         <Pressable
           accessibilityRole="button"
@@ -314,8 +336,8 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     position: "relative",
   },
+  inputFrame: { flex: 1, minWidth: 0 },
   input: {
-    flex: 1,
     minWidth: 0,
     minHeight: 44,
     maxHeight: 120,

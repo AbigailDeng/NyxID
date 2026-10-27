@@ -1,3 +1,4 @@
+import { workspaceAccessibilityState } from "../lib/accessibility/workspaceAccessibility";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { URL, fileURLToPath } from "node:url";
@@ -178,6 +179,11 @@ function setup() {
         "WorkspaceDrawer",
       ].map((name) => [name, name]),
     ),
+    WorkspaceAccessibilityContext: {
+      Provider: "WorkspaceAccessibilityProvider",
+    },
+    workspaceAccessibilityState,
+    workspaceFocus: { context() {} },
     appLinking: {},
     pushToastStyles: { overlay: {} },
     workspaceNavigateAction,

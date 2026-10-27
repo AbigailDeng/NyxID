@@ -332,7 +332,7 @@ function GroupEditor({
     );
   }
   return (
-    <WorkspacePage title={groupId ? "Group settings" : "Create group"}>
+    <WorkspacePage showHeading={false} title={groupId ? "Group settings" : "Create group"}>
       {error && <Notice message={error} tone="error" />}
       {(agents.isPending || (!!groupId && detail.isPending)) && (
         <ActivityIndicator

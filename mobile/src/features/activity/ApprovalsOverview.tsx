@@ -338,7 +338,7 @@ const createStyles = (c: ThemeColors) =>
       textAlign: "center",
     },
     item: { marginBottom: spacing.lg },
-    linkText: { ...typeScale.label, color: c.primary },
+    linkText: { ...typeScale.label, color: c.primaryOnTint },
     textButton: {
       minHeight: 44,
       justifyContent: "center",

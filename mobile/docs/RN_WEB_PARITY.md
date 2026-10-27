@@ -34,7 +34,7 @@ Backend contracts remain in [NyxAgent handlers](../../backend/src/handlers/assis
 - Disconnecting the mobile SSE subscription does not resend the POST. Existing NyxAgent durable execution may continue; recovery reads history before allowing further work. Uncertain sends are not automatically replayed. This is not a guarantee that mobile SSE/audio stays alive in the background.
 - Shared OAuth grant removal is not silently cascaded. Error `11500` offers an explicit token-scope single-service removal path, subject to server support. Full sibling-grant cascade review is a follow-on UI.
 - **Password change is unavailable without backend work.** [Web Settings](../../frontend/src/pages/settings.tsx) explicitly says `/auth/password/change` is not implemented; its existing form is ahead of backend integration. There is no working password-change path to port in this increment. Earlier feasibility wording that included password change was too broad.
-- Real verification/reset email delivery and verification-email resend are incomplete. Recovery codes can be shown when first generated, but recovery-code login/consumption/re-reading/regeneration are not implemented server contracts. These are not included as working RN flows.
+- Real verification/reset email delivery and verification-email resend are incomplete. Main’s password/social MFA challenges accept authenticator or single-use recovery codes, and default-off `auth:mobile-mfa` gates signed-in authenticator/recovery step-up. Codes and pending retries are transient, account-fenced and cleared on background/dismissal; verification never resubmits the first-factor password. Bad-code 401s preserve the signed-in session. Recovery-code re-reading/regeneration is not presented as an included flow.
 - OAuth/push/Universal Links/payment/voice still depend on their documented deployment and native configuration. Closing a browser alone is not proof of authorization or payment completion. Native voice admission compatibility is not established.
 
 ## Follow-on frontend work
@@ -47,3 +47,24 @@ The following existing Web capabilities are **not yet migrated** by this first i
 - Credential Nodes and SSH management/native terminal, specialized device-code/BYO OAuth/SSH connection setup, OAuth scope editing and full shared-grant cascade review. These currently require the corresponding Web setup.
 
 Artifacts/Assistant Activity/folder placeholders are not treated as new durable backend resources. Machines remain excluded. The password-change correction above takes precedence over the earlier design feasibility assessment.
+
+## Native UI alignment after main integration
+
+The [native route inventory](NATIVE_WORKSPACE_ROUTES.md) enumerates every module,
+management stack registration, shared auth/legal entry, cold fallback and
+challenge path. One retained management drawer adopts safe-area-top +10pt,
+24pt corners, a 36×4pt handle in a 44pt drag target, left-aligned 18pt title,
+44pt circular Close, nested Back and a dedicated translucent scrim. Async guards
+remain authoritative for dirty/pending dismissal and notification deferral;
+forced sign-out clears the account stack. Retained chat and custom header
+accessibility descendants are hidden while management is open.
+
+Private user bubbles, shared neutral composers and compact group/private headers
+follow the native reference while preserving real speaker attribution. Display
+preferences use AsyncStorage on this device: default column maximum 758pt,
+wide-window-only width controls and the existing 120pt native composer maximum,
+clamped to keyboard/window space. Reset changes layout only. Shared conditional
+fades use measured overflow/edges, with transcript follow handlers called first.
+The native semantic text palette now meets 4.5:1 on base/card/cardSoft surfaces.
+No iOS orientation/tablet support, RN-web, native rail, machine capability or
+native voice admission was added. Web UI lift is inherited unchanged from main.

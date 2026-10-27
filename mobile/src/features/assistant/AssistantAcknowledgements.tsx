@@ -122,7 +122,7 @@ export function AssistantAcknowledgements({
                           <Label
                             style={[
                               styles.recordText,
-                              { color: colors.primary },
+                              { color: colors.primaryOnTint },
                             ]}
                           >
                             Selected confirmation record

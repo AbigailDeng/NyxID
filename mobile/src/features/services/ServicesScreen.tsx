@@ -271,7 +271,7 @@ export function ServicesScreen({
 
   if (flowComplete)
     return (
-      <WorkspacePage title="Connection removed">
+      <WorkspacePage showHeading={false} title="Connection removed">
         <Notice message={notice ?? "Connection removed."} tone="success" />
       </WorkspacePage>
     );
@@ -893,7 +893,7 @@ export function ServicesScreen({
 
   if (initialCatalogSlug && !launchedCatalog.current) {
     return (
-      <WorkspacePage title="Connect service">
+      <WorkspacePage showHeading={false} title="Connect service">
         {catalog.isPending ? (
           <ActivityIndicator
             accessibilityLabel="Loading service"
@@ -1085,7 +1085,7 @@ export function ServicesScreen({
             >
               <Card style={styles.serviceCard}>
                 <Text
-                  style={[styles.connectionStatus, { color: colors.primary }]}
+                  style={[styles.connectionStatus, { color: colors.primaryOnTint }]}
                 >
                   ●{" "}
                   {entry.platform_key?.available

@@ -1,6 +1,6 @@
 import { useMfaStepUp } from "./useMfaStepUp";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useWorkspaceSheet } from "../../app/WorkspaceHeader";
+import { useWorkspaceBack, useWorkspaceSheet } from "../../app/WorkspaceHeader";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -328,7 +328,9 @@ export function DeviceLoginScreen({ navigation, route }: Props) {
   const [confirmedCode, setConfirmedCode] = useState<string | null>(null);
   const [preview, setPreview] = useState<AuthDevicePreview | null>(null);
   const [terminal, setTerminal] = useState<TerminalState>(null);
-  const stepUp = useMfaStepUp(`${confirmedCode}:${isAuthenticated}:${terminal}`);
+  const stepUp = useMfaStepUp(
+    `${confirmedCode}:${isAuthenticated}:${terminal}`,
+  );
   const [isScanning, setIsScanning] = useState(
     () => route.params?.start_scanner === true && !route.params?.user_code,
   );
@@ -342,6 +344,13 @@ export function DeviceLoginScreen({ navigation, route }: Props) {
   const [deadlineMs, setDeadlineMs] = useState<number | null>(null);
   const [rawUserAgentExpanded, setRawUserAgentExpanded] = useState(false);
   const lastActionAt = useRef(0);
+  useWorkspaceBack({
+    active: inWorkspaceSheet && isScanning,
+    defaultRole: "back",
+    disabled: isPreviewing || !!decisionPending || stepUp.busy,
+    options: { headerShown: inWorkspaceSheet },
+    onBack: () => setIsScanning(false),
+  });
   const localTimezone = useMemo(() => {
     try {
       return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
@@ -459,7 +468,10 @@ export function DeviceLoginScreen({ navigation, route }: Props) {
     setIsScanning(false);
   };
 
-  const handleDecision = async (decision: "approve" | "deny", verifiedRetry = false) => {
+  const handleDecision = async (
+    decision: "approve" | "deny",
+    verifiedRetry = false,
+  ) => {
     if (!confirmedCode || !preview) return;
     if (!verifiedRetry && !claimAction()) {
       setErrorMessage("Please wait a moment before trying again.");
@@ -482,7 +494,8 @@ export function DeviceLoginScreen({ navigation, route }: Props) {
         setTerminal("denied");
       }
     } catch (error) {
-      if (await stepUp.handle(error, () => handleDecision(decision, true))) return;
+      if (await stepUp.handle(error, () => handleDecision(decision, true)))
+        return;
       setErrorMessage(resolveAuthDeviceErrorMessage(error));
     } finally {
       setDecisionPending(null);
@@ -591,7 +604,21 @@ export function DeviceLoginScreen({ navigation, route }: Props) {
   }
 
   if (stepUp.prompt) {
-    return <ScreenContainer><ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">{stepUp.prompt}</ScrollView></ScreenContainer>;
+    return (
+      <ScreenContainer>
+        <KeyboardAvoidingView
+          style={styles.fill}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <ScrollView
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+          >
+            {stepUp.prompt}
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </ScreenContainer>
+    );
   }
   return (
     <ScreenContainer>

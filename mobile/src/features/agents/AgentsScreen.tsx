@@ -273,7 +273,11 @@ export function AgentsScreen({
 
   if (creating)
     return (
-      <WorkspacePage title="New agent" subtitle="Create a personal specialist">
+      <WorkspacePage
+        showHeading={false}
+        title="New agent"
+        subtitle="Create a personal specialist"
+      >
         {error && <Notice message={error} tone="error" />}
         {!isConnected && (
           <Notice message="You're offline. Reconnect to create your agent. Your draft is kept." />
@@ -336,7 +340,7 @@ export function AgentsScreen({
     const alive = agent && agent.status !== "destroyed";
     return (
       <WorkspacePage
-        title={agent?.display_name ?? agent?.name ?? "Agent"}
+        title={agent?.display_name || agent?.name || "Agent"}
         subtitle={
           agent?.owner_kind === "org"
             ? `${agent.owner_name ?? "Organization"} · ${agent.org_role ?? "member"}`
@@ -655,6 +659,7 @@ export function AgentsScreen({
   const atLimit = list.data && live >= list.data.limits.max_live_subagents;
   return (
     <WorkspacePage
+      showHeading={false}
       title="Your agents"
       subtitle="Personal & shared agents"
       refreshing={pullRefreshing}
@@ -939,11 +944,11 @@ function CreateAgentForm({
     onDirtyChange(
       Boolean(
         value.name ||
-        value.display_name ||
-        value.description ||
-        value.persona ||
-        value.services.length ||
-        value.account_read,
+          value.display_name ||
+          value.description ||
+          value.persona ||
+          value.services.length ||
+          value.account_read,
       ),
     );
   }, [value, onDirtyChange]);

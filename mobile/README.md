@@ -362,3 +362,25 @@ assurance and upgraded replicas treat them as existing devices. Rolling back
 to v0.73.0 removes social MFA enforcement. Only environments that ran unreleased
 #1970 builds have rejecting replicas to drain. Deploy the web step-up UI only
 after all API replicas support the route.
+
+### Native drawer and chat display
+
+Signed-in management uses one retained pull-up drawer over the current chat.
+Nested routes have Back and Close; dirty drafts and critical writes guard Close,
+backdrop, drag, accessibility Escape and Android Back. The handle is separate
+from page scrolling. Reduced motion avoids sliding/spring travel. The full
+[route inventory](docs/NATIVE_WORKSPACE_ROUTES.md) includes Services, agent
+creation/details/skills, shared legal/device/auth entries and cold-link fallbacks.
+
+Settings → Display applies device-local chat layout across personal, specialist,
+contextual and group chats. Composer maximum defaults to 120pt and adapts above
+the keyboard; it does not add blank space. Wide windows expose chat column width
+(default maximum 758pt). Phones omit that ineffective control. Reset affects chat
+layout only. Measured transcript, composer and horizontal-strip fades indicate
+remaining content without intercepting taps or replacing scroll-follow logic.
+
+Native validation includes mobile tests, TypeScript, native dependency sync and
+iOS/Android JavaScript exports. Simulator/emulator execution covers development
+runtimes; physical-device and release-build verification remains separate.
+RN-web, native transcript rail, machines and native voice admission remain
+outside the supported native capabilities.

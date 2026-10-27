@@ -127,9 +127,25 @@ export function dismissWorkspaceSheetAction(
 }
 
 /** Drawer destinations overlay chat; Chats simply dismisses that overlay. */
-export function workspaceNavigateAction<Name extends Exclude<keyof WorkspaceParamList, "Assistant">>(name: Name, params?: WorkspaceParamList[Name], state?: NavigationState): ReturnType<typeof openWorkspaceSheetAction<"Pages">>;
-export function workspaceNavigateAction(name: "Assistant", params?: WorkspaceParamList["Assistant"], state?: NavigationState): ReturnType<typeof dismissWorkspaceSheetAction>;
-export function workspaceNavigateAction<Name extends keyof WorkspaceParamList>(name: Name, params?: WorkspaceParamList[Name], state?: NavigationState): ReturnType<typeof openWorkspaceSheetAction<"Pages">> | ReturnType<typeof dismissWorkspaceSheetAction>;
+export function workspaceNavigateAction<
+  Name extends Exclude<keyof WorkspaceParamList, "Assistant">,
+>(
+  name: Name,
+  params?: WorkspaceParamList[Name],
+  state?: NavigationState,
+): ReturnType<typeof openWorkspaceSheetAction<"Pages">>;
+export function workspaceNavigateAction(
+  name: "Assistant",
+  params?: WorkspaceParamList["Assistant"],
+  state?: NavigationState,
+): ReturnType<typeof dismissWorkspaceSheetAction>;
+export function workspaceNavigateAction<Name extends keyof WorkspaceParamList>(
+  name: Name,
+  params?: WorkspaceParamList[Name],
+  state?: NavigationState,
+):
+  | ReturnType<typeof openWorkspaceSheetAction<"Pages">>
+  | ReturnType<typeof dismissWorkspaceSheetAction>;
 export function workspaceNavigateAction<Name extends keyof WorkspaceParamList>(
   name: Name,
   params?: WorkspaceParamList[Name],
@@ -183,8 +199,12 @@ export function challengeNavigationAction(
 }
 
 /** Cold management links always have a chat beneath the dismissible drawer. */
-export function withWorkspaceFallback(state: PartialState<NavigationState> | undefined): PartialState<NavigationState> | undefined;
-export function withWorkspaceFallback(state: NavigationState): NavigationState | PartialState<NavigationState>;
+export function withWorkspaceFallback(
+  state: PartialState<NavigationState> | undefined,
+): PartialState<NavigationState> | undefined;
+export function withWorkspaceFallback(
+  state: NavigationState,
+): NavigationState | PartialState<NavigationState>;
 export function withWorkspaceFallback(
   state: NavigationState | PartialState<NavigationState> | undefined,
 ) {
@@ -227,5 +247,19 @@ export function withWorkspaceFallback(
     });
     return { ...route, state: { ...sheet, routes: sheetRoutes } };
   });
+  if (
+    !routes.some((route) => route.name === "Workspace") &&
+    routes.some((route) => route.name === "WorkspaceSheet")
+  ) {
+    return {
+      ...state,
+      stale: true as const,
+      index: (state.index ?? routes.length - 1) + 1,
+      routes: [
+        { name: "Workspace", state: { routes: [{ name: "Assistant" }] } },
+        ...routes,
+      ],
+    };
+  }
   return changed ? { ...state, routes } : state;
 }
