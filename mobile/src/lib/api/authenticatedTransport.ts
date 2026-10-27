@@ -79,6 +79,7 @@ export async function executeAuthenticatedRequest<
     checkAdmission();
     if (!requiresAuth) return;
     const current = await input.loadSession();
+    checkAdmission();
     if (
       !current ||
       identity(current) !== originalIdentity ||

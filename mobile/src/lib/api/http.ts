@@ -463,6 +463,7 @@ export async function requestJson<T>(path: string, options: RequestOptions = {})
 
   return guardedJsonTransport<T>({
     send, read: readJsonSafely, guard, requiresAuth, retry: retryOnAuthFailure,
+    invalidateOnAuthFailure: options.invalidateSessionOnAuthFailure,
     refresh: async () => {
       const refreshed = await refreshAccessTokenWithSingleFlight();
       guard();

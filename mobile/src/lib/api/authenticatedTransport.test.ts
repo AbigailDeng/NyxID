@@ -201,3 +201,18 @@ test("mixed JSON and raw body are refused before session/transport dispatch", as
   );
   assert.equal(f.counts().sends, 0);
 });
+
+
+test("authority revoked during a session read is fenced before returning a response", async () => {
+  let admitted = true;
+  const f = fixture({ authorityGuard: () => { if (!admitted) throw new Error("authority revoked"); } });
+  const load = f.input.loadSession;
+  let loads = 0;
+  f.input.loadSession = async () => {
+    const value = await load();
+    if (++loads === 3) admitted = false;
+    return value;
+  };
+  await assert.rejects(executeAuthenticatedRequest(f.input), /authority revoked/);
+  assert.equal(f.counts().sends, 1);
+});
