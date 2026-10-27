@@ -55,6 +55,8 @@ import {
 import { useTheme } from "../../theme/ThemeContext";
 import { fonts, radius } from "../../theme/designTokens";
 import { useAssistant } from "./useAssistant";
+import { NyxBotHome } from "./NyxBotHome";
+import { showNyxBotHome } from "./nyxBotHomeModel";
 import { chatAgentLabel } from "./assistantAgentContext";
 import { liveReplyText } from "./assistantStream";
 import {
@@ -176,6 +178,17 @@ export function AssistantScreen({
   const isNyxBotChat = currentAgent
     ? currentAgent.kind === "nyxbot"
     : !assistant.agentId;
+  const homeVisible = showNyxBotHome({
+    contextual,
+    nyxbot: isNyxBotChat,
+    conversationId: assistant.conversationId,
+    routeConversationId: route?.params?.conversationId,
+    openLatest: route?.params?.openLatest,
+    sending: assistant.sending,
+    loading: assistant.loading,
+    inputText: assistant.inputText,
+    inputAttachments: assistant.inputAttachments,
+  });
   const chatTitle = assistant.conversationId
     ? (conversation?.title ?? "Loading chat…")
     : "New chat";
@@ -915,237 +928,287 @@ export function AssistantScreen({
         <Notice message={`Opening ${agentName}'s latest chat…`} />
       ) : null}
       <View key="transcript-column" style={[styles.fill, chatColumn]}>
-        <FlatList
-          key={assistant.conversationId ?? "new-chat"}
-          ref={transcript}
-          style={styles.fill}
-          data={messages}
-          keyExtractor={(item) => item.id}
-          renderItem={renderMessage}
-          ItemSeparatorComponent={TranscriptSeparator}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          contentContainerStyle={styles.transcript}
-          // Anchor stable history only while reading it. Native row anchoring
-          // competes with keeping the newest live or newly saved reply visible.
-          maintainVisibleContentPosition={
-            stableTranscript && !transcriptScroll.following
-              ? { minIndexForVisible: 0 }
-              : undefined
-          }
-          {...transcriptScroll.listProps}
-          onLayout={(event) => {
-            transcriptScroll.listProps.onLayout(event);
-            transcriptEdges.layout(event.nativeEvent.layout.height);
-          }}
-          onContentSizeChange={(width, height) => {
-            transcriptScroll.listProps.onContentSizeChange(width, height);
-            transcriptEdges.content(height);
-          }}
-          onScroll={(event) => {
-            transcriptScroll.listProps.onScroll(event);
-            transcriptEdges.scroll(event.nativeEvent.contentOffset.y);
-          }}
-          ListHeaderComponent={
-            assistant.history?.before_seq ? (
-              <ActionButton
-                label={
-                  hasHistoryGap
-                    ? "Load missing messages"
-                    : "Load earlier messages"
-                }
-                variant="secondary"
-                loading={assistant.loadingOlder}
-                // Page a stable transcript so dynamic footer changes cannot
-                // interfere with the native reading anchor.
-                disabled={
-                  running ||
-                  assistant.loading ||
-                  !assistant.online ||
-                  !!assistant.deciding ||
-                  assistant.mutating
-                }
-                onPress={() => {
-                  transcriptScroll.pause();
-                  void assistant.loadOlder();
-                }}
-              />
-            ) : null
-          }
-          ListHeaderComponentStyle={styles.transcriptHeader}
-          ListEmptyComponent={
-            assistant.loading ? (
-              <ActivityIndicator color={colors.primary} />
-            ) : !assistant.sending ? (
-              <View style={styles.welcome}>
-                <Text
-                  style={[styles.welcomeTitle, { color: colors.textPrimary }]}
-                >
-                  {isNyxBotChat ? "Hi, I'm NyxBot." : "How can I help?"}
-                </Text>
-                {isNyxBotChat ? (
+        {homeVisible ? (
+          <NyxBotHome
+            key={getAuthEpoch()}
+            scrollProps={{
+              style: styles.fill,
+              scrollEventThrottle: 32,
+              onLayout: (event) =>
+                transcriptEdges.layout(event.nativeEvent.layout.height),
+              onContentSizeChange: (_width, height) =>
+                transcriptEdges.content(height),
+              onScroll: (event) =>
+                transcriptEdges.scroll(event.nativeEvent.contentOffset.y),
+            }}
+            onChat={(agentId, conversationId, acknowledgementId) => {
+              if (newChatDisabled || running || uploads.session.sending) return;
+              const agent = assistant.agents.find((row) => row.id === agentId);
+              if (
+                !agent ||
+                agent.can_use === false ||
+                agent.status === "destroyed"
+              )
+                return;
+              setComposerGeneration((value) => value + 1);
+              assistant.openConversation(conversationId, acknowledgementId);
+              assistant.setModel(agent.model ?? "nyxagent/chat");
+              navigation.setParams({
+                agentId,
+                conversationId,
+                acknowledgementId,
+                draft: false,
+                openLatest: !conversationId,
+              });
+              updateDraft("");
+            }}
+            onOpenCrew={(groupId) =>
+              navigation.navigate("GroupChat", { groupId })
+            }
+            onNewAgent={() =>
+              navigation.dispatch(openWorkspaceSheetAction("AgentCreate"))
+            }
+            onNewCrew={() =>
+              navigation.dispatch(openWorkspaceSheetAction("GroupEditor"))
+            }
+          />
+        ) : (
+          <FlatList
+            key={assistant.conversationId ?? "new-chat"}
+            ref={transcript}
+            style={styles.fill}
+            data={messages}
+            keyExtractor={(item) => item.id}
+            renderItem={renderMessage}
+            ItemSeparatorComponent={TranscriptSeparator}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            contentContainerStyle={styles.transcript}
+            // Anchor stable history only while reading it. Native row anchoring
+            // competes with keeping the newest live or newly saved reply visible.
+            maintainVisibleContentPosition={
+              stableTranscript && !transcriptScroll.following
+                ? { minIndexForVisible: 0 }
+                : undefined
+            }
+            {...transcriptScroll.listProps}
+            onLayout={(event) => {
+              transcriptScroll.listProps.onLayout(event);
+              transcriptEdges.layout(event.nativeEvent.layout.height);
+            }}
+            onContentSizeChange={(width, height) => {
+              transcriptScroll.listProps.onContentSizeChange(width, height);
+              transcriptEdges.content(height);
+            }}
+            onScroll={(event) => {
+              transcriptScroll.listProps.onScroll(event);
+              transcriptEdges.scroll(event.nativeEvent.contentOffset.y);
+            }}
+            ListHeaderComponent={
+              assistant.history?.before_seq ? (
+                <ActionButton
+                  label={
+                    hasHistoryGap
+                      ? "Load missing messages"
+                      : "Load earlier messages"
+                  }
+                  variant="secondary"
+                  loading={assistant.loadingOlder}
+                  // Page a stable transcript so dynamic footer changes cannot
+                  // interfere with the native reading anchor.
+                  disabled={
+                    running ||
+                    assistant.loading ||
+                    !assistant.online ||
+                    !!assistant.deciding ||
+                    assistant.mutating
+                  }
+                  onPress={() => {
+                    transcriptScroll.pause();
+                    void assistant.loadOlder();
+                  }}
+                />
+              ) : null
+            }
+            ListHeaderComponentStyle={styles.transcriptHeader}
+            ListEmptyComponent={
+              assistant.loading ? (
+                <ActivityIndicator color={colors.primary} />
+              ) : !assistant.sending ? (
+                <View style={styles.welcome}>
                   <Text
-                    style={[
-                      styles.welcomeBody,
-                      { color: colors.textSecondary },
-                    ]}
+                    style={[styles.welcomeTitle, { color: colors.textPrimary }]}
                   >
-                    I'm here to help you use NyxID, manage your NyxID services
-                    and automate them.
+                    {isNyxBotChat ? "Hi, I'm NyxBot." : "How can I help?"}
                   </Text>
-                ) : null}
-              </View>
-            ) : null
-          }
-          ListFooterComponent={
-            <View style={styles.footer}>
-              {(assistant.inputText || assistant.inputAttachments.length > 0) &&
-              !optimisticUserPersisted ? (
-                <View
-                  style={[
-                    styles.message,
-                    styles.userMessage,
-                    {
-                      backgroundColor: colors.card,
-                      borderColor: colors.border,
-                    },
-                  ]}
-                >
-                  <Label muted style={styles.messageLabel}>
-                    Sending…
-                  </Label>
-                  {assistant.inputText ? (
+                  {isNyxBotChat ? (
                     <Text
-                      selectable
                       style={[
-                        styles.messageText,
-                        { color: colors.textPrimary },
+                        styles.welcomeBody,
+                        { color: colors.textSecondary },
                       ]}
                     >
-                      {assistant.inputText}
+                      I'm here to help you use NyxID, manage your NyxID services
+                      and automate them.
                     </Text>
                   ) : null}
-                  {assistant.inputAttachments.map((attachment) => (
-                    <AssistantAttachmentView
-                      key={attachment.id}
-                      attachment={attachment}
-                      conversationId={
-                        assistant.conversationId ??
-                        assistant.live?.conversationId
+                </View>
+              ) : null
+            }
+            ListFooterComponent={
+              <View style={styles.footer}>
+                {(assistant.inputText ||
+                  assistant.inputAttachments.length > 0) &&
+                !optimisticUserPersisted ? (
+                  <View
+                    style={[
+                      styles.message,
+                      styles.userMessage,
+                      {
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Label muted style={styles.messageLabel}>
+                      Sending…
+                    </Label>
+                    {assistant.inputText ? (
+                      <Text
+                        selectable
+                        style={[
+                          styles.messageText,
+                          { color: colors.textPrimary },
+                        ]}
+                      >
+                        {assistant.inputText}
+                      </Text>
+                    ) : null}
+                    {assistant.inputAttachments.map((attachment) => (
+                      <AssistantAttachmentView
+                        key={attachment.id}
+                        attachment={attachment}
+                        conversationId={
+                          assistant.conversationId ??
+                          assistant.live?.conversationId
+                        }
+                      />
+                    ))}
+                  </View>
+                ) : null}
+                {running && !streamPersisted ? (
+                  <View style={styles.message}>
+                    <Label muted style={styles.messageLabel}>
+                      {conversation?.agent?.display_name ??
+                        conversation?.agent?.name ??
+                        "NyxBot"}{" "}
+                      ·{" "}
+                      {conversation?.active_turn?.stop_requested
+                        ? "Stopping"
+                        : "Working"}
+                    </Label>
+                    <AssistantActivityDisclosure
+                      key={
+                        conversation?.active_turn?.turn_id ??
+                        assistant.live?.turnId ??
+                        "pending-turn"
+                      }
+                      activities={liveActivities}
+                      onToggle={() => {
+                        transcriptScroll.pause();
+                      }}
+                    />
+                    {conversation?.id &&
+                      liveActivities
+                        .filter((activity) => activity.machine)
+                        .map((activity) => (
+                          <MachineToolCard
+                            key={`machine:${activity.id}`}
+                            receipt={activity.machine!}
+                            conversationId={conversation.id}
+                            onOpenDesktop={(params) =>
+                              navigation.navigate("MachineDesktop", params)
+                            }
+                          />
+                        ))}
+                    {liveText ? (
+                      <Markdown
+                        markdownit={assistantMarkdown}
+                        style={markdownStyle}
+                        rules={markdownRules}
+                        onLinkPress={openSafeLink}
+                      >
+                        {liveText}
+                      </Markdown>
+                    ) : (
+                      <View style={[styles.row, styles.thinking]}>
+                        <ActivityIndicator
+                          size="small"
+                          color={colors.primary}
+                        />
+                        {waitingActivity ? (
+                          <Label
+                            muted
+                            numberOfLines={1}
+                            style={styles.runningActivity}
+                          >
+                            {describeToolActivity(
+                              waitingActivity.label,
+                              waitingActivity.status === "completed"
+                                ? "done"
+                                : waitingActivity.status,
+                            )}
+                            {waitingActivity.status === "running" ? "…" : ""}
+                          </Label>
+                        ) : null}
+                      </View>
+                    )}
+                    {assistant.live?.notice ? (
+                      <Label muted>{assistant.live.notice}</Label>
+                    ) : null}
+                    <AssistantCopyButton text={liveText} partial />
+                  </View>
+                ) : null}
+                {assistant.history?.waiting.map((waiting, index) => (
+                  <Notice
+                    key={`${waiting.title}:${index}`}
+                    message={`${waiting.title}${waiting.detail ? ` · ${waiting.detail}` : ""}`}
+                  />
+                ))}
+                <AssistantAcknowledgements
+                  key={conversation?.id ?? "draft"}
+                  acknowledgements={assistant.history?.acknowledgements ?? []}
+                  selectedId={route?.params?.acknowledgementId}
+                  renderPending={renderAcknowledgement}
+                  renderAuthoredReview={renderAuthoredReview}
+                  onToggle={() => transcriptScroll.pause()}
+                />
+                {assistant.history?.approvals.map((approval) => (
+                  <Card key={approval.id}>
+                    <Label style={styles.cardTitle}>
+                      {approval.service_name} · Approval needed
+                    </Label>
+                    <Label>{approval.summary}</Label>
+                    <Label muted mono>
+                      Expires {formatDate(approval.expires_at)}
+                    </Label>
+                    <ActionButton
+                      label="Review request"
+                      variant="secondary"
+                      onPress={() =>
+                        navigation.dispatch(
+                          openWorkspaceSheetAction("ActivityDetail", {
+                            challengeId: approval.id,
+                          }),
+                        )
                       }
                     />
-                  ))}
-                </View>
-              ) : null}
-              {running && !streamPersisted ? (
-                <View style={styles.message}>
-                  <Label muted style={styles.messageLabel}>
-                    {conversation?.agent?.display_name ??
-                      conversation?.agent?.name ??
-                      "NyxBot"}{" "}
-                    ·{" "}
-                    {conversation?.active_turn?.stop_requested
-                      ? "Stopping"
-                      : "Working"}
-                  </Label>
-                  <AssistantActivityDisclosure
-                    key={
-                      conversation?.active_turn?.turn_id ??
-                      assistant.live?.turnId ??
-                      "pending-turn"
-                    }
-                    activities={liveActivities}
-                    onToggle={() => {
-                      transcriptScroll.pause();
-                    }}
-                  />
-                  {conversation?.id &&
-                    liveActivities
-                      .filter((activity) => activity.machine)
-                      .map((activity) => (
-                        <MachineToolCard
-                          key={`machine:${activity.id}`}
-                          receipt={activity.machine!}
-                          conversationId={conversation.id}
-                          onOpenDesktop={(params) =>
-                            navigation.navigate("MachineDesktop", params)
-                          }
-                        />
-                      ))}
-                  {liveText ? (
-                    <Markdown
-                      markdownit={assistantMarkdown}
-                      style={markdownStyle}
-                      rules={markdownRules}
-                      onLinkPress={openSafeLink}
-                    >
-                      {liveText}
-                    </Markdown>
-                  ) : (
-                    <View style={[styles.row, styles.thinking]}>
-                      <ActivityIndicator size="small" color={colors.primary} />
-                      {waitingActivity ? (
-                        <Label
-                          muted
-                          numberOfLines={1}
-                          style={styles.runningActivity}
-                        >
-                          {describeToolActivity(
-                            waitingActivity.label,
-                            waitingActivity.status === "completed"
-                              ? "done"
-                              : waitingActivity.status,
-                          )}
-                          {waitingActivity.status === "running" ? "…" : ""}
-                        </Label>
-                      ) : null}
-                    </View>
-                  )}
-                  {assistant.live?.notice ? (
-                    <Label muted>{assistant.live.notice}</Label>
-                  ) : null}
-                  <AssistantCopyButton text={liveText} partial />
-                </View>
-              ) : null}
-              {assistant.history?.waiting.map((waiting, index) => (
-                <Notice
-                  key={`${waiting.title}:${index}`}
-                  message={`${waiting.title}${waiting.detail ? ` · ${waiting.detail}` : ""}`}
-                />
-              ))}
-              <AssistantAcknowledgements
-                key={conversation?.id ?? "draft"}
-                acknowledgements={assistant.history?.acknowledgements ?? []}
-                selectedId={route?.params?.acknowledgementId}
-                renderPending={renderAcknowledgement}
-                renderAuthoredReview={renderAuthoredReview}
-                onToggle={() => transcriptScroll.pause()}
-              />
-              {assistant.history?.approvals.map((approval) => (
-                <Card key={approval.id}>
-                  <Label style={styles.cardTitle}>
-                    {approval.service_name} · Approval needed
-                  </Label>
-                  <Label>{approval.summary}</Label>
-                  <Label muted mono>
-                    Expires {formatDate(approval.expires_at)}
-                  </Label>
-                  <ActionButton
-                    label="Review request"
-                    variant="secondary"
-                    onPress={() =>
-                      navigation.dispatch(
-                        openWorkspaceSheetAction("ActivityDetail", {
-                          challengeId: approval.id,
-                        }),
-                      )
-                    }
-                  />
-                </Card>
-              ))}
-            </View>
-          }
-        />
+                  </Card>
+                ))}
+              </View>
+            }
+          />
+        )}
         <ScrollEdgeFades edges={transcriptEdges.edges} color={colors.bg} />
       </View>
       {voiceThread && voiceThread === assistant.conversationId ? (

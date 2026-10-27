@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { conversationIdSchema } from "../assistant/assistantTypes";
 import type { ServiceConnection } from "../services/serviceContracts";
 
 export const accessModeSchema = z.enum([
@@ -29,6 +30,25 @@ export const agentSchema = z.object({
   home_conversation_id: z.string().nullish(),
   memory_count: z.number().default(0),
   pending_acknowledgements: z.number().default(0),
+  pending_requests: z
+    .array(
+      z.object({
+        request_id: z.string(),
+        conversation_id: conversationIdSchema,
+        summary: z.string(),
+        expires_at: z.string().optional(),
+      }),
+    )
+    .default([]),
+  last_reply: z
+    .object({
+      seq: z.number(),
+      status: z.string(),
+      text: z.string(),
+      created_at: z.string(),
+    })
+    .nullish(),
+  last_active_at: z.string().optional(),
   channels: z
     .array(
       z.object({

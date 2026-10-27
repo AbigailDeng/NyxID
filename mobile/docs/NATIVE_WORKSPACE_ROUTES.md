@@ -81,3 +81,10 @@ opens its exact conversation ID through the existing chat navigation; New chat
 retains the selected agent. Crews remain a distinct section. All-items browsers
 finish their native dismissal before selecting a chat. These disclosures add no
 routes or deep-link variants.
+
+NyxBot Home occupies the existing primary Assistant route only when no
+conversation is open. It adds no route or deep link. Roster Chat reuses the
+existing latest-thread selection; away Review includes its exact conversation
+and acknowledgement IDs, and finished-work Open uses the agent's home thread.
+Crew Open pushes the existing GroupChat route, preserving the primary draft;
+New agent and New crew open their existing guarded drawer editors.

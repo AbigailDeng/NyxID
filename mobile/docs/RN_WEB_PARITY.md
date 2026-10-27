@@ -117,3 +117,15 @@ previews and searchable all-items browsers keep long accounts navigable; older
 cursor pages remain explicit. The shared authenticated metadata stream refreshes
 agent, crew and thread reads, with foreground/offline/account fences and polling
 fallback. No server contracts or URLs change.
+
+An idle primary NyxBot draft now shows Home above the existing Message NyxBot
+composer: the web's local-time greeting, While you were away (exact pending
+request links, latest replies/current work and Show more), Your agents grouped
+by Personal/organization owner ID, and Crews. These use the existing profile,
+agent summaries and crew APIs; no activity rows are inferred from missing data.
+The shared metadata stream and foreground polling refresh the reads. Loading,
+failed and offline reads retain honest notices; older responses without the
+optional summary fields have no away rows. Hi, I'm NyxBot remains the empty-team
+copy. Saved conversations, specialists, contextual drafts and in-progress sends
+retain the transcript. Home scrolls independently of transcript follow intent.
+Memory previews from web Home are outside this requested increment.

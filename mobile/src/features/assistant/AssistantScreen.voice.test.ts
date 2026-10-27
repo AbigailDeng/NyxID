@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { deferred, hookHarness } from "./assistantHookTestHarness";
+import type { AssistantParams } from "../../app/navigationTypes";
 import type { AssistantUploadedMessage } from "./AssistantUploadSession";
 import * as voiceSelection from "./voice/voiceSelection";
 import {
@@ -129,6 +130,7 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
       events.push(["send", text, files]);
       return true;
     },
+    setModel: (model: string) => events.push(["model", model]),
     stop: async () => {
       events.push(["stop"]);
     },
@@ -152,8 +154,9 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     },
   };
   const props = {
+    contextual: false,
     route: {
-      params: { agentId: agent.id, conversationId },
+      params: { agentId: agent.id, conversationId } as AssistantParams,
     },
   };
   const harness = hookHarness<Element>({
@@ -250,6 +253,7 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
       ),
     ),
     "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
+    "./NyxBotHome": { NyxBotHome: "NyxBotHome" },
     "./useAssistant": { useAssistant: () => assistant },
     "./useAssistantUploads": { useAssistantUploads: () => uploads },
     "./useComposerDictation": {
@@ -809,7 +813,7 @@ test("private user attribution joins only real via and steering context", () => 
   x.harness.unmount();
 });
 
-test("an empty NyxBot chat introduces NyxBot while specialists keep the neutral prompt", () => {
+test("empty primary NyxBot uses home while specialists and contextual drafts keep their welcome", () => {
   const x = setup();
   const welcome = () =>
     elements(
@@ -821,6 +825,13 @@ test("an empty NyxBot chat introduces NyxBot while specialists keep the neutral 
       .flatMap((node) => node.props.children)
       .filter((child: unknown) => typeof child === "string")
       .join(" ");
+  assert.ok(x.all().some((node) => node.type === "NyxBotHome"));
+  assert.equal(
+    x.all().some((node) => node.type === "FlatList"),
+    false,
+  );
+  x.props.contextual = true;
+  x.harness.render();
   assert.match(welcome(), /Hi, I'm NyxBot\./);
   assert.match(welcome(), /help you use NyxID, manage your NyxID services/);
   x.assistant.agent.kind = "specialist";
@@ -874,5 +885,62 @@ test("chat machine receipts forward every desktop selector to the full-screen ro
   };
   card.props.onOpenDesktop(params);
   assert.deepEqual(x.events.at(-1), ["navigate", "MachineDesktop", params]);
+  x.harness.unmount();
+});
+
+test("home opens the exact request conversation and leaves Message NyxBot below its independent scroll view", () => {
+  const x = setup();
+  const home = x.all().find((node) => node.type === "NyxBotHome")!;
+  assert.equal(x.input().props.placeholder, "Message NyxBot");
+  home.props.scrollProps.onContentSizeChange(390, 1200);
+  home.props.scrollProps.onScroll({
+    nativeEvent: { contentOffset: { y: 250 } },
+  });
+  assert.deepEqual(x.events, [
+    ["fade-content", 1200],
+    ["fade-scroll", 250],
+  ]);
+  home.props.onChat("agent-a", A, "request-id");
+  assert.deepEqual(x.events.slice(2), [
+    ["open", A, "request-id"],
+    ["model", "nyxagent/chat"],
+    [
+      "params",
+      {
+        agentId: "agent-a",
+        conversationId: A,
+        acknowledgementId: "request-id",
+        draft: false,
+        openLatest: false,
+      },
+    ],
+  ]);
+  x.harness.render();
+  assert.equal(
+    x.all().some((node) => node.type === "NyxBotHome"),
+    false,
+  );
+  assert.ok(x.all().some((node) => node.type === "FlatList"));
+  x.harness.unmount();
+});
+
+test("home roster Chat reuses latest-thread navigation and crew navigation retains the primary draft", () => {
+  const x = setup();
+  const home = x.all().find((node) => node.type === "NyxBotHome")!;
+  home.props.onOpenCrew("crew-id");
+  assert.deepEqual(JSON.parse(JSON.stringify(x.events)), [
+    ["navigate", "GroupChat", { groupId: "crew-id" }],
+  ]);
+  home.props.onChat("agent-a");
+  assert.deepEqual(x.events.at(-1), [
+    "params",
+    {
+      agentId: "agent-a",
+      conversationId: undefined,
+      acknowledgementId: undefined,
+      draft: false,
+      openLatest: true,
+    },
+  ]);
   x.harness.unmount();
 });
