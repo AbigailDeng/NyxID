@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+import { AgentAvatar } from "../../components/AgentAvatar";
 import { useEffect, useState } from "react";
 import { Alert, Pressable, View } from "react-native";
 import {
@@ -114,9 +116,17 @@ export function AutomationsScreen({
   const agentOptions =
     agents.data?.agents
       .filter((a) => a.status !== "destroyed")
-      .map((a) => ({ value: a.id, label: a.display_name || a.name })) ?? [];
+      .map((a) => ({
+        value: a.id,
+        label: a.display_name || a.name,
+        leading: (<AgentAvatar agent={a} size="lg" />) as ReactNode,
+      })) ?? [];
   if (agentId && !agentOptions.some((a) => a.value === agentId))
-    agentOptions.push({ value: agentId, label: "Selected agent" });
+    agentOptions.push({
+      value: agentId,
+      label: "Selected agent",
+      leading: undefined,
+    });
   return (
     <WorkspacePage title="Automations" showHeading={false}>
       <View style={s.spread}>

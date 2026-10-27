@@ -1,3 +1,4 @@
+import { AgentAvatar } from "../../components/AgentAvatar";
 import {
   useCallback,
   useEffect,
@@ -19,11 +20,9 @@ import {
 import { useIsFocused } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Bot,
   ChevronRight,
   Search,
   SlidersHorizontal,
-  Users,
   X,
 } from "lucide-react-native";
 import { ZodError } from "zod";
@@ -367,14 +366,7 @@ export function AgentsScreen({
           <>
             <Card>
               <View style={styles.row}>
-                <View
-                  style={[
-                    styles.avatar,
-                    { backgroundColor: colors.primaryTone.bg },
-                  ]}
-                >
-                  <Bot color={colors.primaryOnTint} size={26} />
-                </View>
+                <AgentAvatar agent={agent} size="xl" />
                 <View style={styles.flex}>
                   <Text style={[styles.title, { color: colors.textPrimary }]}>
                     {agent.display_name ?? agent.name}
@@ -801,18 +793,7 @@ export function AgentsScreen({
         >
           <Card>
             <View style={styles.row}>
-              <View
-                style={[
-                  styles.avatar,
-                  { backgroundColor: colors.primaryTone.bg },
-                ]}
-              >
-                {agent.owner_kind === "org" ? (
-                  <Users color={colors.primaryOnTint} size={24} />
-                ) : (
-                  <Bot color={colors.primaryOnTint} size={24} />
-                )}
-              </View>
+              <AgentAvatar agent={agent} size="xl" />
               <View style={styles.flex}>
                 <Text style={[styles.title, { color: colors.textPrimary }]}>
                   {agent.display_name ?? agent.name}
@@ -1308,13 +1289,6 @@ const styles = StyleSheet.create({
     right: 6,
   },
   title: { fontSize: 18, fontFamily: fonts.displaySemi },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    justifyContent: "center",
-    alignItems: "center",
-  },
   thread: {
     flexDirection: "row",
     alignItems: "center",

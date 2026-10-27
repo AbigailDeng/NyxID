@@ -1,3 +1,4 @@
+import { AgentAvatar, AgentAvatarStack } from "../../components/AgentAvatar";
 import type { NativeStackNavigationOptions } from "@react-navigation/native-stack";
 import { useChatColumn } from "../display/ChatLayoutContext";
 import {
@@ -30,7 +31,6 @@ import {
   MessageSquare,
   ThumbsDown,
   ThumbsUp,
-  Users,
   X,
 } from "lucide-react-native";
 import {
@@ -213,6 +213,7 @@ function GroupChat({
         handle: member.name,
         label: title(member.id, member.name),
         kind: "agent" as const,
+        agent: member,
       })),
     ...uploads.files.map((row) => ({
       id: `attachment:${row.key}`,
@@ -534,10 +535,7 @@ function GroupChat({
                 },
               ]}
             >
-              <Users
-                size={14}
-                color={member.working ? colors.success : colors.primaryOnTint}
-              />
+              <AgentAvatar agent={member} size="sm" />
               <Label style={styles.small}>
                 {title(member.id, member.name)}
               </Label>
@@ -596,7 +594,7 @@ function GroupChat({
               />
             ) : group ? (
               <View style={styles.empty}>
-                <Users size={32} color={colors.primaryOnTint} />
+                <AgentAvatarStack agents={group.members} size="lg" />
                 <Label style={styles.heading}>Work together</Label>
                 <Label muted>
                   Say hello. @mention an agent to ask it directly.
@@ -682,8 +680,7 @@ function GroupChat({
                 </Label>
                 {expired ? (
                   <Label muted>
-                    This request expired. Refresh the crew for its latest
-                    state.
+                    This request expired. Refresh the crew for its latest state.
                   </Label>
                 ) : action.authored_skill ? (
                   review && onOpenConversation ? (
@@ -774,8 +771,7 @@ function GroupChat({
           )}
           {!liveMembers.length && (
             <Label muted>
-              All agents have been removed or destroyed. This crew is
-              read-only.
+              All agents have been removed or destroyed. This crew is read-only.
             </Label>
           )}
           {!canParticipate && (
@@ -1111,14 +1107,19 @@ function GroupMessage({
           if (message.agent) onOpenAgent?.(message.agent.id);
         }}
       >
-        <Label muted style={styles.small}>
-          {user
-            ? (message.author?.display_name ?? "You")
-            : message.agent
-              ? title(message.agent.id, message.agent.name)
-              : "Agent"}{" "}
-          · {clock(message.created_at)}
-        </Label>
+        <View style={styles.row}>
+          {message.agent ? (
+            <AgentAvatar agent={message.agent} size="sm" />
+          ) : null}
+          <Label muted style={styles.small}>
+            {user
+              ? (message.author?.display_name ?? "You")
+              : message.agent
+                ? title(message.agent.id, message.agent.name)
+                : "Agent"}{" "}
+            · {clock(message.created_at)}
+          </Label>
+        </View>
       </Pressable>
       {user && !!message.recipient_agent_ids?.length && (
         <Label muted style={styles.small}>
@@ -1267,6 +1268,7 @@ function Icon({
   );
 }
 const styles = StyleSheet.create({
+  row: { flexDirection: "row", alignItems: "center", gap: 6 },
   horizontalStrip: { flexGrow: 0 },
   feedbackActions: { flexDirection: "row", alignItems: "center" },
   feedbackInput: {

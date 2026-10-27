@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type PropsWithChildren } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type PropsWithChildren,
+} from "react";
 import {
   ActivityIndicator,
   AppState,
@@ -84,7 +90,12 @@ export function useAutomationWrite() {
   return { ...runtime, busy, error, setError, run };
 }
 
-export type Choice = { value: string; label: string; description?: string };
+export type Choice = {
+  leading?: ReactNode;
+  value: string;
+  label: string;
+  description?: string;
+};
 export function ChoiceField({
   label,
   value,
@@ -119,6 +130,7 @@ export function ChoiceField({
           },
         ]}
       >
+        {current?.leading}
         <Label style={automationStyles.flex}>
           {current?.label ?? "Choose"}
         </Label>
@@ -141,6 +153,7 @@ export function ChoiceField({
             }}
             style={[automationStyles.option, { borderColor: colors.border }]}
           >
+            {option.leading}
             <View style={automationStyles.flex}>
               <Label>{option.label}</Label>
               {option.description ? (

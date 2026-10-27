@@ -1,3 +1,4 @@
+import { AgentAvatar } from "../../components/AgentAvatar";
 import { useChatColumn } from "../display/ChatLayoutContext";
 import { MachineToolCard } from "../machines/MachineToolCard";
 import {
@@ -513,21 +514,26 @@ export function AssistantScreen({
             onPress={() => setSheet("agents")}
             style={styles.headerIdentity}
           >
-            <View style={styles.headerName}>
+            {currentAgent ? (
+              <AgentAvatar agent={currentAgent} size="lg" />
+            ) : null}
+            <View style={styles.fill}>
+              <View style={styles.headerName}>
+                <Text
+                  numberOfLines={1}
+                  style={[styles.agentName, { color: colors.textPrimary }]}
+                >
+                  {agentName}
+                </Text>
+                <ChevronDown size={14} color={colors.textSecondary} />
+              </View>
               <Text
                 numberOfLines={1}
-                style={[styles.agentName, { color: colors.textPrimary }]}
+                style={[styles.headerSubtitle, { color: colors.textSecondary }]}
               >
-                {agentName}
+                {chatTitle}
               </Text>
-              <ChevronDown size={14} color={colors.textSecondary} />
             </View>
-            <Text
-              numberOfLines={1}
-              style={[styles.headerSubtitle, { color: colors.textSecondary }]}
-            >
-              {chatTitle}
-            </Text>
           </Pressable>
         </WorkspaceHeaderVisibility>
       ),
@@ -538,6 +544,7 @@ export function AssistantScreen({
     };
   }, [
     agentName,
+    currentAgent,
     chatTitle,
     conversation?.title,
     colors.textPrimary,
@@ -1376,10 +1383,13 @@ export function AssistantScreen({
                   }}
                 >
                   <Card>
-                    <Label>
-                      {chatAgentLabel(agent)}
-                      {assistant.agentId === agent.id ? " · Selected" : ""}
-                    </Label>
+                    <View style={styles.row}>
+                      <AgentAvatar agent={agent} size="lg" />
+                      <Label>
+                        {chatAgentLabel(agent)}
+                        {assistant.agentId === agent.id ? " · Selected" : ""}
+                      </Label>
+                    </View>
                     <Label muted>
                       {agent.owner_kind === "org"
                         ? (agent.owner_name ?? "Organization")
@@ -1724,7 +1734,9 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: 8 },
   headerActions: { flexDirection: "row", alignItems: "center" },
   headerIdentity: {
-    maxWidth: 190,
+    maxWidth: 210,
+    flexDirection: "row",
+    gap: 8,
     minHeight: 44,
     justifyContent: "center",
     alignItems: "center",

@@ -1,7 +1,8 @@
+import { AgentAvatarStack } from "../../components/AgentAvatar";
 import { useEffect } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Users } from "lucide-react-native";
+import { ChevronRight } from "lucide-react-native";
 import {
   ActionButton,
   Card,
@@ -88,9 +89,7 @@ export function GroupsList({
                 : `${group.members.filter((member) => !member.destroyed).length} agents`}
             </Label>
             <View style={styles.row}>
-              <View style={[styles.icon, { backgroundColor: colors.cardSoft }]}>
-                <Users size={22} color={colors.primaryOnTint} />
-              </View>
+              <AgentAvatarStack agents={group.members} size="lg" />
               <View style={styles.fill}>
                 <Label numberOfLines={1} style={styles.title}>
                   {group.name}
@@ -116,23 +115,12 @@ export function GroupsList({
           </Label>
         </Card>
       )}
-      <ActionButton
-        label="Create crew"
-        onPress={onCreate}
-        disabled={!active}
-      />
+      <ActionButton label="Create crew" onPress={onCreate} disabled={!active} />
     </>
   );
 }
 const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: 12 },
   fill: { flex: 1, minWidth: 0 },
-  icon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   title: { fontSize: 15 },
 });

@@ -177,6 +177,7 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
         scroll: (offset: number) => events.push(["fade-scroll", offset]),
       }),
     },
+    "../../components/AgentAvatar": { AgentAvatar: "AgentAvatar", AgentAvatarStack: "AgentAvatarStack" },
     "react/jsx-runtime": {
       Fragment: "Fragment",
       jsx: (type: unknown, props: unknown, key?: unknown) => ({

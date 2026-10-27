@@ -1,3 +1,4 @@
+import { AgentAvatar } from "../../components/AgentAvatar";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
@@ -15,7 +16,6 @@ import NetInfo from "@react-native-community/netinfo";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookOpen,
-  Bot,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -128,14 +128,7 @@ export function PluginSkills({
           onPress={() => setPicking((value) => !value)}
           style={[styles.agentContext, { backgroundColor: colors.cardSoft }]}
         >
-          <View
-            style={[
-              styles.agentIcon,
-              { backgroundColor: colors.primaryTone.bg },
-            ]}
-          >
-            <Bot size={18} color={colors.primaryOnTint} />
-          </View>
+          {agent ? <AgentAvatar agent={agent} size="lg" /> : null}
           <View style={styles.flex}>
             <Label muted style={styles.caption}>
               Skills for
@@ -158,6 +151,7 @@ export function PluginSkills({
             options={manageable.map((item) => ({
               value: item.id,
               label: titleOf(item),
+              leading: <AgentAvatar agent={item} size="lg" />,
               description:
                 item.owner_kind === "org"
                   ? (item.owner_name ?? "Organization")
@@ -848,9 +842,9 @@ function AgentSkillsManager({
                       (!pin && pins.length >= 16) ||
                       Boolean(
                         pin &&
-                        preview.data &&
-                        pin.version === preview.data.reference.version &&
-                        pin.sha256 === preview.data.reference.sha256,
+                          preview.data &&
+                          pin.version === preview.data.reference.version &&
+                          pin.sha256 === preview.data.reference.sha256,
                       )
                     }
                     onPress={() => {
@@ -1313,13 +1307,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-  },
-  agentIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 9,
-    alignItems: "center",
-    justifyContent: "center",
   },
   agentName: { fontFamily: fonts.bodySemi, fontSize: 14, lineHeight: 20 },
   cardTitle: { fontFamily: fonts.bodySemi, fontSize: 15, lineHeight: 22 },

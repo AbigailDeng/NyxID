@@ -129,3 +129,20 @@ optional summary fields have no away rows. Hi, I'm NyxBot remains the empty-team
 copy. Saved conversations, specialists, contextual drafts and in-progress sends
 retain the transcript. Home scrolls independently of transcript follow intent.
 Memory previews from web Home are outside this requested increment.
+
+Agent identity now shares the web's `AgentAvatar` and crew stack treatment across
+Home, the side menu, chat headers, Agents & Crews, mention/selection controls and
+machine agent access. The six tints, FNV-1a index, ASCII word initials and five
+sizes are ported exactly; Home follows the source's `lg` (32pt) size. NyxBot uses
+the vector product mark at 70% inside the purple circle. Decorative avatars stay
+out of the accessibility tree; the containing row supplies the full name and
+status. Crew stacks overlap and cap with +N.
+
+The exact web tint table carries contrast exceptions. Across chat and drawer
+cards, dark purple/blue initials reach minima of 3.46:1/3.36:1; light secondary
+purple/green with white initials reach 4.29:1/3.77:1. Dark circle edges range
+1.62–2.08:1 against their cards; light edges exceed 3:1. These decorative marks
+retain source parity and do not carry an action, name or status alone. The full
+adjacent name/status uses the tested accessible theme tokens. Fixed web vectors
+and the explicit contrast exceptions are covered by `agentAvatarModel.test.ts`;
+these measurements do not claim that every decorative initial meets text AA.

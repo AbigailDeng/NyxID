@@ -1,3 +1,4 @@
+import { AgentAvatar } from "../../components/AgentAvatar";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -332,7 +333,10 @@ function GroupEditor({
     );
   }
   return (
-    <WorkspacePage showHeading={false} title={groupId ? "Crew settings" : "New crew"}>
+    <WorkspacePage
+      showHeading={false}
+      title={groupId ? "Crew settings" : "New crew"}
+    >
       {error && <Notice message={error} tone="error" />}
       {(agents.isPending || (!!groupId && detail.isPending)) && (
         <ActivityIndicator
@@ -431,6 +435,7 @@ function GroupEditor({
               options={eligible.map((agent) => ({
                 value: agent.id,
                 label: agent.display_name ?? agent.name,
+                leading: <AgentAvatar agent={agent} size="lg" />,
                 description:
                   agent.kind === "nyxbot"
                     ? "Your personal agent"
@@ -532,6 +537,7 @@ function GroupEditor({
                     .map((agent) => ({
                       value: agent.id,
                       label: agent.display_name ?? agent.name,
+                      leading: <AgentAvatar agent={agent} size="lg" />,
                       description: agent.description || undefined,
                       searchText: agent.name,
                     }))}

@@ -1,3 +1,5 @@
+import { AgentAvatar } from "../../components/AgentAvatar";
+import type { AgentIdentity } from "../../components/agentAvatarModel";
 import { useComposerHeight } from "../display/ChatLayoutContext";
 import {
   ScrollEdgeFades,
@@ -15,7 +17,7 @@ import {
   type StyleProp,
   type TextStyle,
 } from "react-native";
-import { Bot, Clipboard, FileText, Image } from "lucide-react-native";
+import { Clipboard, FileText, Image } from "lucide-react-native";
 import { useTheme } from "../../theme/ThemeContext";
 import { fonts } from "../../theme/designTokens";
 import {
@@ -31,6 +33,7 @@ export type AssistantMentionOption = {
   label: string;
   kind: "agent" | "image" | "file" | "pasted-text";
   detail?: string;
+  agent?: AgentIdentity;
 };
 
 type ScopedSelection = {
@@ -192,13 +195,11 @@ export function AssistantMentionInput({
             {candidates.length ? (
               candidates.map((option) => {
                 const Icon =
-                  option.kind === "agent"
-                    ? Bot
-                    : option.kind === "image"
-                      ? Image
-                      : option.kind === "pasted-text"
-                        ? Clipboard
-                        : FileText;
+                  option.kind === "image"
+                    ? Image
+                    : option.kind === "pasted-text"
+                      ? Clipboard
+                      : FileText;
                 return (
                   <Pressable
                     key={option.id}
@@ -228,7 +229,11 @@ export function AssistantMentionInput({
                       },
                     ]}
                   >
-                    <Icon size={18} color={colors.primaryOnTint} />
+                    {option.kind === "agent" && option.agent ? (
+                      <AgentAvatar agent={option.agent} size="md" />
+                    ) : (
+                      <Icon size={18} color={colors.primaryOnTint} />
+                    )}
                     <View style={styles.optionText}>
                       <Text
                         numberOfLines={1}

@@ -71,6 +71,7 @@ function setup() {
   const calls: unknown[][] = [];
   const queries = new Map<string, Record<string, any>>();
   const harness = hookHarness<Element>({
+    "../../components/AgentAvatar": { AgentAvatar: "AgentAvatar", AgentAvatarStack: "AgentAvatarStack" },
     "react/jsx-runtime": {
       jsx: (type: unknown, props: unknown) => ({ type, props }),
       jsxs: (type: unknown, props: unknown) => ({ type, props }),

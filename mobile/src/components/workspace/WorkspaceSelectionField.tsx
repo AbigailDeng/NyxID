@@ -18,6 +18,7 @@ import { ActionButton, Label, Notice } from "./WorkspaceUI";
 
 export type WorkspaceSelectionOption = {
   value: string;
+  leading?: ReactNode;
   label: string;
   description?: string;
   disabled?: boolean;
@@ -90,6 +91,10 @@ export function WorkspaceSelectionField(props: SelectionProps) {
           setOpen(true);
         }}
       >
+        {selected.length === 1
+          ? props.options.find((option) => option.value === selected[0])
+              ?.leading
+          : null}
         <Label numberOfLines={2} style={styles.flex}>
           {summary}
         </Label>
@@ -353,6 +358,7 @@ export function WorkspaceSelectionSheet({
                       },
                     ]}
                   >
+                    {item.leading}
                     <View style={styles.flex}>
                       <Label numberOfLines={2}>{item.label}</Label>
                       {item.description && (

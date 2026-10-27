@@ -1,3 +1,4 @@
+import { AgentAvatar, AgentAvatarStack } from "../../components/AgentAvatar";
 import { useRef, useState, type PropsWithChildren } from "react";
 import {
   ScrollView,
@@ -6,7 +7,6 @@ import {
   type ScrollViewProps,
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import { Bot, Users } from "lucide-react-native";
 import {
   ActionButton,
   Card,
@@ -120,7 +120,10 @@ export function NyxBotHome({
       contentContainerStyle={styles.content}
     >
       <View style={styles.greeting}>
-        <Bot size={32} color={colors.primary} />
+        <AgentAvatar
+          agent={{ id: "nyxbot", name: "NyxBot", kind: "nyxbot" }}
+          size="lg"
+        />
         <View style={styles.greetingText}>
           <Label accessibilityRole="header" style={styles.title}>
             {greetingFor(now)}
@@ -181,7 +184,7 @@ export function NyxBotHome({
                   style={[styles.listRow, { borderColor: colors.borderSoft }]}
                 >
                   <View style={styles.rowTitle}>
-                    <Bot size={18} color={colors.textSecondary} />
+                    <AgentAvatar agent={item.agent} size="lg" />
                     <Label style={styles.name}>{name}</Label>
                     {request ? (
                       <SectionBadge label="Needs a decision" tone="warning" />
@@ -279,14 +282,7 @@ export function NyxBotHome({
             {section.agents.map((agent) => (
               <Card key={agent.id}>
                 <View style={styles.rowTitle}>
-                  <Bot
-                    size={22}
-                    color={
-                      agent.kind === "nyxbot"
-                        ? colors.primary
-                        : colors.textSecondary
-                    }
-                  />
+                  <AgentAvatar agent={agent} size="lg" />
                   <Label style={styles.name}>{chatAgentLabel(agent)}</Label>
                   {agent.kind !== "nyxbot" ? (
                     agent.pending_acknowledgements > 0 ? (
@@ -373,7 +369,7 @@ export function NyxBotHome({
         {groups.map((group) => (
           <Card key={group.id}>
             <View style={styles.rowTitle}>
-              <Users size={22} color={colors.textSecondary} />
+              <AgentAvatarStack agents={group.members} max={4} />
               <Label style={styles.name}>{group.name}</Label>
               {group.working_agent_ids.length ? (
                 <SectionBadge

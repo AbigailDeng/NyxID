@@ -143,6 +143,7 @@ function setup({
   state.set("proposals", response({ proposals: [] }));
   const client = { invalidateQueries: record("invalidate") };
   const harness = hookHarness<Element>({
+    "../../components/AgentAvatar": { AgentAvatar: "AgentAvatar", AgentAvatarStack: "AgentAvatarStack" },
     "react/jsx-runtime": {
       jsx: (type: unknown, props: unknown, key?: string) => ({
         type,

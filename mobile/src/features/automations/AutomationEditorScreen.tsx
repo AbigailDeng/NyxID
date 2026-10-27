@@ -1,3 +1,4 @@
+import { AgentAvatar } from "../../components/AgentAvatar";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Switch, View } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -412,6 +413,14 @@ function AutomationEditor({
           options={options.map(([value, text, description]) => ({
             value,
             label: text,
+            leading:
+              name === "agent_id" &&
+              agents.find((agent) => agent.id === value) ? (
+                <AgentAvatar
+                  agent={agents.find((agent) => agent.id === value)!}
+                  size="lg"
+                />
+              ) : undefined,
             description,
           }))}
         />
@@ -497,7 +506,11 @@ function AutomationEditor({
           });
       if (!current()) return;
       const oneTime: SecretValue[] = [];
-      if ("secret" in result && typeof result.secret === "string" && result.secret) {
+      if (
+        "secret" in result &&
+        typeof result.secret === "string" &&
+        result.secret
+      ) {
         if (result.trigger.inbound_url)
           oneTime.push({
             label: "Inbound URL",

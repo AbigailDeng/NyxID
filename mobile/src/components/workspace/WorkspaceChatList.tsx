@@ -1,3 +1,4 @@
+import { AgentAvatar, AgentAvatarStack } from "../AgentAvatar";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
@@ -11,7 +12,6 @@ import {
 } from "react-native";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
-  Bot,
   ChevronDown,
   ChevronRight,
   MessageSquare,
@@ -378,6 +378,7 @@ export function WorkspaceChatList({
           }
         >
           <DisclosureRow
+            agent={row}
             label={chatAgentLabel(row)}
             detail={
               [status, agentDetail(row)].filter(Boolean).join(" · ") ||
@@ -657,6 +658,7 @@ export function WorkspaceChatList({
           renderItem={(row) =>
             "agent" in row ? (
               <DisclosureRow
+                agent={row.agent}
                 label={chatAgentLabel(row.agent)}
                 detail={agentDetail(row.agent)}
                 expanded={false}
@@ -842,9 +844,9 @@ function GroupChatRow({
         },
       ]}
     >
-      <Users
-        size={18}
-        color={selected ? colors.primary : colors.textSecondary}
+      <AgentAvatarStack
+        agents={group.members}
+        surface={selected ? colors.navActive : colors.cardSoft}
       />
       <View style={styles.label}>
         <Text
@@ -872,6 +874,7 @@ function GroupChatRow({
 }
 
 function DisclosureRow({
+  agent,
   label,
   detail,
   expanded,
@@ -885,9 +888,9 @@ function DisclosureRow({
   selected: boolean;
   onPress: () => void;
   kind: "agent" | "group";
+  agent?: AssistantAgent;
 }) {
   const { colors } = useTheme();
-  const Icon = kind === "agent" ? Bot : Users;
   const Chevron = expanded ? ChevronDown : ChevronRight;
   return (
     <Pressable
@@ -903,10 +906,11 @@ function DisclosureRow({
         },
       ]}
     >
-      <Icon
-        size={18}
-        color={selected ? colors.primary : colors.textSecondary}
-      />
+      {agent ? (
+        <AgentAvatar agent={agent} size="lg" />
+      ) : (
+        <Users size={18} color={colors.textSecondary} />
+      )}
       <View style={styles.label}>
         <Text
           numberOfLines={1}

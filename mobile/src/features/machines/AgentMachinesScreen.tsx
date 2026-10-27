@@ -1,3 +1,4 @@
+import { AgentAvatar } from "../../components/AgentAvatar";
 import { useRef, useState, type PropsWithChildren } from "react";
 import { View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -123,9 +124,12 @@ export function AgentMachinesScreen({
       )}
       {query.data && !selected && !query.error && (
         <>
-          <Label style={machineStyles.heading}>
-            {query.data.agent.display_name ?? query.data.agent.name}
-          </Label>
+          <View style={machineStyles.row}>
+            <AgentAvatar agent={query.data.agent} size="lg" />
+            <Label style={machineStyles.heading}>
+              {query.data.agent.display_name ?? query.data.agent.name}
+            </Label>
+          </View>
           <Label muted style={machineStyles.metadata}>
             Machine permissions only narrow the local capability ceiling. Saving
             cancels this agent's current work on that machine. External API-key

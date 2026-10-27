@@ -76,6 +76,7 @@ function setup(
         scroll() {},
       }),
     },
+    "../../components/AgentAvatar": { AgentAvatar: "AgentAvatar", AgentAvatarStack: "AgentAvatarStack" },
     "react/jsx-runtime": {
       jsx: (type: unknown, props: unknown, key?: unknown) => ({
         type,
