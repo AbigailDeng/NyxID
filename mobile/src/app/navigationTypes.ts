@@ -52,6 +52,7 @@ export type WorkspaceSheetParamList = SharedEntryParamList & {
   GroupEditor: { groupId?: string } | undefined;
   ServiceSetup: { connectionId?: string; catalogSlug?: string };
   AgentSkills: { agentId: string };
+  AgentMachines: { agentId: string };
   MachinePolicy: { machineId: string; ownerId: string };
   MachineActivity: { machineId: string; ownerId: string };
   AutomationDetail: { id: string };

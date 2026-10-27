@@ -50,6 +50,8 @@ Artifacts/Assistant Activity/folder placeholders are not treated as new durable 
 
 ## Native UI alignment after main integration
 
+Agent details include a dedicated machine access drawer page. It uses revisioned agent-machine APIs with five capability switches, preserves saved-login scope and service grants, and requires browser access for computer/developer browser. Selection-required, shared legacy, separation refusal, revocation, delivery and quarantine remain visible. Context changes request an owner action card; requesting does not apply the change. The context-request endpoint snapshots the live assignment on the server rather than trusting the submitted selection; the client rereads revision/ownership before dispatch. External API-key/OAuth machine grants remain deferred.
+
 The [native route inventory](NATIVE_WORKSPACE_ROUTES.md) enumerates every module,
 management stack registration, shared auth/legal entry, cold fallback and
 challenge path. One retained management drawer adopts safe-area-top +10pt,

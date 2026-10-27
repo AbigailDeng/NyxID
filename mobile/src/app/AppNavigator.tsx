@@ -25,6 +25,7 @@ import {
 import { AccountSecurityScreen } from "../features/account/AccountSecurityScreen";
 import { MachinePolicyScreen } from "../features/machines/MachinePolicyScreen";
 import { MachineActivityScreen } from "../features/machines/MachineActivityScreen";
+import { AgentMachinesScreen } from "../features/machines/AgentMachinesScreen";
 import { MachinesScreen } from "../features/machines/MachinesScreen";
 import { ActivityScreen } from "../features/activity/ActivityScreen";
 import { ActivityDetailScreen } from "../features/activity/ActivityDetailScreen";
@@ -109,6 +110,9 @@ function AgentsRoute({ navigation, route }: WorkspaceScreenProps<"Agents">) {
       onCreateGroup={() => navigation.push("GroupEditor")}
       onOpenChat={openChat}
       onOpenSkills={(agentId) => navigation.push("AgentSkills", { agentId })}
+      onOpenMachines={(agentId) =>
+        navigation.push("AgentMachines", { agentId })
+      }
       onOpenAutomations={(agentId) =>
         navigation.navigate({
           name: "Automations",
@@ -186,6 +190,9 @@ function AgentDetailRoute({
       onClose={() => navigation.goBack()}
       onOpenChat={openChat}
       onOpenSkills={(agentId) => navigation.push("AgentSkills", { agentId })}
+      onOpenMachines={(agentId) =>
+        navigation.push("AgentMachines", { agentId })
+      }
       onOpenAutomations={(agentId) =>
         navigation.popTo(
           "Pages",
@@ -507,6 +514,11 @@ function WorkspaceSheetRoute({
             name="MachineActivity"
             component={MachineActivityScreen}
             options={{ title: "Machine activity" }}
+          />
+          <SheetStack.Screen
+            name="AgentMachines"
+            component={AgentMachinesScreen}
+            options={{ title: "Agent machine access" }}
           />
           <SheetStack.Screen
             name="AgentSkills"

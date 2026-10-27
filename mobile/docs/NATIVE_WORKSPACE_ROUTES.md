@@ -26,6 +26,7 @@ in `navigationHierarchy.ts` and `workspaceChatNavigation.ts`.
 | SheetStack / MachinePolicy | Owner confirmation/single-user login policy and separate automatic-update save; explicit update confirmation. Dirty/pending/uncertain-result guards. Cold fallback Machines. |
 | SheetStack / MachineActivity | Metadata activity with Agent/unattributed filters and cursor pages; cold fallback Machines. |
 | SheetStack / AgentSkills | Current specialist's exact-version skills and nested review/history. Cold fallback is Agents. |
+| SheetStack / AgentMachines | Revisioned per-agent capability editor; read-only local ceiling and recovery states. Context selection requests an owner card and opens its exact conversation/acknowledgement. Cold fallback Agents. |
 | SheetStack / AutomationDetail | Existing automation details; cold fallback Automations. |
 | SheetStack / AutomationEditor | Create/edit automation; cold fallback Automations. |
 | SheetStack / AutomationRuns | Existing run history; cold fallback Automations. |

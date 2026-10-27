@@ -78,6 +78,7 @@ export function AgentsScreen({
   onOpenChat,
   onOpenSkills,
   onOpenAutomations,
+  onOpenMachines,
   onClose,
   listHeader,
   initialCreate = false,
@@ -88,6 +89,7 @@ export function AgentsScreen({
   onOpenChat?: OpenChat;
   onOpenSkills?: (agentId: string) => void;
   onOpenAutomations?: (agentId: string) => void;
+  onOpenMachines?: (agentId: string) => void;
   onClose?: () => void;
   listHeader?: ReactNode;
   initialCreate?: boolean;
@@ -412,6 +414,14 @@ export function AgentsScreen({
                   label="Agent skills"
                   variant="secondary"
                   onPress={() => onOpenSkills(agent.id)}
+                  disabled={busy}
+                />
+              )}
+              {alive && maintain && onOpenMachines && (
+                <ActionButton
+                  label="Agent machine access"
+                  variant="secondary"
+                  onPress={() => onOpenMachines(agent.id)}
                   disabled={busy}
                 />
               )}
