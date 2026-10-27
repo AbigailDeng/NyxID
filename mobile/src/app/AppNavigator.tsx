@@ -23,6 +23,8 @@ import {
   AccountSettingsTitle,
 } from "../features/account/AccountSettingsScreen";
 import { AccountSecurityScreen } from "../features/account/AccountSecurityScreen";
+import { MachinePolicyScreen } from "../features/machines/MachinePolicyScreen";
+import { MachineActivityScreen } from "../features/machines/MachineActivityScreen";
 import { MachinesScreen } from "../features/machines/MachinesScreen";
 import { ActivityScreen } from "../features/activity/ActivityScreen";
 import { ActivityDetailScreen } from "../features/activity/ActivityDetailScreen";
@@ -332,7 +334,11 @@ function WorkspacePages() {
         component={ServicesScreen}
         options={{ title: "Services" }}
       />
-      <Tabs.Screen name="Machines" component={MachinesScreen} options={{ title: "Machines" }} />
+      <Tabs.Screen
+        name="Machines"
+        component={MachinesScreen}
+        options={{ title: "Machines" }}
+      />
       <Tabs.Screen
         name="Activity"
         component={ActivityScreen}
@@ -491,6 +497,16 @@ function WorkspaceSheetRoute({
                 ? "Connect service"
                 : "Manage connection",
             })}
+          />
+          <SheetStack.Screen
+            name="MachinePolicy"
+            component={MachinePolicyScreen}
+            options={{ title: "Owner policy and updates" }}
+          />
+          <SheetStack.Screen
+            name="MachineActivity"
+            component={MachineActivityScreen}
+            options={{ title: "Machine activity" }}
           />
           <SheetStack.Screen
             name="AgentSkills"

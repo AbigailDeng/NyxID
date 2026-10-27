@@ -61,6 +61,8 @@ const sheetOptions = {
     "GroupEditor",
     "ServiceSetup",
     "AgentSkills",
+    "MachinePolicy",
+    "MachineActivity",
     "ActivityDetail",
     "AutomationDetail",
     "AutomationEditor",
@@ -723,7 +725,6 @@ test("a cold ServiceSetup drawer returns to Plugins with the retained chat under
   assert.equal(partial.routes[0]?.name, "Workspace");
 });
 
-
 test("canonical machine links keep chat underneath and select detail or logins", () => {
   for (const [path, params] of [
     ["assistant/machines", undefined],
@@ -731,9 +732,37 @@ test("canonical machine links keep chat underneath and select detail or logins",
     ["assistant/machines?tab=logins", { tab: "logins" }],
   ] as const) {
     const state = linkedState(path);
-    assert.deepEqual(focusedNames(state), ["WorkspaceSheet", "Pages", "Machines"]);
+    assert.deepEqual(focusedNames(state), [
+      "WorkspaceSheet",
+      "Pages",
+      "Machines",
+    ]);
     assert.equal(state.routes[0]?.name, "Workspace");
     const panel = selected(selected(state).state!);
     assert.deepEqual(selected(panel.state!).params, params);
+  }
+});
+
+test("cold machine management details fall back to Machines in the same drawer", () => {
+  for (const name of ["MachinePolicy", "MachineActivity"]) {
+    const state = withWorkspaceFallback({
+      stale: true as const,
+      routes: [
+        {
+          name: "WorkspaceSheet",
+          state: {
+            stale: true as const,
+            routes: [
+              { name: "Pages" },
+              { name, params: { machineId: "machine", ownerId: "owner" } },
+            ],
+          },
+        },
+      ],
+    });
+    const sheet = selected(state!).state!;
+    const pages = sheet.routes[0]!;
+    assert.equal(selected(pages.state!).name, "Machines");
+    assert.equal(state!.routes[0]!.name, "Workspace");
   }
 });

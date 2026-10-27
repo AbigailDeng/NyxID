@@ -23,6 +23,8 @@ in `navigationHierarchy.ts` and `workspaceChatNavigation.ts`.
 | SheetStack / AgentDetail | Specialist profile, permissions, model and related actions; creation/details use the same screen implementation. |
 | SheetStack / GroupEditor | Create/edit group, ownership and membership; dirty/pending guards. Cold edit fallback is Agents → Groups. |
 | SheetStack / ServiceSetup | Connection setup/manage; cold nested Back returns to Plugins. |
+| SheetStack / MachinePolicy | Owner confirmation/single-user login policy and separate automatic-update save; explicit update confirmation. Dirty/pending/uncertain-result guards. Cold fallback Machines. |
+| SheetStack / MachineActivity | Metadata activity with Agent/unattributed filters and cursor pages; cold fallback Machines. |
 | SheetStack / AgentSkills | Current specialist's exact-version skills and nested review/history. Cold fallback is Agents. |
 | SheetStack / AutomationDetail | Existing automation details; cold fallback Automations. |
 | SheetStack / AutomationEditor | Create/edit automation; cold fallback Automations. |

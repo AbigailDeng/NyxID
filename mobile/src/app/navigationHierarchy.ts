@@ -219,15 +219,17 @@ export function withWorkspaceFallback(
     const sheet = route.state;
     const detail = sheet.routes[sheet.index ?? sheet.routes.length - 1];
     if (!detail || detail.name === "Pages") return route;
-    const panel = detail.name.startsWith("Automation")
-      ? "Automations"
-      : detail.name === "AccountSecurity"
-        ? "AccountSettings"
-        : detail.name === "ActivityDetail"
-          ? "Activity"
-          : detail.name === "ServiceSetup"
-            ? "Plugins"
-            : "Agents";
+    const panel = detail.name.startsWith("Machine")
+      ? "Machines"
+      : detail.name.startsWith("Automation")
+        ? "Automations"
+        : detail.name === "AccountSecurity"
+          ? "AccountSettings"
+          : detail.name === "ActivityDetail"
+            ? "Activity"
+            : detail.name === "ServiceSetup"
+              ? "Plugins"
+              : "Agents";
     const sheetRoutes = sheet.routes.map((page) => {
       if (page.name !== "Pages" || page.state) return page;
       changed = true;
