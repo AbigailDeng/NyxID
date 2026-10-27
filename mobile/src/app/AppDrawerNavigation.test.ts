@@ -1,4 +1,5 @@
 import { workspaceAccessibilityState } from "../lib/accessibility/workspaceAccessibility";
+import { createWorkspaceFocusState } from "../lib/accessibility/workspaceFocusState";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { URL, fileURLToPath } from "node:url";
@@ -91,6 +92,7 @@ function shellSource() {
 function setup() {
   let rootState = fixture();
   let authenticated = true;
+  let authEpoch = 0;
   let ready = true;
   let rootReads = 0;
   let cursor = 0;
@@ -100,6 +102,18 @@ function setup() {
   const effects = new Map<number, Effect>();
   let pendingEffects: number[] = [];
   const dispatched: NavigationAction[] = [];
+  const focused: number[] = [];
+  const scheduled: (() => void)[] = [];
+  const scheduledWhileHidden: boolean[] = [];
+  const nativeMenuOwner = Symbol("native menu host");
+  const focus = createWorkspaceFocusState(
+    (target) => focused.push(target),
+    (callback) => {
+      scheduledWhileHidden.push(background().props.accessibilityElementsHidden);
+      scheduled.push(callback);
+    },
+    () => authEpoch,
+  );
   const react = {
     useRef: <T>(initial: T) => {
       const i = cursor++;
@@ -183,7 +197,7 @@ function setup() {
       Provider: "WorkspaceAccessibilityProvider",
     },
     workspaceAccessibilityState,
-    workspaceFocus: { context() {} },
+    workspaceFocus: focus,
     appLinking: {},
     pushToastStyles: { overlay: {} },
     appRootStyles: { fill: { flex: 1 } },
@@ -233,19 +247,48 @@ function setup() {
     assert.ok(element, `Missing rendered ${name}`);
     return element;
   };
+  const background = () =>
+    elements(rendered).find(
+      (item) =>
+        item.type === "View" && "accessibilityElementsHidden" in item.props,
+    )!;
   dirty = true;
   flush();
   return {
     dispatched,
+    focus,
+    focused,
+    scheduledWhileHidden,
+    flushFocus: () => {
+      while (scheduled.length) scheduled.shift()!();
+    },
     flush,
-    drawer: () => find("WorkspaceDrawer"),
-    background: () =>
-      elements(rendered).find(
-        (item) =>
-          item.type === "View" && "accessibilityElementsHidden" in item.props,
-      )!,
+    drawer: (): Element => {
+      const element = find("WorkspaceDrawer");
+      return {
+        ...element,
+        props: {
+          ...element.props,
+          onDismiss: () => {
+            // The actual native host releases ownership before this shell callback.
+            focus.setModalActive(nativeMenuOwner, false);
+            element.props.onDismiss();
+          },
+        },
+      };
+    },
+    background,
     open: () => {
       find("AppNavigator").props.onOpenMenu();
+      flush();
+      focus.setModalActive(nativeMenuOwner, true);
+    },
+    readyNavigation: () => {
+      find("NavigationContainer").props.onReady();
+      flush();
+    },
+    changedNavigation: () => {
+      find("NavigationContainer").props.onStateChange();
       flush();
     },
     setState: (state: NavigationState) => {
@@ -254,7 +297,9 @@ function setup() {
     state: () => rootState,
     rootReads: () => rootReads,
     authenticate: (next: boolean) => {
+      if (authenticated !== next) authEpoch++;
       authenticated = next;
+      if (!next) focus.setModalActive(nativeMenuOwner, false);
       dirty = true;
       flush();
     },
@@ -357,6 +402,88 @@ test("navigation accessibility stays excluded through menu exit and restores aft
   env.authenticate(false);
   assert.equal(env.hasDrawer(), false);
   assert.equal(env.background().props.accessibilityElementsHidden, false);
+});
+
+test("plain menu Close restores a live primary owner only after the background visibility commit", () => {
+  const env = setup();
+  env.readyNavigation();
+  const scope = env.state().routes[0]!.key;
+  const original = Symbol("invoking header");
+  let tag = 10;
+  env.focus.register(original, () => tag, true, scope);
+  env.focus.invoked(original);
+  env.open();
+  env.drawer().props.onClose();
+  env.flush();
+  env.flushFocus();
+  assert.deepEqual(env.focused, [], "closing animation still owns focus");
+  env.drawer().props.onDismiss();
+  assert.equal(
+    env.background().props.accessibilityElementsHidden,
+    true,
+    "the shell has not committed restored visibility yet",
+  );
+  env.flush();
+  assert.equal(env.background().props.accessibilityElementsHidden, false);
+  assert.ok(env.scheduledWhileHidden.length > 0);
+  assert.ok(
+    env.scheduledWhileHidden.every((hidden) => !hidden),
+    "return focus is scheduled after the visible background commit",
+  );
+  env.focus.release(original);
+  env.focus.register(Symbol("remounted header"), () => tag, true, scope);
+  tag = 20;
+  env.flushFocus();
+  assert.deepEqual(
+    env.focused,
+    [20],
+    "resolve the mounted active owner and its current native handle",
+  );
+});
+
+test("menu return focus is skipped or cancelled for navigation, auth, scope replacement and reopening", () => {
+  for (const cancel of [
+    "navigation",
+    "auth",
+    "auth-before-dismiss",
+    "scope",
+    "reopen",
+  ] as const) {
+    const env = setup();
+    env.readyNavigation();
+    const scope = env.state().routes[0]!.key;
+    const owner = Symbol("invoking header");
+    env.focus.register(owner, () => 10, true, scope);
+    env.focus.invoked(owner);
+    env.open();
+    if (cancel === "navigation") env.drawer().props.onNavigate("Agents");
+    else env.drawer().props.onClose();
+    env.flush();
+    const dismiss = env.drawer().props.onDismiss;
+    if (cancel === "auth-before-dismiss") env.authenticate(false);
+    dismiss();
+    env.flush();
+    if (cancel === "auth") env.authenticate(false);
+    if (cancel === "scope") {
+      env.setState({
+        ...env.state(),
+        routes: [{ name: "GroupChat", key: "replacement-group" }],
+        index: 0,
+      });
+      env.changedNavigation();
+    }
+    if (cancel === "reopen") env.open();
+    env.flushFocus();
+    assert.deepEqual(env.focused, [], cancel);
+    if (cancel === "navigation") {
+      assert.equal(env.dispatched.length, 1);
+      assert.deepEqual(
+        env.scheduledWhileHidden,
+        [],
+        "queued navigation never requests primary focus",
+      );
+    }
+  }
 });
 
 test("management Chats resolves the latest root state when dismissal completes", () => {

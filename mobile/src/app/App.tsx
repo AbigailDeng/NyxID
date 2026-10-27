@@ -480,6 +480,10 @@ function ThemedAppShell({
   const { isAuthenticated } = useAuthSession();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerPresented, setDrawerPresented] = useState(false);
+  const drawerOrigin =
+    useRef<ReturnType<typeof workspaceFocus.capture>>(undefined);
+  const pendingMenuFocus =
+    useRef<ReturnType<typeof workspaceFocus.capture>>(undefined);
   const pendingDrawerNavigation = useRef<(() => void) | undefined>(undefined);
   const [currentChat, setCurrentChat] = useState<WorkspaceChatTarget>();
   const [accessibility, setAccessibility] = useState<WorkspaceAccessibility>({
@@ -495,20 +499,30 @@ function ThemedAppShell({
   useEffect(() => {
     if (!isAuthenticated) {
       pendingDrawerNavigation.current = undefined;
+      drawerOrigin.current = undefined;
+      pendingMenuFocus.current = undefined;
       setDrawerOpen(false);
       setDrawerPresented(false);
       workspaceFocus.context(undefined, false);
     }
   }, [isAuthenticated]);
+  useEffect(() => {
+    if (drawerPresented) return;
+    const origin = pendingMenuFocus.current;
+    pendingMenuFocus.current = undefined;
+    if (isAuthenticated) workspaceFocus.restore(origin);
+  }, [drawerPresented, isAuthenticated]);
   // Remove the menu's native host before presenting the next destination.
   const closeDrawerThen = (navigate: () => void) => {
     pendingDrawerNavigation.current = navigate;
     setDrawerOpen(false);
   };
   const onDrawerDismiss = useCallback(() => {
-    setDrawerPresented(false);
     const navigate = pendingDrawerNavigation.current;
     pendingDrawerNavigation.current = undefined;
+    pendingMenuFocus.current = navigate ? undefined : drawerOrigin.current;
+    drawerOrigin.current = undefined;
+    setDrawerPresented(false);
     navigate?.();
   }, []);
   const navigateFromDrawer = (route: WorkspaceRoute) => {
@@ -560,6 +574,11 @@ function ThemedAppShell({
           <WorkspaceAccessibilityContext.Provider value={accessibility}>
             <AppNavigator
               onOpenMenu={() => {
+                pendingMenuFocus.current = undefined;
+                if (!drawerPresented)
+                  drawerOrigin.current = workspaceFocus.capture(
+                    accessibility.primaryKey,
+                  );
                 setDrawerPresented(true);
                 setDrawerOpen(true);
               }}
