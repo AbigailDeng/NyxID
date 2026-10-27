@@ -8,6 +8,9 @@ import {
   drawerAgentConversations,
   orderedDrawerAgents,
   searchDrawerItems,
+  splitChannelThreads,
+  threadTitle,
+  threadStatus,
 } from "./workspaceChatListModel";
 
 const agent = (id: string, overrides: object = {}) =>
@@ -195,5 +198,57 @@ test("empty searches return every row in order and search never mutates its inpu
   assert.deepEqual(
     rows.map((row) => row.id),
     ["a", "b"],
+  );
+});
+
+test("channel metadata retains separate bot identities and parent/topic labels in newest-first order", () => {
+  const channel = {
+    platform: "telegram",
+    channel_agent_id: "bot-one",
+    bot_label: "Same bot name",
+    chat_id: "chat",
+    chat_title: "Customer chat",
+    parent_chat_id: "parent",
+    parent_title: "Support",
+    thread_id: "topic",
+  };
+  const direct = chat(1, "agent-a");
+  const oldest = chat(2, "agent-a", { channel });
+  const latest = chat(3, "agent-a", {
+    channel,
+    last_message_at: "2026-10-17T00:00:00Z",
+  });
+  const otherBot = chat(4, "agent-a", {
+    channel: { ...channel, channel_agent_id: "bot-two" },
+  });
+  const legacy = chat(5, "agent-a", { channel: { platform: "lark" } });
+  const split = splitChannelThreads(
+    drawerAgentConversations(
+      [{ conversations: [oldest, otherBot, latest, direct, legacy] }],
+      agent("agent-a"),
+    ),
+  );
+  assert.deepEqual(split.own, [direct]);
+  assert.deepEqual(
+    split.bots.map((bot) => bot.key),
+    ["bot-one", "bot-two", "platform:lark"],
+  );
+  assert.deepEqual(split.bots[0]!.threads, [latest, oldest]);
+  assert.equal(split.bots[2]!.label, "Lark bot");
+  assert.equal(split.bots[0]!.threads[0]!.channel?.parent_title, "Support");
+  assert.equal(threadTitle(latest), "Customer chat");
+  assert.equal(threadTitle(legacy), "Same title");
+});
+
+test("pending decisions take precedence over running turns without inventing completed work", () => {
+  const idle = chat(1, "a");
+  const running = chat(2, "a", {
+    active_turn: { turn_id: "turn", started_at: "2026-10-17T00:00:00Z" },
+  });
+  assert.equal(threadStatus(idle), undefined);
+  assert.equal(threadStatus(running), "Running");
+  assert.equal(
+    threadStatus({ ...running, pending_acknowledgements: 2 }),
+    "Needs you",
   );
 });

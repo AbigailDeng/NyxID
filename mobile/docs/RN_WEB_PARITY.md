@@ -104,3 +104,16 @@ voice conversations are unsupported. Provider audio and microphone behavior
 still require device verification; JavaScript exports do not establish acoustic
 or provider compatibility. No iOS orientation/tablet support, RN-web, native rail
 or live desktop capability was added.
+
+
+The side menu expands one agent's saved threads directly beneath its row, newest
+first, with a shallow guide line, relative times, Current, Needs you and Running
+labels. Its header stays pinned while those threads scroll. Channel chats are
+separate counted bot disclosures (opaque connection IDs), with parent/topic
+labels when supplied; the current child stays visible and Show more expands the
+loaded batch. New chat with the agent follows the thread rows. Crews retain a
+separate section with the same current/status/time language. Existing bounded
+previews and searchable all-items browsers keep long accounts navigable; older
+cursor pages remain explicit. The shared authenticated metadata stream refreshes
+agent, crew and thread reads, with foreground/offline/account fences and polling
+fallback. No server contracts or URLs change.

@@ -72,3 +72,12 @@ active primary control after transitions; auth/context handoffs cancel restorati
 
 This inventory describes native iOS/Android. It adds no RN-web route support,
 new API, native live desktop admission, or native transcript index.
+
+
+Side-menu agent rows disclose threads in place without changing the active
+route. The expanded header pins while its threads scroll; channel bot and
+parent/topic disclosures narrow the same agent history. Selecting a thread
+opens its exact conversation ID through the existing chat navigation; New chat
+retains the selected agent. Crews remain a distinct section. All-items browsers
+finish their native dismissal before selecting a chat. These disclosures add no
+routes or deep-link variants.

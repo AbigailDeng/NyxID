@@ -280,6 +280,7 @@ test("ready and resync catch up from saved group reads and clear coalesced signa
       [
         ["workspace", "groups", 1],
         ["workspace", "agents"],
+        ["workspace", "drawer-chats", 1],
       ],
     );
     h.invalidations.length = 0;
@@ -313,6 +314,7 @@ test("more than 256 pending groups collapse to one epoch root without losing cov
     [
       ["workspace", "groups", 1],
       ["workspace", "agents"],
+      ["workspace", "drawer-chats", 1],
     ],
   );
   release();
@@ -328,4 +330,39 @@ test("an unexpectedly rejected runner exposes connecting fallback without an unh
   release();
   h.runs[0]!.onStatus("live");
   assert.equal(h.session.getStatus(h.client, 1), "idle");
+});
+
+test("private and channel event bursts share the throttled drawer refresh and respect release fences", () => {
+  const h = harness();
+  const release = h.session.acquire(h.client, 1, () => true);
+  for (let index = 0; index < 10; index++) {
+    h.runs[0]!.onEvent({
+      type: "conversation",
+      id: "private",
+      group_id: null,
+      turn_id: "turn",
+      messages: index,
+    });
+    h.runs[0]!.onEvent({ type: "channels" });
+  }
+  h.advance(1999);
+  assert.equal(h.invalidations.length, 0);
+  h.advance(1);
+  assert.deepEqual(
+    h.invalidations.map((call) => call.key),
+    [
+      ["workspace", "drawer-chats", 1],
+      ["workspace", "agents"],
+    ],
+  );
+  h.runs[0]!.onEvent({
+    type: "channel_thread",
+    id: "child",
+    channel_id: "bot",
+    parent_id: null,
+    conversation_id: "private",
+  });
+  release();
+  h.advance(2000);
+  assert.equal(h.invalidations.length, 2);
 });

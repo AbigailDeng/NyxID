@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   AppState,
   Pressable,
+  ScrollView,
+  type ScrollViewProps,
   StyleSheet,
   Text,
   View,
@@ -21,6 +23,9 @@ import type { AssistantAgent } from "../../features/agents/agentContracts";
 import type { AssistantConversation } from "../../features/assistant/assistantTypes";
 import type { Group } from "../../features/groups/groupContracts";
 import { chatAgentLabel } from "../../features/assistant/assistantAgentContext";
+import { formatRelativeTimeFromMs } from "../../lib/time";
+import { useGroupsLive } from "../../features/groups/useGroupsLive";
+import { livePollInterval } from "../../lib/api/assistantLiveTransport";
 import { groupKeys } from "../../features/groups/groupLiveRefresh";
 import { useNetworkStatus } from "../../hooks/useNetworkStatus";
 import { agentsApi } from "../../lib/api/agentsApi";
@@ -35,9 +40,15 @@ import {
   DRAWER_PREVIEW_LIMIT,
   drawerAgentConversations,
   orderedDrawerAgents,
+  splitChannelThreads,
+  channelPlatformName,
+  threadTitle,
+  threadStatus,
 } from "./workspaceChatListModel";
 
 type Props = {
+  scrollHeader?: ReactNode;
+  scrollProps?: ScrollViewProps;
   visible: boolean;
   current?: WorkspaceChatTarget;
   onSelect: (target: WorkspaceChatTarget) => void;
@@ -53,6 +64,8 @@ type Browser =
   | { kind: "chats"; fromAgents: boolean };
 
 export function WorkspaceChatList({
+  scrollHeader,
+  scrollProps,
   visible,
   current,
   onSelect,
@@ -79,6 +92,17 @@ export function WorkspaceChatList({
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
   const active = visible && foreground && isConnected;
+  const available = () =>
+    visible &&
+    AppState.currentState === "active" &&
+    isConnected &&
+    epoch === getAuthEpoch();
+  const live = useGroupsLive(epoch, active, available);
+  const [channelDisclosures, setChannelDisclosures] = useState<
+    Record<string, { open: boolean; active?: string; shown: number }>
+  >({});
+  const [pastThreads, setPastThreads] = useState(false);
+  const sticky = useRef({ bottom: Infinity, headerHeight: 0, scrollY: 0 });
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) =>
       setForeground(state === "active"),
@@ -97,12 +121,14 @@ export function WorkspaceChatList({
     queryKey: ["workspace", "agents", "drawer", epoch],
     queryFn: ({ signal }) => agentsApi.list(signal),
     enabled: active,
+    refetchInterval: livePollInterval(5000, live),
     retry: false,
   });
   const groups = useQuery({
     queryKey: [...groupKeys(epoch), "list"],
     queryFn: ({ signal }) => groupsApi.list(signal),
     enabled: active,
+    refetchInterval: livePollInterval(5000, live),
     retry: false,
   });
   const allAgents = orderedDrawerAgents(agents.data?.agents ?? []);
@@ -115,6 +141,10 @@ export function WorkspaceChatList({
     current?.kind === "agent" ? current.agentId : undefined;
   const openId = expandedAgent !== undefined ? expandedAgent : currentAgentId;
   const agent = allAgents.find((row) => row.id === openId);
+  useEffect(() => {
+    sticky.current.bottom = Infinity;
+    setPastThreads(false);
+  }, [openId, sections.agents]);
   const agentRef = useRef(agent);
   agentRef.current = agent;
   const canStartChat =
@@ -130,6 +160,7 @@ export function WorkspaceChatList({
       !!agent &&
       agent.can_use !== false &&
       (sections.agents || browser?.kind === "chats"),
+    refetchInterval: livePollInterval(5000, live),
     retry: false,
   });
   const chats =
@@ -145,8 +176,9 @@ export function WorkspaceChatList({
       : undefined;
   const missingCurrent =
     !!selectedChatId && !chats.some((row) => row.id === selectedChatId);
+  const threads = splitChannelThreads(chats);
   const previewChats = boundedDrawerPreview(
-    chats,
+    threads.own,
     selectedChatId,
     DRAWER_PREVIEW_LIMIT - (missingCurrent ? 1 : 0),
   );
@@ -214,17 +246,12 @@ export function WorkspaceChatList({
   const chatRow = (row: AssistantConversation) => (
     <ChatRow
       key={row.id}
-      label={row.title.trim() || "Untitled chat"}
-      detail={
-        row.active_turn
-          ? "Working…"
-          : row.pending_acknowledgements
-            ? "Needs approval"
-            : row.channel?.platform
-      }
+      label={threadTitle(row)}
+      detail={formatRelativeTimeFromMs(Date.parse(row.last_message_at))}
+      status={threadStatus(row)}
       selected={selectedChatId === row.id}
       onPress={() => openChat(row.id)}
-      accessibilityLabel={`Open chat ${row.title.trim() || "Untitled chat"} with ${agent ? chatAgentLabel(agent) : "agent"}`}
+      accessibilityLabel={`Open chat ${threadTitle(row)} with ${agent ? chatAgentLabel(agent) : "agent"}${threadStatus(row) ? `, ${threadStatus(row)}` : ""}${selectedChatId === row.id ? ", current thread" : ""}`}
     />
   );
   const groupRow = (row: Group) => (
@@ -262,14 +289,15 @@ export function WorkspaceChatList({
   const startChat =
     canStartChat && agent ? (
       <ChatRow
-        label="New chat"
+        label={`New chat with ${chatAgentLabel(agent)}`}
+        create
         selected={
           current?.kind === "agent" &&
           current.agentId === agent.id &&
           !current.conversationId
         }
         onPress={() => openChat()}
-        accessibilityLabel={`Start a chat with ${chatAgentLabel(agent)}`}
+        accessibilityLabel={`New chat with ${chatAgentLabel(agent)}`}
       />
     ) : null;
   const currentRow = missingCurrent ? (
@@ -279,146 +307,310 @@ export function WorkspaceChatList({
       onPress={() => openChat(selectedChatId)}
     />
   ) : null;
-  return (
-    <View style={styles.sections}>
-      <SectionHeading
-        label="Agent chats"
-        count={allAgents.length}
-        expanded={sections.agents}
-        createLabel="New agent"
-        onCreate={onCreateAgent}
-        createDisabled={!active}
-        onPress={() =>
-          setSections((value) => ({ ...value, agents: !value.agents }))
-        }
-      />
-      {sections.agents ? (
-        <>
-          {current?.kind === "agent" &&
-          current.conversationId &&
-          !current.agentId &&
-          !chats.some((row) => row.id === current.conversationId) ? (
-            <ChatRow
-              label="Current chat"
-              selected
-              onPress={() => onSelect(current)}
-            />
-          ) : null}
-          {!isConnected ? (
-            <DrawerMessage text="Offline · showing saved chats" />
-          ) : null}
-          {agents.isPending ? (
-            <DrawerMessage text="Loading agents…" loading={active} />
-          ) : null}
-          {agents.isError ? (
-            <DrawerMessage
-              text="Couldn’t load agents."
-              retry={() => void agents.refetch()}
-              disabled={!active}
-            />
-          ) : null}
-          {agents.isSuccess && !allAgents.length ? (
-            <DrawerMessage text="No agents yet." />
-          ) : null}
-          {boundedDrawerPreview(allAgents, openId || currentAgentId).map(
-            (row) => (
-              <View key={row.id}>
+  const rows: ReactNode[] = [
+    <View key="workspace">{scrollHeader}</View>,
+    <SectionHeading
+      key="agents"
+      label="Agent chats"
+      count={allAgents.length}
+      expanded={sections.agents}
+      createLabel="New agent"
+      onCreate={onCreateAgent}
+      createDisabled={!active}
+      onPress={() =>
+        setSections((value) => ({ ...value, agents: !value.agents }))
+      }
+    />,
+  ];
+  let stickyIndex: number | undefined;
+  if (sections.agents) {
+    rows.push(
+      <View key="agent-status">
+        {current?.kind === "agent" &&
+        current.conversationId &&
+        !current.agentId &&
+        !chats.some((row) => row.id === current.conversationId) ? (
+          <ChatRow
+            label="Current chat"
+            selected
+            onPress={() => onSelect(current)}
+          />
+        ) : null}
+        {!isConnected ? (
+          <DrawerMessage text="Offline · showing saved chats" />
+        ) : null}
+        {agents.isPending ? (
+          <DrawerMessage text="Loading agents…" loading={active} />
+        ) : null}
+        {agents.isError ? (
+          <DrawerMessage
+            text="Couldn’t load agents."
+            retry={() => void agents.refetch()}
+            disabled={!active}
+          />
+        ) : null}
+        {agents.isSuccess && !allAgents.length ? (
+          <DrawerMessage text="No agents yet." />
+        ) : null}
+      </View>,
+    );
+    for (const row of boundedDrawerPreview(
+      allAgents,
+      openId || currentAgentId,
+    )) {
+      const expanded = openId === row.id;
+      if (expanded) stickyIndex = rows.length;
+      const status = row.pending_acknowledgements
+        ? "Needs you"
+        : row.status === "running"
+          ? "Running"
+          : undefined;
+      rows.push(
+        <View
+          key={`agent:${row.id}`}
+          style={{ backgroundColor: colors.cardSoft }}
+          onLayout={
+            expanded
+              ? (event) => {
+                  sticky.current.headerHeight = event.nativeEvent.layout.height;
+                }
+              : undefined
+          }
+        >
+          <DisclosureRow
+            label={chatAgentLabel(row)}
+            detail={
+              [status, agentDetail(row)].filter(Boolean).join(" · ") ||
+              undefined
+            }
+            expanded={expanded}
+            selected={
+              current?.kind === "agent" &&
+              (current.agentId === row.id ||
+                (!current.agentId &&
+                  !current.conversationId &&
+                  row.kind === "nyxbot"))
+            }
+            onPress={() => setExpandedAgent(expanded ? null : row.id)}
+            kind="agent"
+          />
+        </View>,
+      );
+      if (!expanded) continue;
+      rows.push(
+        <View
+          key={`threads:${row.id}`}
+          accessibilityLabel={`Threads with ${chatAgentLabel(row)}`}
+          style={[styles.children, { borderColor: colors.border }]}
+          onLayout={(event) => {
+            const { y, height } = event.nativeEvent.layout;
+            sticky.current.bottom = y + height;
+            setPastThreads(
+              sticky.current.scrollY >=
+                y + height - sticky.current.headerHeight,
+            );
+          }}
+        >
+          {historyStatus}
+          {currentRow}
+          {previewChats.map(chatRow)}
+          {threads.bots.map((bot) => {
+            const key = `${row.id}:${bot.key}`;
+            const holdsActive = bot.threads.some(
+              (thread) => thread.id === selectedChatId,
+            );
+            const disclosure = channelDisclosures[key];
+            const open =
+              disclosure &&
+              (disclosure.active === selectedChatId || !holdsActive)
+                ? disclosure.open
+                : holdsActive;
+            const shown = disclosure?.shown ?? DRAWER_PREVIEW_LIMIT;
+            const visibleThreads = bot.threads.filter(
+              (thread, index) => index < shown || thread.id === selectedChatId,
+            );
+            const hidden = bot.threads.length - visibleThreads.length;
+            const status = bot.threads.some(
+              (thread) => thread.pending_acknowledgements,
+            )
+              ? "Needs you"
+              : bot.threads.some((thread) => thread.active_turn)
+                ? "Running"
+                : undefined;
+            const platform = channelPlatformName(bot.platform);
+            const update = (nextOpen: boolean, nextShown = shown) =>
+              setChannelDisclosures((value) => ({
+                ...value,
+                [key]: {
+                  open: nextOpen,
+                  active: selectedChatId,
+                  shown: nextShown,
+                },
+              }));
+            return (
+              <View key={key}>
                 <DisclosureRow
-                  label={chatAgentLabel(row)}
-                  detail={agentDetail(row)}
-                  expanded={openId === row.id}
-                  selected={
-                    current?.kind === "agent" &&
-                    (current.agentId === row.id ||
-                      (!current.agentId &&
-                        !current.conversationId &&
-                        row.kind === "nyxbot"))
-                  }
-                  onPress={() =>
-                    setExpandedAgent(openId === row.id ? null : row.id)
-                  }
-                  kind="agent"
+                  label={bot.label}
+                  detail={`${platform} · ${bot.threads.length} ${bot.threads.length === 1 ? "chat" : "chats"}${status ? ` · ${status}` : ""}`}
+                  expanded={Boolean(open)}
+                  selected={holdsActive}
+                  onPress={() => update(!open)}
+                  kind="group"
                 />
-                {openId === row.id ? (
+                {open ? (
                   <View
                     style={[styles.children, { borderColor: colors.border }]}
                   >
-                    {startChat}
-                    {historyStatus}
-                    {currentRow}
-                    {previewChats.map(chatRow)}
-                    {history.isSuccess &&
-                    !chats.length &&
-                    row.can_use !== false ? (
-                      <DrawerMessage
-                        text={
-                          row.status === "destroyed"
-                            ? "No saved chats for this deleted agent."
-                            : "No chats yet."
-                        }
-                      />
-                    ) : null}
-                    {row.can_use !== false &&
-                    (chats.length > previewChats.length ||
-                      history.hasNextPage) ? (
+                    {[
+                      ...new Set(
+                        visibleThreads.map(
+                          (thread) =>
+                            thread.channel?.parent_chat_id ||
+                            thread.channel?.chat_id ||
+                            thread.id,
+                        ),
+                      ),
+                    ].map((parentId) => {
+                      const children = visibleThreads.filter(
+                        (thread) =>
+                          (thread.channel?.parent_chat_id ||
+                            thread.channel?.chat_id ||
+                            thread.id) === parentId,
+                      );
+                      const followed = children.some(
+                        (thread) => thread.channel?.thread_id,
+                      );
+                      return (
+                        <View key={parentId}>
+                          {followed ? (
+                            <Text
+                              style={[
+                                styles.detail,
+                                { color: colors.textMuted },
+                              ]}
+                            >
+                              {children.find(
+                                (thread) => thread.channel?.parent_title,
+                              )?.channel?.parent_title || "Channel chat"}
+                            </Text>
+                          ) : null}
+                          <View
+                            style={
+                              followed
+                                ? [
+                                    styles.subthreads,
+                                    { borderColor: colors.border },
+                                  ]
+                                : undefined
+                            }
+                          >
+                            {children.map(chatRow)}
+                          </View>
+                        </View>
+                      );
+                    })}
+                    {hidden > 0 ? (
                       <MoreButton
-                        label="View all chats"
+                        label={`Show ${Math.min(hidden, DRAWER_PREVIEW_LIMIT * 4)} more`}
                         onPress={() =>
-                          setBrowser({ kind: "chats", fromAgents: false })
+                          update(true, shown + DRAWER_PREVIEW_LIMIT * 4)
                         }
                       />
                     ) : null}
                   </View>
                 ) : null}
               </View>
-            ),
-          )}
-          {allAgents.length > DRAWER_PREVIEW_LIMIT ? (
-            <MoreButton
-              label={`View all agents (${allAgents.length})`}
-              onPress={() => setBrowser({ kind: "agents" })}
-            />
-          ) : null}
-        </>
-      ) : null}
-      <SectionHeading
-        label="Crews"
-        count={allGroups.length}
-        expanded={sections.groups}
-        createLabel="New crew"
-        onCreate={onCreateGroup}
-        createDisabled={!active}
-        onPress={() =>
-          setSections((value) => ({ ...value, groups: !value.groups }))
-        }
-      />
-      {sections.groups ? (
-        <>
-          {groups.isPending ? (
-            <DrawerMessage text="Loading crews..." loading={active} />
-          ) : null}
-          {groups.isError ? (
+            );
+          })}
+          {history.isSuccess && !chats.length && row.can_use !== false ? (
             <DrawerMessage
-              text="Couldn’t load crews."
-              retry={() => void groups.refetch()}
-              disabled={!active}
+              text={
+                row.status === "destroyed"
+                  ? "No saved chats for this deleted agent."
+                  : "No chats yet."
+              }
             />
           ) : null}
-          {groups.isSuccess && !allGroups.length ? (
-            <DrawerMessage text="No crews yet." />
-          ) : null}
-          {boundedDrawerPreview(
-            allGroups,
-            current?.kind === "group" ? current.groupId : undefined,
-          ).map(groupRow)}
-          {allGroups.length > DRAWER_PREVIEW_LIMIT ? (
+          {row.can_use !== false &&
+          (threads.own.length > previewChats.length || history.hasNextPage) ? (
             <MoreButton
-              label={`View all crews (${allGroups.length})`}
-              onPress={() => setBrowser({ kind: "groups" })}
+              label="View all chats"
+              onPress={() => setBrowser({ kind: "chats", fromAgents: false })}
             />
           ) : null}
-        </>
-      ) : null}
+          {startChat}
+        </View>,
+      );
+    }
+    if (allAgents.length > DRAWER_PREVIEW_LIMIT)
+      rows.push(
+        <MoreButton
+          key="all-agents"
+          label={`View all agents (${allAgents.length})`}
+          onPress={() => setBrowser({ kind: "agents" })}
+        />,
+      );
+  }
+  rows.push(
+    <SectionHeading
+      key="crews"
+      label="Crews"
+      count={allGroups.length}
+      expanded={sections.groups}
+      createLabel="New crew"
+      onCreate={onCreateGroup}
+      createDisabled={!active}
+      onPress={() =>
+        setSections((value) => ({ ...value, groups: !value.groups }))
+      }
+    />,
+  );
+  if (sections.groups)
+    rows.push(
+      <View key="crew-rows">
+        {groups.isPending ? (
+          <DrawerMessage text="Loading crews..." loading={active} />
+        ) : null}
+        {groups.isError ? (
+          <DrawerMessage
+            text="Couldn’t load crews."
+            retry={() => void groups.refetch()}
+            disabled={!active}
+          />
+        ) : null}
+        {groups.isSuccess && !allGroups.length ? (
+          <DrawerMessage text="No crews yet." />
+        ) : null}
+        {boundedDrawerPreview(
+          allGroups,
+          current?.kind === "group" ? current.groupId : undefined,
+        ).map(groupRow)}
+        {allGroups.length > DRAWER_PREVIEW_LIMIT ? (
+          <MoreButton
+            label={`View all crews (${allGroups.length})`}
+            onPress={() => setBrowser({ kind: "groups" })}
+          />
+        ) : null}
+      </View>,
+    );
+  return (
+    <View style={styles.fill}>
+      <ScrollView
+        {...scrollProps}
+        stickyHeaderIndices={
+          stickyIndex !== undefined && !pastThreads ? [stickyIndex] : []
+        }
+        onScroll={(event) => {
+          sticky.current.scrollY = event.nativeEvent.contentOffset.y;
+          const past =
+            sticky.current.scrollY >=
+            sticky.current.bottom - sticky.current.headerHeight;
+          if (past !== pastThreads) setPastThreads(past);
+          scrollProps?.onScroll?.(event);
+        }}
+      >
+        {rows}
+      </ScrollView>
       {browser ? (
         <WorkspaceChatBrowser<BrowseRow>
           title={
@@ -460,7 +652,7 @@ export function WorkspaceChatList({
               ? `${chatAgentLabel(row.agent)} ${row.agent.name} ${row.agent.owner_name ?? ""}`
               : "group" in row
                 ? `${row.group.name} ${row.group.owner?.name ?? ""}`
-                : row.chat.title
+                : threadTitle(row.chat)
           }
           renderItem={(row) =>
             "agent" in row ? (
@@ -489,7 +681,7 @@ export function WorkspaceChatList({
               ? canStartChat && agent
                 ? {
                     label: "New chat",
-                    accessibilityLabel: `Start a chat with ${chatAgentLabel(agent)}`,
+                    accessibilityLabel: `New chat with ${chatAgentLabel(agent)}`,
                     onPress: () => openChat(),
                   }
                 : {
@@ -639,7 +831,7 @@ function GroupChatRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Open crew ${group.name}`}
+      accessibilityLabel={`Open crew ${group.name}${group.working_agent_ids.length ? `, ${group.working_agent_ids.length} running` : ""}${selected ? ", current crew" : ""}`}
       accessibilityState={{ selected }}
       onPress={onPress}
       style={({ pressed }) => [
@@ -670,6 +862,8 @@ function GroupChatRow({
             : `${group.message_count} messages`}{" "}
           · {group.members.length} agents
           {group.owner?.type === "org" ? ` · ${group.owner.name}` : ""}
+          {` · ${formatRelativeTimeFromMs(Date.parse(group.last_message_at || group.created_at))}`}
+          {selected ? " · Current" : ""}
         </Text>
       </View>
       <ChevronRight size={16} color={colors.textMuted} />
@@ -698,7 +892,7 @@ function DisclosureRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${expanded ? "Collapse" : "Expand"} chats for ${label}`}
+      accessibilityLabel={`${expanded ? "Collapse" : "Expand"} chats for ${label}${detail ? `, ${detail}` : ""}`}
       accessibilityState={{ expanded, selected }}
       onPress={onPress}
       style={({ pressed }) => [
@@ -740,14 +934,19 @@ function ChatRow({
   selected,
   onPress,
   accessibilityLabel,
+  status,
+  create,
 }: {
   label: string;
   detail?: string;
   selected: boolean;
   onPress: () => void;
   accessibilityLabel?: string;
+  status?: string;
+  create?: boolean;
 }) {
   const { colors } = useTheme();
+  const Icon = create ? Plus : MessageSquare;
   return (
     <Pressable
       accessibilityRole="button"
@@ -762,10 +961,7 @@ function ChatRow({
         },
       ]}
     >
-      <MessageSquare
-        size={14}
-        color={selected ? colors.primary : colors.textMuted}
-      />
+      <Icon size={14} color={selected ? colors.primary : colors.textMuted} />
       <View style={styles.label}>
         <Text
           numberOfLines={2}
@@ -776,6 +972,23 @@ function ChatRow({
         >
           {label}
         </Text>
+        {selected || status ? (
+          <Text
+            style={[
+              styles.detail,
+              {
+                color:
+                  status === "Needs you"
+                    ? colors.warning
+                    : colors.primaryOnTint,
+              },
+            ]}
+          >
+            {[selected ? "Current" : undefined, status]
+              .filter(Boolean)
+              .join(" · ")}
+          </Text>
+        ) : null}
         {detail ? (
           <Text
             numberOfLines={1}
@@ -827,6 +1040,8 @@ function DrawerMessage({
 }
 
 const styles = StyleSheet.create({
+  fill: { flex: 1 },
+  subthreads: { marginLeft: 8, paddingLeft: 5, borderLeftWidth: 1 },
   sectionHeading: { flexDirection: "row", alignItems: "center" },
   createButton: {
     width: 44,

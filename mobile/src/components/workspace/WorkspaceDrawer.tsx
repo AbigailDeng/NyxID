@@ -2,7 +2,6 @@ import { useRef } from "react";
 import {
   findNodeHandle,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -116,78 +115,85 @@ export function WorkspaceDrawer({
           </Pressable>
         </View>
         <View style={styles.scroll}>
-          <ScrollView
-            style={styles.scroll}
-            contentContainerStyle={styles.body}
-            scrollEventThrottle={32}
-            onLayout={(event) => scroll.layout(event.nativeEvent.layout.height)}
-            onContentSizeChange={(_width, height) => scroll.content(height)}
-            onScroll={(event) =>
-              scroll.scroll(event.nativeEvent.contentOffset.y)
-            }
-          >
-            <Text style={[styles.section, { color: colors.textMuted }]}>
-              QUICK ACTIONS
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              onPress={onScan}
-              style={styles.row}
-            >
-              <ScanQrCode color={colors.textSecondary} size={19} />
-              <Text style={[styles.rowText, { color: colors.textPrimary }]}>
-                Scan QR code
-              </Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={onLoginCode}
-              style={styles.row}
-            >
-              <KeyRound color={colors.textSecondary} size={19} />
-              <Text style={[styles.rowText, { color: colors.textPrimary }]}>
-                Terminal login code
-              </Text>
-            </Pressable>
-            <Text style={[styles.section, { color: colors.textMuted }]}>
-              YOUR WORKSPACE
-            </Text>
-            {destinations.map(({ route, label, Icon }) => (
-              <Pressable
-                key={route}
-                accessibilityRole="button"
-                accessibilityState={{ selected: currentRoute === route }}
-                onPress={() => onNavigate(route)}
-                style={[
-                  styles.row,
-                  {
-                    backgroundColor:
-                      currentRoute === route ? colors.navActive : "transparent",
-                  },
-                ]}
-              >
-                <Icon
-                  color={
-                    currentRoute === route
-                      ? colors.primary
-                      : colors.textSecondary
-                  }
-                  size={19}
-                />
-                <Text style={[styles.rowText, { color: colors.textPrimary }]}>
-                  {label}
+          <WorkspaceChatList
+            key={getAuthEpoch()}
+            visible={visible}
+            current={currentChat}
+            onSelect={onOpenChat}
+            onCreateAgent={onCreateAgent}
+            onCreateGroup={onCreateGroup}
+            scrollProps={{
+              style: styles.scroll,
+              contentContainerStyle: styles.body,
+              scrollEventThrottle: 32,
+              onLayout: (event) =>
+                scroll.layout(event.nativeEvent.layout.height),
+              onContentSizeChange: (_width, height) => scroll.content(height),
+              onScroll: (event) =>
+                scroll.scroll(event.nativeEvent.contentOffset.y),
+            }}
+            scrollHeader={
+              <>
+                <Text style={[styles.section, { color: colors.textMuted }]}>
+                  QUICK ACTIONS
                 </Text>
-              </Pressable>
-            ))}
-            <WorkspaceChatList
-              key={getAuthEpoch()}
-              visible={visible}
-              current={currentChat}
-              onSelect={onOpenChat}
-              onCreateAgent={onCreateAgent}
-              onCreateGroup={onCreateGroup}
-            />
-          </ScrollView>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={onScan}
+                  style={styles.row}
+                >
+                  <ScanQrCode color={colors.textSecondary} size={19} />
+                  <Text style={[styles.rowText, { color: colors.textPrimary }]}>
+                    Scan QR code
+                  </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={onLoginCode}
+                  style={styles.row}
+                >
+                  <KeyRound color={colors.textSecondary} size={19} />
+                  <Text style={[styles.rowText, { color: colors.textPrimary }]}>
+                    Terminal login code
+                  </Text>
+                </Pressable>
+                <Text style={[styles.section, { color: colors.textMuted }]}>
+                  YOUR WORKSPACE
+                </Text>
+                {destinations.map(({ route, label, Icon }) => (
+                  <Pressable
+                    key={route}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: currentRoute === route }}
+                    onPress={() => onNavigate(route)}
+                    style={[
+                      styles.row,
+                      {
+                        backgroundColor:
+                          currentRoute === route
+                            ? colors.navActive
+                            : "transparent",
+                      },
+                    ]}
+                  >
+                    <Icon
+                      color={
+                        currentRoute === route
+                          ? colors.primary
+                          : colors.textSecondary
+                      }
+                      size={19}
+                    />
+                    <Text
+                      style={[styles.rowText, { color: colors.textPrimary }]}
+                    >
+                      {label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </>
+            }
+          />
           <ScrollEdgeFades edges={scroll.edges} color={colors.cardSoft} />
         </View>
         <Pressable

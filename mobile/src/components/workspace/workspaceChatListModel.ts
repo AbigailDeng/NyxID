@@ -3,6 +3,71 @@ import type { AssistantConversation } from "../../features/assistant/assistantTy
 
 export const DRAWER_PREVIEW_LIMIT = 5;
 
+export function channelPlatformName(platform: string) {
+  const names: Record<string, string> = {
+    "telegram-new": "Telegram",
+    telegram: "Telegram",
+    lark: "Lark",
+    feishu: "Feishu",
+    whatsapp: "WhatsApp",
+    aurinko: "Email",
+    x: "X",
+  };
+  return (
+    names[platform] ||
+    (platform ? platform[0]!.toUpperCase() + platform.slice(1) : "Channel")
+  );
+}
+
+export function threadTitle(thread: AssistantConversation) {
+  return (
+    thread.channel?.chat_title?.trim() || thread.title.trim() || "Untitled chat"
+  );
+}
+
+export function threadStatus(thread: AssistantConversation) {
+  return thread.pending_acknowledgements > 0
+    ? "Needs you"
+    : thread.active_turn
+      ? "Running"
+      : undefined;
+}
+
+/** Bot connection IDs, rather than names, keep separate bots and chats apart. */
+export function splitChannelThreads(threads: readonly AssistantConversation[]) {
+  const own: AssistantConversation[] = [];
+  const bots = new Map<
+    string,
+    {
+      key: string;
+      platform: string;
+      label: string;
+      threads: AssistantConversation[];
+    }
+  >();
+  for (const thread of threads) {
+    if (!thread.channel) {
+      own.push(thread);
+      continue;
+    }
+    const channel = thread.channel;
+    const key = channel.channel_agent_id || `platform:${channel.platform}`;
+    let bot = bots.get(key);
+    if (!bot) {
+      bot = {
+        key,
+        platform: channel.platform,
+        label:
+          channel.bot_label || `${channelPlatformName(channel.platform)} bot`,
+        threads: [],
+      };
+      bots.set(key, bot);
+    }
+    bot.threads.push(thread);
+  }
+  return { own, bots: [...bots.values()] };
+}
+
 /** Keep an active or expanded row visible without growing the drawer preview. */
 export function boundedDrawerPreview<T extends { id: string }>(
   items: readonly T[],

@@ -9,6 +9,7 @@ import {
 import { conversationSchema } from "../../features/assistant/assistantTypes";
 import { hookHarness } from "../../features/assistant/assistantHookTestHarness";
 import { groupSchema } from "../../features/groups/groupContracts";
+import { formatRelativeTimeFromMs } from "../../lib/time";
 import * as listHelpers from "./workspaceChatListModel";
 
 type Element = { type: unknown; props: Record<string, any> };
@@ -104,6 +105,7 @@ type SetupOptions = {
   history?: "loaded" | "empty" | "pending" | "error";
   agent?: Partial<AssistantAgent>;
   online?: boolean;
+  chats?: ReturnType<typeof chatsFor>;
 };
 
 function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
@@ -118,6 +120,7 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
       options.agent,
     );
   }
+  const threadOverrides = options.chats;
   const historyState = options.history ?? "loaded";
   const props = {
     visible: true,
@@ -137,10 +140,9 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     },
     "react-native": {
       ...Object.fromEntries(
-        ["ActivityIndicator", "Pressable", "Text", "View"].map((name) => [
-          name,
-          name,
-        ]),
+        ["ActivityIndicator", "Pressable", "ScrollView", "Text", "View"].map(
+          (name) => [name, name],
+        ),
       ),
       AppState: {
         currentState: "active",
@@ -178,7 +180,9 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
                   pages: [
                     {
                       conversations:
-                        historyState === "empty" ? [] : chatsFor(agentId),
+                        historyState === "empty"
+                          ? []
+                          : (threadOverrides ?? chatsFor(agentId)),
                       next_cursor: null,
                     },
                   ],
@@ -194,6 +198,11 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
           fetchNextPage: async () => {},
         };
       },
+    },
+    "../../lib/time": { formatRelativeTimeFromMs },
+    "../../features/groups/useGroupsLive": { useGroupsLive: () => false },
+    "../../lib/api/assistantLiveTransport": {
+      livePollInterval: (value: number) => value,
     },
     "../../hooks/useNetworkStatus": {
       useNetworkStatus: () => ({ isConnected: options.online !== false }),
@@ -219,7 +228,11 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     return found;
   };
   const label = (name: string) =>
-    one((row) => row.props.accessibilityLabel === name);
+    one(
+      (row) =>
+        row.props.accessibilityLabel === name ||
+        row.props.accessibilityLabel?.startsWith(`${name}, `),
+    );
   const press = (name: string) => {
     label(name).props.onPress();
     harness.flush();
@@ -271,6 +284,10 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
   };
   return {
     harness,
+    setCurrent: (value: WorkspaceChatTarget) => {
+      props.current = value;
+      harness.render();
+    },
     selections,
     creations,
     all,
@@ -408,7 +425,7 @@ test("the all-agents browser reaches hidden agents and chats while both previews
   assert.equal(selected.length, 1);
   assert.equal(
     selected[0]?.props.accessibilityLabel,
-    "Open chat Agent 7 chat 8 with Agent 7",
+    "Open chat Agent 7 chat 8 with Agent 7, current thread",
   );
   env.harness.unmount();
 });
@@ -422,7 +439,7 @@ test("a current group outside the first five is pinned and the all-groups browse
       .groupRows()
       .some(
         (row) =>
-          row.props.accessibilityLabel === "Open crew Group 1" &&
+          row.props.accessibilityLabel === "Open crew Group 1, current crew" &&
           row.props.accessibilityState.selected,
       ),
   );
@@ -437,7 +454,7 @@ test("a current group outside the first five is pinned and the all-groups browse
       .groupRows()
       .some(
         (row) =>
-          row.props.accessibilityLabel === "Open crew Group 2" &&
+          row.props.accessibilityLabel === "Open crew Group 2, current crew" &&
           row.props.accessibilityState.selected,
       ),
   );
@@ -512,9 +529,7 @@ test("a view-only agent keeps history querying disabled and offers no chat actio
   assert.equal(
     env
       .all()
-      .some(
-        (row) => row.props.accessibilityLabel === "Start a chat with Agent 8",
-      ),
+      .some((row) => row.props.accessibilityLabel === "New chat with Agent 8"),
     false,
   );
   assert.deepEqual(env.selections, []);
@@ -524,7 +539,7 @@ test("a view-only agent keeps history querying disabled and offers no chat actio
 test("usable agents can start a fresh chat regardless of saved-history state", () => {
   for (const history of ["loaded", "empty", "pending", "error"] as const) {
     const env = setup({ kind: "agent", agentId: "agent-1" }, { history });
-    env.press("Start a chat with Agent 1");
+    env.press("New chat with Agent 1");
     assert.deepEqual(
       env.selections,
       [{ kind: "agent", agentId: "agent-1" }],
@@ -542,7 +557,7 @@ test("the agent-history browser keeps New chat separate from its saved history",
     const primary = env.browser().primaryAction;
     assert.ok(primary, `Missing primary action for ${history} history`);
     assert.equal(primary.label, "New chat");
-    assert.equal(primary.accessibilityLabel, "Start a chat with Agent 7");
+    assert.equal(primary.accessibilityLabel, "New chat with Agent 7");
     primary.onPress();
     env.harness.flush();
     assert.deepEqual(env.selections, []);
@@ -597,9 +612,7 @@ test("a destroyed agent retains readable saved conversations without offering a 
   assert.equal(
     env
       .all()
-      .some(
-        (row) => row.props.accessibilityLabel === "Start a chat with Agent 1",
-      ),
+      .some((row) => row.props.accessibilityLabel === "New chat with Agent 1"),
     false,
   );
   env.more("View all agents (9)");
@@ -768,5 +781,135 @@ test("a saved conversation remains navigable if its agent is deleted while the b
   assert.deepEqual(env.selections, [
     { kind: "agent", agentId: "agent-7", conversationId: selected.id },
   ]);
+  env.harness.unmount();
+});
+
+test("channel bots form counted sub-thread groups, keep the current child visible, and expand more in place", () => {
+  const source = chatsFor("agent-1");
+  const channels = source.map((thread, index) =>
+    conversationSchema.parse({
+      ...thread,
+      channel: {
+        platform: "telegram",
+        channel_agent_id: "bot-1",
+        bot_label: "Support bot",
+        chat_id: `chat-${index}`,
+        chat_title: `Customer ${index + 1}`,
+        parent_chat_id: "support-room",
+        parent_title: "Support room",
+        thread_id: `topic-${index}`,
+      },
+      pending_acknowledgements: index === 7 ? 1 : 0,
+    }),
+  );
+  const current = {
+    kind: "agent" as const,
+    agentId: "agent-1",
+    conversationId: channels[7]!.id,
+  };
+  const env = setup(current, { chats: channels });
+  const bot = env.label("Collapse chats for Support bot");
+  assert.equal(bot.props.accessibilityState.expanded, true);
+  assert.match(bot.props.accessibilityLabel, /Telegram · 8 chats · Needs you/);
+  assert.equal(
+    env.chatRows().length,
+    6,
+    "the current channel child stays visible beyond the first five",
+  );
+  const selected = env.label(
+    "Open chat Customer 8 with Agent 1, Needs you, current thread",
+  );
+  assert.equal(selected.props.accessibilityState.selected, true);
+  assert.ok(content(env.harness.flush()).includes("Support room"));
+  assert.ok(
+    env
+      .all()
+      .some((row) => row.type === "Text" && content(row).includes("Needs you")),
+  );
+  env.more("Show 2 more");
+  assert.equal(env.chatRows().length, 8);
+  const rows = env.all();
+  assert.ok(
+    rows.findIndex(
+      (row) => row.props.accessibilityLabel === "New chat with Agent 1",
+    ) >
+      rows
+        .map((row) =>
+          Boolean(row.props.accessibilityLabel?.startsWith("Open chat ")),
+        )
+        .lastIndexOf(true),
+  );
+  env.press("Collapse chats for Support bot");
+  assert.equal(env.chatRows().length, 0);
+  env.setCurrent({ ...current, conversationId: channels[6]!.id });
+  assert.equal(
+    env.label("Collapse chats for Support bot").props.accessibilityState
+      .expanded,
+    true,
+    "opening another child unfolds its bot again",
+  );
+  env.press("Open chat Customer 7 with Agent 1, current thread");
+  assert.deepEqual(env.selections, [
+    { ...current, conversationId: channels[6]!.id },
+  ]);
+  env.harness.unmount();
+});
+
+test("thread rows show newest first, relative times, running and needs-you states, and fold with their agent", () => {
+  const source = chatsFor("agent-1");
+  source[0] = conversationSchema.parse({
+    ...source[0],
+    active_turn: { turn_id: "turn", started_at: "2026-10-16T00:00:00Z" },
+  });
+  source[1] = conversationSchema.parse({
+    ...source[1],
+    pending_acknowledgements: 1,
+  });
+  const env = setup(
+    { kind: "agent", agentId: "agent-1", conversationId: source[0]!.id },
+    { chats: source },
+  );
+  const rows = env.chatRows();
+  assert.match(
+    rows[0]!.props.accessibilityLabel,
+    /chat 1.*Running.*current thread/,
+  );
+  assert.match(rows[1]!.props.accessibilityLabel, /chat 2.*Needs you/);
+  assert.ok(
+    content(rows[0]!).includes(
+      formatRelativeTimeFromMs(Date.parse(source[0]!.last_message_at)),
+    ),
+  );
+  assert.ok(content(rows[0]!).includes("Current · Running"));
+  assert.equal(rows[0]!.props.style({ pressed: false })[0].minHeight, 44);
+  env.press("Collapse chats for Agent 1");
+  assert.equal(env.chatRows().length, 0);
+  assert.equal(env.historyQuery().enabled, false);
+  env.press("Expand chats for Agent 1");
+  assert.equal(env.chatRows().length, 5);
+  env.harness.unmount();
+});
+
+test("expanded agent is a native sticky header only while its threads remain in the scroll viewport", () => {
+  const env = setup({ kind: "agent", agentId: "agent-1" });
+  const scroll = () => env.all().find((row) => row.type === "ScrollView")!;
+  const index = scroll().props.stickyHeaderIndices[0];
+  assert.equal(typeof index, "number");
+  const children = scroll().props.children.flat(Infinity);
+  children[index].props.onLayout({ nativeEvent: { layout: { height: 48 } } });
+  children[index + 1].props.onLayout({
+    nativeEvent: { layout: { y: 200, height: 400 } },
+  });
+  scroll().props.onScroll({ nativeEvent: { contentOffset: { y: 300 } } });
+  env.harness.flush();
+  assert.deepEqual(plain(scroll().props.stickyHeaderIndices), [index]);
+  scroll().props.onScroll({ nativeEvent: { contentOffset: { y: 555 } } });
+  env.harness.flush();
+  assert.deepEqual(plain(scroll().props.stickyHeaderIndices), []);
+  scroll().props.onScroll({ nativeEvent: { contentOffset: { y: 300 } } });
+  env.harness.flush();
+  assert.deepEqual(plain(scroll().props.stickyHeaderIndices), [index]);
+  env.press("Collapse chats for Agent 1");
+  assert.deepEqual(plain(scroll().props.stickyHeaderIndices), []);
   env.harness.unmount();
 });

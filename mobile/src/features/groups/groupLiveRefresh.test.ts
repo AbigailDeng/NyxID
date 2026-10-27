@@ -64,22 +64,34 @@ test("repeated metadata refreshes only the transcript while turn, count or title
   );
 });
 
-test("unrelated private, channel and channel-thread notifications do not populate deduplication metadata", () => {
-  const seen = new Map<string, string>([["existing", "metadata"]]);
-  const events: AssistantLiveEvent[] = [
-    conversation({ group_id: null }),
-    { type: "channels" },
+test("private and channel notifications refresh drawer metadata without entering crew transcripts", () => {
+  const seen = new Map<string, string>();
+  const event = conversation({ group_id: null });
+  const refresh = {
+    now: [],
+    lists: [
+      ["workspace", "drawer-chats", 4],
+      ["workspace", "agents"],
+    ],
+  };
+  assert.deepEqual(groupLiveRefresh(4, event, seen), refresh);
+  assert.equal(seen.size, 1);
+  assert.deepEqual(groupLiveRefresh(4, event, seen), { now: [], lists: [] });
+  assert.deepEqual(
+    groupLiveRefresh(4, { ...event, turn_id: null }, seen),
+    refresh,
+  );
+  for (const event of [
+    { type: "channels" as const },
     {
-      type: "channel_thread",
-      id: "channel-thread",
-      channel_id: "channel",
-      parent_id: null,
-      conversation_id: "private-conversation",
+      type: "channel_thread" as const,
+      id: "child",
+      channel_id: "bot",
+      parent_id: "parent",
+      conversation_id: "private",
     },
-  ];
-  for (const event of events)
-    assert.deepEqual(groupLiveRefresh(4, event, seen), { now: [], lists: [] });
-  assert.deepEqual([...seen], [["existing", "metadata"]]);
+  ])
+    assert.deepEqual(groupLiveRefresh(4, event, seen), refresh);
 });
 
 test("ready and resync clear signatures and refresh the epoch group root plus agents", () => {
@@ -90,6 +102,7 @@ test("ready and resync clear signatures and refresh the epoch group root plus ag
       now: [
         ["workspace", "groups", 4],
         ["workspace", "agents"],
+        ["workspace", "drawer-chats", 4],
       ],
       lists: [],
     });

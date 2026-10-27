@@ -39,7 +39,7 @@ const session = createGroupLiveSession({
   },
 });
 
-/** Only focused foreground Groups views participate in live notifications. */
+/** Focused foreground workspace lists and crew views share live notifications. */
 export function useGroupsLive(
   epoch: number,
   active: boolean,

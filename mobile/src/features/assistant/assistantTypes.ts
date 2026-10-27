@@ -59,7 +59,19 @@ export const conversationSchema = z.object({
       destroyed: z.boolean().default(false),
     })
     .nullish(),
-  channel: z.object({ platform: z.string() }).nullish(),
+  channel: z
+    .object({
+      platform: z.string(),
+      channel_agent_id: z.string().nullish(),
+      bot_label: z.string().nullish(),
+      chat_id: z.string().nullish(),
+      chat_kind: z.string().nullish(),
+      chat_title: z.string().nullish(),
+      parent_chat_id: z.string().nullish(),
+      thread_id: z.string().nullish(),
+      parent_title: z.string().nullish(),
+    })
+    .nullish(),
 });
 export const messageSchema = z.object({
   id: z.string(),
