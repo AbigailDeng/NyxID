@@ -30,7 +30,6 @@ import {
   MoreHorizontal,
   SquarePen,
   X,
-  AudioLines,
 } from "lucide-react-native";
 import type {
   AssistantParams,
@@ -1208,20 +1207,13 @@ export function AssistantScreen({
                 />
               ) : voiceAvailable &&
                 (!voiceThread || voiceThread !== assistant.conversationId) ? (
-                <IconButton
+                <ComposerSubmitButton
+                  kind="voice"
                   label="Open voice call"
                   disabled={!canCompose || openingVoice}
+                  busy={openingVoice}
                   onPress={() => void openVoice()}
-                >
-                  {openingVoice ? (
-                    <ActivityIndicator size="small" color={colors.primary} />
-                  ) : (
-                    <AudioLines
-                      size={21}
-                      color={canCompose ? colors.primary : colors.textTertiary}
-                    />
-                  )}
-                </IconButton>
+                />
               ) : (
                 <ComposerSubmitButton
                   kind="send"

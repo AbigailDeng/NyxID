@@ -48,6 +48,7 @@ function elements(element: Element): Element[] {
 
 // The shared composer controls are exercised through their accessible button contract.
 function composerButton(props: {
+  kind?: string;
   label: string;
   disabled?: boolean;
   onPress: () => void;
@@ -55,6 +56,7 @@ function composerButton(props: {
   return {
     type: "Pressable",
     props: {
+      kind: props.kind,
       accessibilityLabel: props.label,
       disabled: props.disabled,
       onPress: props.onPress,
@@ -368,7 +370,7 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
 test("eligible native composers expose distinct attachments, dictation and voice actions", () => {
   for (const id of [undefined, A]) {
     const x = setup(id, voiceSelection.NATIVE_VOICE_ENTRY_ENABLED);
-    assert.ok(x.button("Open voice call"));
+    assert.equal(x.button("Open voice call")?.props.kind, "voice");
     assert.equal(x.voice(), undefined);
     assert.ok(x.button("Attach files or photos"));
     assert.ok(x.button("Dictate message"));
@@ -506,10 +508,11 @@ test("voice and transcript retain distinct sibling identities for both adopted d
 
 test("voice entry yields to text, attachments, upload work and the active turn's Stop action", async () => {
   const x = setup(A);
-  assert.ok(x.button("Open voice call"));
+  assert.equal(x.button("Open voice call")?.props.kind, "voice");
   x.input().props.onChangeText("Keep my draft");
   x.harness.flush();
   assert.equal(x.button("Open voice call"), undefined);
+  assert.equal(x.button("Send message")?.props.kind, "send");
   assert.equal(x.button("Send message")?.props.disabled, false);
   x.input().props.onChangeText("");
   x.uploads.files = [
@@ -517,6 +520,7 @@ test("voice entry yields to text, attachments, upload work and the active turn's
   ];
   x.harness.render();
   assert.equal(x.button("Open voice call"), undefined);
+  assert.equal(x.button("Send message")?.props.kind, "send");
   assert.equal(x.button("Send message")?.props.disabled, false);
   x.uploads.files = [];
   x.uploads.picking = true;
@@ -528,6 +532,7 @@ test("voice entry yields to text, attachments, upload work and the active turn's
   x.harness.render();
   assert.equal(x.button("Open voice call"), undefined);
   assert.equal(x.button("Send message"), undefined);
+  assert.equal(x.button("Stop assistant")?.props.kind, "stop");
   assert.equal(x.button("Stop assistant")?.props.disabled, undefined);
   x.button("Stop assistant")!.props.onPress();
   await x.harness.settle();
@@ -649,6 +654,7 @@ test("typing during pending draft creation preserves the text and invalidates th
   await x.harness.settle();
   assert.equal(x.voice(), undefined);
   assert.equal(x.input().props.value, "Actually, send this instead");
+  assert.equal(x.button("Send message")?.props.kind, "send");
   assert.equal(x.button("Send message")?.props.disabled, false);
   assert.equal(
     x.events.some(([name]) => name === "open" || name === "params"),
