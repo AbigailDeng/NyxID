@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -16,6 +17,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { workspaceFocus } from "../../lib/accessibility/workspaceFocus";
 
 export function WorkspaceDrawerModal({
   visible,
@@ -38,13 +40,26 @@ export function WorkspaceDrawerModal({
   const dismissalPending = useRef(visible);
   const [mounted, setMounted] = useState(visible);
   const [presented, setPresented] = useState(false);
+  const [presentationId, setPresentationId] = useState(0);
   const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
+  const focusOwner = useRef(Symbol("navigation-modal")).current;
+
+  useLayoutEffect(() => {
+    if (visible) workspaceFocus.setModalActive(focusOwner, true);
+  }, [focusOwner, visible]);
+  useLayoutEffect(
+    () => () => workspaceFocus.setModalActive(focusOwner, false),
+    [focusOwner],
+  );
 
   const notifyDismissed = useCallback(() => {
     if (visibleRef.current || !dismissalPending.current) return;
     dismissalPending.current = false;
+    workspaceFocus.setModalActive(focusOwner, false);
+    // Reopening gets a new native modal/accessibility owner after full dismissal.
+    setPresentationId((previous) => previous + 1);
     onDismissRef.current?.();
-  }, []);
+  }, [focusOwner]);
 
   useEffect(() => {
     let active = true;
@@ -122,6 +137,7 @@ export function WorkspaceDrawerModal({
 
   return (
     <Modal
+      key={presentationId}
       visible={mounted}
       transparent
       animationType="none"
@@ -149,7 +165,7 @@ export function WorkspaceDrawerModal({
           style={StyleSheet.absoluteFill}
         />
         <Animated.View
-          accessibilityViewIsModal
+          accessible={false}
           pointerEvents={visible ? "auto" : "none"}
           style={[
             styles.panel,

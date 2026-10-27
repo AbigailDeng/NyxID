@@ -7,6 +7,7 @@ export function createWorkspaceFocusState(
   authority: () => number = () => 0,
 ) {
   const controls = new Map<symbol, Control>();
+  const modalOwners = new Set<symbol>();
   const drawers = new Map<
     string,
     { target: () => number | null; focused: boolean }
@@ -28,7 +29,8 @@ export function createWorkspaceFocusState(
   }
   function restoreIfActive() {
     syncAuthority();
-    if (!pending || obscured || pending.scope !== scope) return;
+    if (!pending || obscured || modalOwners.size || pending.scope !== scope)
+      return;
     const request = pending;
     const scheduledRevision = ++revision;
     schedule(() => {
@@ -37,6 +39,7 @@ export function createWorkspaceFocusState(
         scheduledRevision !== revision ||
         pending !== request ||
         obscured ||
+        modalOwners.size ||
         scope !== request.scope
       )
         return;
@@ -54,6 +57,16 @@ export function createWorkspaceFocusState(
     });
   }
   return {
+    setModalActive(owner: symbol, active: boolean) {
+      syncAuthority();
+      if (active) {
+        modalOwners.add(owner);
+        pending = undefined;
+        revision++;
+      } else {
+        modalOwners.delete(owner);
+      }
+    },
     context(nextScope: string | undefined, nextObscured: boolean) {
       syncAuthority();
       if (nextScope !== scope) {
@@ -99,6 +112,7 @@ export function createWorkspaceFocusState(
       syncAuthority();
       if (
         !origin ||
+        modalOwners.size ||
         origin.scope !== scope ||
         origin.authority !== admittedAuthority
       )
@@ -108,13 +122,21 @@ export function createWorkspaceFocusState(
     },
     focusDrawerOnce(key: string, target: () => number | null) {
       syncAuthority();
+      if (modalOwners.size) return;
       const drawer = drawers.get(key) ?? { target, focused: false };
       if (drawer.focused) return;
       drawer.target = target;
       drawers.set(key, drawer);
+      const scheduledRevision = revision;
       schedule(() => {
         syncAuthority();
-        if (drawers.get(key) !== drawer || drawer.focused) return;
+        if (
+          scheduledRevision !== revision ||
+          modalOwners.size ||
+          drawers.get(key) !== drawer ||
+          drawer.focused
+        )
+          return;
         const current = drawer.target();
         if (current) {
           drawer.focused = true;

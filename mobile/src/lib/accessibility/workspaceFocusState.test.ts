@@ -120,3 +120,92 @@ test("auth admission cancels a queued native event and rejects the old drawer or
   while (scheduled.length) scheduled.shift()!();
   assert.deepEqual(focused, []);
 });
+
+test("opening navigation cancels a delayed sheet focus return through native modal dismissal", () => {
+  const { state, focused, flush } = setup();
+  const primary = Symbol("chat header"),
+    modal = Symbol("side menu");
+  state.context("chat", false);
+  state.register(primary, () => 10, true, "chat");
+  const origin = state.capture("chat");
+  state.context("chat", true);
+  state.restore(origin);
+  state.context("chat", false); // A callback is now queued after sheet Close.
+  state.focusDrawerOnce("queued-sheet", () => 30);
+  state.setModalActive(modal, true);
+  state.register(primary, () => 20, true, "chat");
+  state.restore(origin); // A later unmount cannot revive the sheet request.
+  state.focusDrawerOnce("stale-sheet", () => 30);
+  flush();
+  assert.deepEqual(
+    focused,
+    [],
+    "no underlying header/sheet focus while the menu owns the native modal",
+  );
+  state.setModalActive(modal, false);
+  state.releaseDrawer("queued-sheet");
+  flush();
+  assert.deepEqual(
+    focused,
+    [],
+    "dismissing the menu cannot revive a cancelled focus request",
+  );
+  const nextOrigin = state.capture("chat");
+  state.context("chat", true);
+  state.restore(nextOrigin);
+  state.context("chat", false);
+  flush();
+  assert.deepEqual(
+    focused,
+    [20],
+    "later ordinary sheet dismissal still restores its mounted primary control",
+  );
+});
+
+test("modal focus ownership survives auth changes and one owner cannot release another", () => {
+  let epoch = 1;
+  const focused: number[] = [],
+    scheduled: (() => void)[] = [];
+  const state = createWorkspaceFocusState(
+    (target) => focused.push(target),
+    (callback) => scheduled.push(callback),
+    () => epoch,
+  );
+  const first = Symbol("menu"),
+    second = Symbol("replacement modal");
+  state.context("chat", false);
+  state.setModalActive(first, true);
+  epoch++;
+  state.context("chat", false);
+  state.setModalActive(second, true);
+  state.setModalActive(first, false);
+  state.register(Symbol(), () => 40, true, "chat");
+  state.restore(state.capture("chat"));
+  while (scheduled.length) scheduled.shift()!();
+  assert.deepEqual(focused, []);
+  state.setModalActive(second, false);
+  state.restore(state.capture("chat"));
+  while (scheduled.length) scheduled.shift()!();
+  assert.deepEqual(focused, [40]);
+});
+
+test("a complete menu presentation cancels queued focus even before the scheduler runs", () => {
+  const { state, focused, flush } = setup();
+  const modal = Symbol("side menu");
+  state.context("chat", false);
+  state.register(Symbol("chat header"), () => 10, true, "chat");
+  state.restore(state.capture("chat"));
+  state.focusDrawerOnce("old-sheet", () => 20);
+  state.setModalActive(modal, true);
+  state.setModalActive(modal, false);
+  flush();
+  assert.deepEqual(
+    focused,
+    [],
+    "neither a primary nor a Close request can outlive the intervening menu",
+  );
+  state.releaseDrawer("old-sheet");
+  state.focusDrawerOnce("new-sheet", () => 30);
+  flush();
+  assert.deepEqual(focused, [30]);
+});
