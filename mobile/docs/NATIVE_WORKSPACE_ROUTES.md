@@ -27,6 +27,7 @@ in `navigationHierarchy.ts` and `workspaceChatNavigation.ts`.
 | SheetStack / MachineActivity | Metadata activity with Agent/unattributed filters and cursor pages; cold fallback Machines. |
 | SheetStack / AgentSkills | Current specialist's exact-version skills and nested review/history. Cold fallback is Agents. |
 | SheetStack / AgentMachines | Revisioned per-agent capability editor; read-only local ceiling and recovery states. Context selection requests an owner card and opens its exact conversation/acknowledgement. Cold fallback Agents. |
+| Root / MachineDesktop | Full-screen modal outside the drawer. `/assistant/machines/{id}/desktop?conversation_id=&context_id=&display=secure\|dev` retains every selector. Native screen-capture and app-switcher protection must succeed before B's viewer mounts. Close returns to the calling drawer/chat; cold fallback is chat. |
 | SheetStack / AutomationDetail | Existing automation details; cold fallback Automations. |
 | SheetStack / AutomationEditor | Create/edit automation; cold fallback Automations. |
 | SheetStack / AutomationRuns | Existing run history; cold fallback Automations. |

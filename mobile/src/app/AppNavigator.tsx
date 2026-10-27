@@ -26,6 +26,7 @@ import { AccountSecurityScreen } from "../features/account/AccountSecurityScreen
 import { MachinePolicyScreen } from "../features/machines/MachinePolicyScreen";
 import { MachineActivityScreen } from "../features/machines/MachineActivityScreen";
 import { AgentMachinesScreen } from "../features/machines/AgentMachinesScreen";
+import { MachineDesktopRoute } from "../features/machines/MachineDesktopRoute";
 import { MachinesScreen } from "../features/machines/MachinesScreen";
 import { ActivityScreen } from "../features/activity/ActivityScreen";
 import { ActivityDetailScreen } from "../features/activity/ActivityDetailScreen";
@@ -674,6 +675,16 @@ export function AppNavigator({
                     gestureEnabled: false,
                     headerShown: false,
                     contentStyle: { backgroundColor: "transparent" },
+                  }}
+                />
+                <Stack.Screen
+                  name="MachineDesktop"
+                  component={MachineDesktopRoute}
+                  options={{
+                    presentation: "fullScreenModal",
+                    animation: reducedMotion ? "none" : "fade",
+                    headerShown: false,
+                    gestureEnabled: false,
                   }}
                 />
               </Stack.Group>

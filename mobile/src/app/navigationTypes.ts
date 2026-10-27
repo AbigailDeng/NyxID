@@ -11,6 +11,7 @@ import type {
   NativeStackNavigationProp,
   NativeStackScreenProps,
 } from "@react-navigation/native-stack";
+import type { MachineDesktopRouteParams } from "../features/machines/desktopEntry";
 
 export type AssistantParams = {
   conversationId?: string;
@@ -70,6 +71,7 @@ export type RootStackParamList = SharedEntryParamList & {
   Workspace: NavigatorScreenParams<WorkspaceChatParamList> | undefined;
   AssistantContext: AssistantParams | undefined;
   GroupChat: { groupId: string };
+  MachineDesktop: MachineDesktopRouteParams;
   WorkspaceSheet: NavigatorScreenParams<WorkspaceSheetParamList> | undefined;
 };
 

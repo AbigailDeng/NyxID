@@ -251,7 +251,10 @@ export function withWorkspaceFallback(
   });
   if (
     !routes.some((route) => route.name === "Workspace") &&
-    routes.some((route) => route.name === "WorkspaceSheet")
+    routes.some(
+      (route) =>
+        route.name === "WorkspaceSheet" || route.name === "MachineDesktop",
+    )
   ) {
     return {
       ...state,

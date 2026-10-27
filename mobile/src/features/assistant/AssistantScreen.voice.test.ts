@@ -209,6 +209,8 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
           events.push(["params", { ...params }]);
         },
         dispatch: () => {},
+        navigate: (name: string, params: unknown) =>
+          events.push(["navigate", name, params]),
         goBack: () => {},
       }),
     },
@@ -279,6 +281,7 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     "./AssistantActivityDisclosure": {
       AssistantActivityDisclosure: "AssistantActivityDisclosure",
     },
+    "../machines/MachineToolCard": { MachineToolCard: "MachineToolCard" },
     "./AssistantAcknowledgements": {
       AssistantAcknowledgements: "AssistantAcknowledgements",
     },
@@ -824,5 +827,52 @@ test("an empty NyxBot chat introduces NyxBot while specialists keep the neutral 
   x.harness.render();
   assert.doesNotMatch(welcome(), /NyxBot/);
   assert.match(welcome(), /How can I help\?/);
+  x.harness.unmount();
+});
+
+test("chat machine receipts forward every desktop selector to the full-screen route", () => {
+  const x = setup(A, false);
+  const render = x.all().find((node) => node.type === "FlatList")!.props
+    .renderItem;
+  const receipt = {
+    node_id: "node",
+    machine_name: "Workstation",
+    action: "computer.snapshot",
+    status: "completed",
+  };
+  const row = expand(
+    render({
+      item: {
+        id: "message",
+        seq: 1,
+        role: "assistant",
+        text: "Done",
+        status: "completed",
+        activities: [
+          {
+            id: "tool",
+            label: "machine",
+            status: "completed",
+            started_at: "now",
+            machine: receipt,
+          },
+        ],
+        attachments: [],
+        created_at: "now",
+      },
+      index: 0,
+    }),
+  );
+  const card = elements(row).find((node) => node.type === "MachineToolCard")!;
+  assert.equal(card.props.conversationId, A);
+  assert.deepEqual(card.props.receipt, receipt);
+  const params = {
+    nodeId: "node",
+    conversationId: A,
+    contextId: "context",
+    display: "dev",
+  };
+  card.props.onOpenDesktop(params);
+  assert.deepEqual(x.events.at(-1), ["navigate", "MachineDesktop", params]);
   x.harness.unmount();
 });

@@ -42,7 +42,14 @@ export const navigationLinkingConfig: NonNullable<
               path: "plugins",
               parse: { tab: String, agentId: String },
             },
-            Machines: { path: "assistant/machines", parse: { machine: String, tab: (value: string) => value === "logins" ? "logins" : undefined } },
+            Machines: {
+              path: "assistant/machines",
+              parse: {
+                machine: String,
+                tab: (value: string) =>
+                  value === "logins" ? "logins" : undefined,
+              },
+            },
             Services: "services",
             Activity: { path: "activity", parse: { challengeId: String } },
             AccountSettings: "account",
@@ -64,6 +71,15 @@ export const navigationLinkingConfig: NonNullable<
       },
     },
     AssistantContext: { path: "chat/:conversationId", parse: assistantParams },
+    MachineDesktop: {
+      path: "assistant/machines/:nodeId/desktop",
+      parse: {
+        nodeId: String,
+        conversation_id: String,
+        context_id: String,
+        display: String,
+      },
+    },
     GroupChat: { path: "groups/:groupId", parse: { groupId: String } },
     DeviceLogin: { path: "login/device", parse: { user_code: String } },
     AgentKeyLogin: { path: "login/agent-key", parse: { user_code: String } },

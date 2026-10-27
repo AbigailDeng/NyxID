@@ -10,6 +10,8 @@ import {
   WorkspacePage,
 } from "../../components/workspace/WorkspaceUI";
 import { SavedLogins } from "./SavedLogins";
+import { MachineDesktopEntries } from "./MachineDesktopEntries";
+import type { MachineDesktopParams } from "./desktop/desktopRoutes";
 import { machinesApi } from "../../lib/api/machinesApi";
 import {
   machineWebPath,
@@ -165,6 +167,7 @@ export function MachinesScreen({
               ownerId: node.owner.id,
             })
           }
+          onDesktop={(params) => navigation.navigate("MachineDesktop", params)}
         />
       )}
     </WorkspacePage>
@@ -177,12 +180,14 @@ export function MachineDetails({
   onWeb,
   onPolicy,
   onActivity,
+  onDesktop,
 }: {
   node: MachineNode;
   update?: MachineUpdate;
   onWeb: () => void;
   onPolicy: () => void;
   onActivity: () => void;
+  onDesktop: (params: MachineDesktopParams) => void;
 }) {
   const machine = node.machine!;
   return (
@@ -260,12 +265,7 @@ export function MachineDetails({
         variant="secondary"
         onPress={onActivity}
       />
-      <ActionButton
-        label="Live desktop — available on web"
-        variant="secondary"
-        disabled
-        onPress={() => {}}
-      />
+      <MachineDesktopEntries nodeId={node.id} onOpen={onDesktop} />
       <ActionButton
         label="Open machine on web"
         variant="secondary"

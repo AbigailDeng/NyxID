@@ -1,4 +1,5 @@
 import { useChatColumn } from "../display/ChatLayoutContext";
+import { MachineToolCard } from "../machines/MachineToolCard";
 import {
   ScrollEdgeFades,
   useScrollEdges,
@@ -685,6 +686,19 @@ export function AssistantScreen({
             transcriptScroll.pause();
           }}
         />
+        {conversation?.id &&
+          item.activities
+            .filter((activity) => activity.machine)
+            .map((activity) => (
+              <MachineToolCard
+                key={`machine:${activity.id}`}
+                receipt={activity.machine!}
+                conversationId={conversation.id}
+                onOpenDesktop={(params) =>
+                  navigation.navigate("MachineDesktop", params)
+                }
+              />
+            ))}
         {isUser ? (
           item.text ? (
             <Text
@@ -1045,6 +1059,19 @@ export function AssistantScreen({
                       transcriptScroll.pause();
                     }}
                   />
+                  {conversation?.id &&
+                    liveActivities
+                      .filter((activity) => activity.machine)
+                      .map((activity) => (
+                        <MachineToolCard
+                          key={`machine:${activity.id}`}
+                          receipt={activity.machine!}
+                          conversationId={conversation.id}
+                          onOpenDesktop={(params) =>
+                            navigation.navigate("MachineDesktop", params)
+                          }
+                        />
+                      ))}
                   {liveText ? (
                     <Markdown
                       markdownit={assistantMarkdown}

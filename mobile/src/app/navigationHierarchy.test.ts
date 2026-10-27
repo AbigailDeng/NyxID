@@ -11,6 +11,7 @@ import {
   type PartialState,
 } from "@react-navigation/routers";
 import { navigationLinkingConfig } from "./navigationLinking";
+import { desktopRouteParams } from "../features/machines/desktopEntry";
 import {
   challengeNavigationAction,
   dismissWorkspaceSheetAction,
@@ -79,6 +80,35 @@ const sheetOptions = {
   routeGetIdList: {},
 };
 type State = ReturnType<typeof rootRouter.getInitialState>;
+
+test("desktop cold links stay outside the drawer and preserve every selector", () => {
+  const state = withWorkspaceFallback(
+    getStateFromPath(
+      "assistant/machines/node/desktop?conversation_id=nyxa-thread&context_id=context&display=dev",
+      navigationLinkingConfig,
+    ),
+  )!;
+  assert.deepEqual(
+    state.routes.map((route) => route.name),
+    ["Workspace", "MachineDesktop"],
+  );
+  const route = state.routes.at(-1)!;
+  assert.deepEqual(
+    desktopRouteParams(
+      route.params as Parameters<typeof desktopRouteParams>[0],
+    ),
+    {
+      nodeId: "node",
+      conversationId: "nyxa-thread",
+      contextId: "context",
+      display: "dev",
+    },
+  );
+  assert.equal(
+    state.routes.some((route) => route.name === "WorkspaceSheet"),
+    false,
+  );
+});
 
 function linkedState(path: string) {
   const state = withWorkspaceFallback(

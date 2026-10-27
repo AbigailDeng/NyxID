@@ -7,13 +7,13 @@ import { radius, TOUCH_TARGET } from "../../theme/designTokens";
 import type { AssistantMessage } from "./assistantTypes";
 import { describeToolActivity } from "./assistantActivityText";
 
-type Activity = AssistantMessage["activities"][number];
+type Activity = Omit<AssistantMessage["activities"][number], "machine">;
 
 export function AssistantActivityDisclosure({
   activities,
   onToggle,
 }: {
-  activities: AssistantMessage["activities"];
+  activities: Activity[];
   onToggle: () => void;
 }) {
   const { colors } = useTheme();

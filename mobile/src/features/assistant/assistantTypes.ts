@@ -7,6 +7,16 @@ const activitySchema = z.object({
   status: z.enum(["running", "completed", "error"]),
   started_at: z.string(),
   ended_at: z.string().nullish(),
+  machine: z
+    .object({
+      node_id: z.string(),
+      machine_name: z.string().nullish(),
+      context_mode: z.enum(["shared_legacy", "separated"]).nullish(),
+      action: z.string(),
+      status: z.string(),
+      error_code: z.number().nullish(),
+    })
+    .nullish(),
 });
 export const attachmentSchema = z.object({
   id: z.string(),
