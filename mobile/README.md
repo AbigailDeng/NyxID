@@ -382,5 +382,20 @@ remaining content without intercepting taps or replacing scroll-follow logic.
 Native validation includes mobile tests, TypeScript, native dependency sync and
 iOS/Android JavaScript exports. Simulator/emulator execution covers development
 runtimes; physical-device and release-build verification remains separate.
-RN-web, native transcript rail, machines and native voice admission remain
-outside the supported native capabilities.
+RN-web, native transcript rail and machines remain outside the supported native
+capabilities.
+
+The chat toolbar offers Photos and Files under "+", with each opening its native
+picker. Selected HEIC/AVIF/TIFF/BMP images are converted to JPEG when necessary;
+the original library assets are untouched. Existing upload size/count, session
+and foreground checks apply to both paths. The microphone starts system
+dictation, with Stop, review, Insert text and Discard. Inserting preserves the
+existing draft and never sends it. Speech recognition uses the device's configured
+speech service and needs a development or production app rebuilt with
+`expo-speech-recognition`; stock Expo Go cannot provide that module. Missing
+modules produce an inline availability message while Files/text remain usable.
+A separate waveform action opens the existing voice conversation flow for
+eligible private chats when the server enables `assistant:voice`. Voice source,
+permission and provider availability are checked there. Group chat supports
+dictation, without live voice conversations. Actual microphone/transcription and
+provider audio require native device validation beyond bundle/type checks.

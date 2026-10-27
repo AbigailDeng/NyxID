@@ -68,8 +68,11 @@ accessibility descendants are hidden while management is open.
 Private user bubbles and compact group/private headers follow the native
 reference while preserving real speaker attribution. Private, contextual and
 group chats share one ChatGPT-style composer: a filled pill with full-width text
-above a toolbar containing "+" for attachments, optional mentions and a trailing
-send/stop circle. Group recipient chips and pending files stay inside the pill
+above a toolbar containing "+" for attachments, optional mentions, dictation and a
+trailing send/stop circle. "+" offers Photos (the system photo library) and Files
+(the document browser). Unsupported photo formats such as HEIC are converted to
+JPEG from selected cache copies, retaining the same upload validation and account
+ownership fences. Group recipient chips and pending files stay inside the pill
 above the text. Chat pages use 12pt horizontal and 4pt bottom padding plus the
 system safe area. The side-navigation footer combines its bottom padding with
 the safe-area clearance instead of stacking both. iOS sizes
@@ -86,5 +89,14 @@ native text measurements when system text size changes, retaining page, scroll
 and control state. Display uses fixed-size step icons in
 labelled 44pt targets, with scalable labels/values and wrapping control rows.
 The native semantic text palette now meets 4.5:1 on base/card/cardSoft surfaces.
-No iOS orientation/tablet support, RN-web, native rail, machine capability or
-native voice admission was added.
+Dictation uses the device speech recognizer with microphone/speech permission,
+shows a review, and inserts editable text only after acceptance. It never sends a
+message automatically and releases capture on background, chat/account change,
+loss of access or drawer presentation. It requires an app build containing the
+speech recognition module; older builds retain keyboard dictation and text entry.
+Eligible private chats with the server's `assistant:voice` capability also expose
+a separate waveform action for the existing voice conversation surface. Group
+voice conversations are unsupported. Provider audio and microphone behavior
+still require device verification; JavaScript exports do not establish acoustic
+or provider compatibility. No iOS orientation/tablet support, RN-web, native rail
+or machine capability was added.

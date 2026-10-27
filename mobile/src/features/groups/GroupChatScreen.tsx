@@ -72,6 +72,14 @@ import { AssistantCopyButton } from "../assistant/AssistantCopyButton";
 import { assistantSelectableMarkdown } from "../assistant/assistantSelectableMarkdown";
 import { useAssistantUploads } from "../assistant/useAssistantUploads";
 import {
+  appendDictation,
+  useComposerDictation,
+} from "../assistant/useComposerDictation";
+import {
+  ComposerDictationButton,
+  ComposerDictationReview,
+} from "../assistant/ComposerDictation";
+import {
   safeAssistantLinkUrl,
   assistantMarkdownOptions,
 } from "../assistant/assistantMarkdown";
@@ -299,8 +307,14 @@ function GroupChat({
     !chat.active ||
     !canParticipate ||
     chat.isError;
+  const dictation = useComposerDictation({
+    scope: `${groupId}:${composerGeneration}`,
+    enabled: !blocked && !uploads.picking && !!liveMembers.length,
+    onInsert: (text) => edit(appendDictation(draft, text)),
+  });
   const canSend =
     !blocked &&
+    !dictation.active &&
     !uploads.blocked &&
     !uploads.session.sending &&
     !!recipients.ids.length &&
@@ -773,6 +787,7 @@ function GroupChat({
             <Label muted>{uploads.error ?? uploads.notice}</Label>
           )}
           <ChatComposerFrame>
+            <ComposerDictationReview dictation={dictation} />
             <OverflowScrollView
               fadeColor={colors.composerBg}
               horizontal
@@ -846,18 +861,23 @@ function GroupChat({
               renderActions={(mentionAction) => (
                 <ChatComposerRow>
                   <ComposerAttachButton
-                    label="Attach a file to group"
+                    label="Attach files or photos to group"
                     busy={uploads.picking}
                     disabled={
                       blocked ||
+                      dictation.active ||
                       !liveMembers.length ||
                       uploads.picking ||
                       uploads.session.sending
                     }
-                    onPress={() => void uploads.pick()}
+                    onPress={uploads.choose}
                   />
                   {mentionAction}
                   <View style={{ flex: 1 }} />
+                  <ComposerDictationButton
+                    dictation={dictation}
+                    disabled={blocked || uploads.picking || !liveMembers.length}
+                  />
                   <ComposerSubmitButton
                     kind="send"
                     label="Send group message"

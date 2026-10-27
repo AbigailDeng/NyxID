@@ -60,7 +60,9 @@
     <key>NSCameraUsageDescription</key>
     <string>Allow NyxID to scan login approval QR codes.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Allow NyxID to use your microphone during voice conversations.</string>
+    <string>Allow NyxID to use your microphone for dictation and voice conversations.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Allow NyxID to turn your speech into editable message text.</string>
     <key>NSFaceIDUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your Face ID biometric data.</string>
     <key>NSLocalNetworkUsageDescription</key>

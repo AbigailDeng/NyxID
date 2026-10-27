@@ -30,7 +30,7 @@ import {
   MoreHorizontal,
   SquarePen,
   X,
-  Mic,
+  AudioLines,
 } from "lucide-react-native";
 import type {
   AssistantParams,
@@ -76,6 +76,11 @@ import {
 } from "./ChatComposer";
 import { AssistantMentionInput } from "./AssistantMentionInput";
 import { useAssistantUploads } from "./useAssistantUploads";
+import { appendDictation, useComposerDictation } from "./useComposerDictation";
+import {
+  ComposerDictationButton,
+  ComposerDictationReview,
+} from "./ComposerDictation";
 import { describeToolActivity } from "./assistantActivityText";
 import { NativeAuthoredSkillReview } from "../plugins/NativeAuthoredSkillReview";
 import { parseAutomationLink } from "../automations/automationLinks";
@@ -236,8 +241,19 @@ export function AssistantScreen({
     assistant.loading ||
     ((assistant.sending || uploads.session.sending) &&
       !assistant.conversationId);
+  const dictation = useComposerDictation({
+    scope: `${assistant.agentId}:${assistant.conversationId ?? "new"}:${composerGeneration}`,
+    enabled:
+      canCompose &&
+      !uploads.picking &&
+      !uploads.session.sending &&
+      !openingVoice &&
+      !voiceThread,
+    onInsert: (text) => updateDraft(appendDictation(draft, text)),
+  });
   const canSend =
     canCompose &&
+    !dictation.active &&
     !uploads.session.sending &&
     !uploads.blocked &&
     !uploads.picking &&
@@ -259,7 +275,10 @@ export function AssistantScreen({
     text: draft,
     attachmentCount: uploads.files.length,
     uploadBlocked:
-      uploads.blocked || uploads.picking || uploads.session.sending,
+      uploads.blocked ||
+      uploads.picking ||
+      uploads.session.sending ||
+      dictation.active,
     channel: conversation?.channel,
     subagent: conversation?.role === "subagent",
     destroyed: !!destroyed,
@@ -1106,6 +1125,7 @@ export function AssistantScreen({
         />
       ) : null}
       <ChatComposerFrame style={[styles.composer, chatColumn]}>
+        <ComposerDictationReview dictation={dictation} />
         <AssistantPendingUploads
           files={uploads.files}
           remove={uploads.remove}
@@ -1135,18 +1155,29 @@ export function AssistantScreen({
           renderActions={(mentionAction) => (
             <ChatComposerRow>
               <ComposerAttachButton
-                label="Attach files"
+                label="Attach files or photos"
                 busy={uploads.picking}
                 disabled={
                   !canCompose ||
+                  dictation.active ||
                   uploads.picking ||
                   uploads.session.sending ||
                   uploads.files.length >= 10
                 }
-                onPress={() => void uploads.pick()}
+                onPress={uploads.choose}
               />
               {mentionAction}
               <View style={{ flex: 1 }} />
+              <ComposerDictationButton
+                dictation={dictation}
+                disabled={
+                  !canCompose ||
+                  uploads.picking ||
+                  uploads.session.sending ||
+                  openingVoice ||
+                  !!voiceThread
+                }
+              />
               {running && assistant.conversationId ? (
                 <ComposerSubmitButton
                   kind="stop"
@@ -1170,7 +1201,7 @@ export function AssistantScreen({
                   {openingVoice ? (
                     <ActivityIndicator size="small" color={colors.primary} />
                   ) : (
-                    <Mic
+                    <AudioLines
                       size={21}
                       color={canCompose ? colors.primary : colors.textTertiary}
                     />

@@ -63,7 +63,7 @@ function composerButton(props: {
   };
 }
 
-// Opt in here to retain coverage of the paused voice flow.
+// Exercise enabled and unavailable server/runtime admission separately.
 function setup(conversationId?: string, enableVoiceForTest = true) {
   const draft = deferred<string>();
   const events: unknown[][] = [];
@@ -144,6 +144,7 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     blocked: false,
     picking: false,
     pick: async () => {},
+    choose: () => events.push(["choose-attachment"]),
     remove: (key: string) => {
       uploads.files = uploads.files.filter((file) => file.key !== key);
     },
@@ -247,6 +248,16 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
     "./useAssistant": { useAssistant: () => assistant },
     "./useAssistantUploads": { useAssistantUploads: () => uploads },
+    "./useComposerDictation": {
+      useComposerDictation: () => ({ active: false, phase: "idle" }),
+      appendDictation: (draft: string, text: string) =>
+        `${draft}${draft ? " " : ""}${text}`,
+    },
+    "./ComposerDictation": {
+      ComposerDictationButton: () =>
+        composerButton({ label: "Dictate message", onPress: () => {} }),
+      ComposerDictationReview: "ComposerDictationReview",
+    },
     "./useTranscriptScrollFollow": {
       useTranscriptScrollFollow: () => ({
         following: true,
@@ -277,7 +288,9 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
       AssistantPendingUploads: "AssistantPendingUploads",
     },
     "./AssistantMentionInput": {
-      AssistantMentionInput: (props: { renderActions?: (mention: null) => unknown }) => ({
+      AssistantMentionInput: (props: {
+        renderActions?: (mention: null) => unknown;
+      }) => ({
         type: "AssistantMentionInput",
         props: { ...props, children: props.renderActions?.(null) },
       }),
@@ -352,14 +365,16 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
   };
 }
 
-test("native voice entry stays hidden despite a cached server flag in new and saved chats", () => {
+test("eligible native composers expose distinct attachments, dictation and voice actions", () => {
   for (const id of [undefined, A]) {
     const x = setup(id, voiceSelection.NATIVE_VOICE_ENTRY_ENABLED);
-    assert.equal(x.button("Open voice call"), undefined);
+    assert.ok(x.button("Open voice call"));
     assert.equal(x.voice(), undefined);
-    assert.ok(x.button("Attach files"));
-    assert.ok(x.button("Send message"));
-    assert.equal(x.featureQueries.at(-1)?.enabled, false);
+    assert.ok(x.button("Attach files or photos"));
+    assert.ok(x.button("Dictate message"));
+    assert.equal(x.featureQueries.at(-1)?.enabled, true);
+    x.button("Attach files or photos")!.props.onPress();
+    assert.deepEqual(x.events.at(-1), ["choose-attachment"]);
     assert.equal(x.drafts.length, 0);
     x.harness.unmount();
   }
