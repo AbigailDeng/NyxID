@@ -1,3 +1,4 @@
+import { NyxidLogo } from "../brand/NyxidLogo";
 import { useRef } from "react";
 import {
   findNodeHandle,
@@ -101,9 +102,7 @@ export function WorkspaceDrawer({
         ]}
       >
         <View style={styles.brandRow}>
-          <Text style={[styles.brand, { color: colors.textPrimary }]}>
-            NyxID
-          </Text>
+          <NyxidLogo />
           <Pressable
             ref={closeButton}
             accessibilityRole="button"
@@ -262,7 +261,6 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingVertical: 12,
   },
-  brand: { fontFamily: fonts.bodySemi, fontSize: 19 },
   iconButton: {
     width: 44,
     height: 44,
