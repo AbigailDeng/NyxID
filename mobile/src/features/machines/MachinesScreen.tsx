@@ -16,6 +16,7 @@ import { SavedLogins } from "./SavedLogins";
 import { MachineDesktopEntries } from "./MachineDesktopEntries";
 import {
   MachineBadges,
+  MachineActionRow,
   MachineCapability,
   MachineMetadata,
   MachineRowCard,
@@ -311,7 +312,11 @@ export function MachineDetails({
         {update?.updater_guidance && (
           <Label muted>{update.updater_guidance}</Label>
         )}
-        <ActionButton label="Owner policy and updates" onPress={onPolicy} />
+        <MachineActionRow
+          label="Owner policy and updates"
+          chevron
+          onPress={onPolicy}
+        />
       </Card>
       <Card>
         <Label style={machineStyles.heading}>Desktop and activity</Label>

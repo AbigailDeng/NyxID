@@ -28,6 +28,7 @@ import { MachineActivityScreen } from "../features/machines/MachineActivityScree
 import { AgentMachinesScreen } from "../features/machines/AgentMachinesScreen";
 import { MachineDesktopRoute } from "../features/machines/MachineDesktopRoute";
 import { MachinesScreen } from "../features/machines/MachinesScreen";
+import { MachineDrawerHeader } from "../features/machines/MachinePresentation";
 import { ActivityScreen } from "../features/activity/ActivityScreen";
 import { ActivityDetailScreen } from "../features/activity/ActivityDetailScreen";
 import { AssistantScreen } from "../features/assistant/AssistantScreen";
@@ -509,17 +510,26 @@ function WorkspaceSheetRoute({
           <SheetStack.Screen
             name="MachinePolicy"
             component={MachinePolicyScreen}
-            options={{ title: "Owner policy and updates" }}
+            options={{
+              title: "Owner policy and updates",
+              header: MachineDrawerHeader,
+            }}
           />
           <SheetStack.Screen
             name="MachineActivity"
             component={MachineActivityScreen}
-            options={{ title: "Machine activity" }}
+            options={{
+              title: "Machine activity",
+              header: MachineDrawerHeader,
+            }}
           />
           <SheetStack.Screen
             name="AgentMachines"
             component={AgentMachinesScreen}
-            options={{ title: "Agent machine access" }}
+            options={{
+              title: "Agent machine access",
+              header: MachineDrawerHeader,
+            }}
           />
           <SheetStack.Screen
             name="AgentSkills"

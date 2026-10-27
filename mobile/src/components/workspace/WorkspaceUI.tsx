@@ -268,8 +268,14 @@ export function ActionButton({
             compact && styles.compactButtonFill,
             {
               backgroundColor:
-                disabled && !loading ? colors.cardSoft : variant === "danger" ? colors.dangerSoftBg : colors.card,
-              borderWidth: 1,
+                disabled && !loading
+                  ? colors.cardSoft
+                  : variant === "danger"
+                    ? colors.dangerSoftBg
+                    : compact
+                      ? colors.navActive
+                      : colors.card,
+              borderWidth: compact && variant === "secondary" ? 0 : 1,
               borderColor:
                 variant === "danger" ? colors.danger : colors.controlBorder,
             },
@@ -336,10 +342,21 @@ const styles = StyleSheet.create({
   },
   multiline: { minHeight: 96, textAlignVertical: "top" },
   button: { borderRadius: radius.md, overflow: "hidden" },
-  compactButton: { alignSelf: "flex-start", maxWidth: "100%" },
-  compactButtonLabel: { flexShrink: 1 },
-  compactButtonFill: {
+  compactButton: {
+    alignSelf: "flex-start",
+    maxWidth: "100%",
     minHeight: TOUCH_TARGET,
+    justifyContent: "center",
+    paddingVertical: 4,
+  },
+  compactButtonLabel: {
+    flexShrink: 1,
+    fontFamily: fonts.body,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  compactButtonFill: {
+    minHeight: 36,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },

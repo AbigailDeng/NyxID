@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type PropsWithChildren } from "react";
 import { View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -16,7 +16,11 @@ import {
 } from "../../components/workspace/WorkspaceUI";
 import { agentMachinesApi } from "../../lib/api/agentMachinesApi";
 import { MachineSwitch } from "./MachinePolicyScreen";
-import { MachineRowCard, machineStyles } from "./MachinePresentation";
+import {
+  MachineActionRow,
+  MachineRowCard,
+  machineStyles,
+} from "./MachinePresentation";
 import {
   confirmDiscard,
   machineError,
@@ -62,11 +66,6 @@ export function AgentMachinesScreen({
     refetchOnWindowFocus: false,
   });
   const machine = query.data?.machines.find((row) => row.node_id === selected);
-  useWorkspaceBack({
-    active: !!selected,
-    defaultRole: "back",
-    onBack: () => setSelected(undefined),
-  });
   async function refresh() {
     if (Date.now() - refreshedAt.current < 1000)
       throw new Error("Wait a moment before refreshing again.");
@@ -75,22 +74,47 @@ export function AgentMachinesScreen({
     if (result.error) throw result.error;
     return result.data?.machines.find((row) => row.node_id === selected);
   }
+  if (machine && query.data) {
+    return (
+      <AgentMachineEditor
+        key={`${runtime.epoch}:${route.params.agentId}:${machine.node_id}:${machine.revision}`}
+        machine={machine}
+        notice={notice}
+        readError={query.error ? machineError(query.error) : undefined}
+        agentId={route.params.agentId}
+        ownerId={query.data.agent.owner_id}
+        agentName={query.data.agent.display_name ?? query.data.agent.name}
+        features={query.data.features}
+        unavailable={!!query.error}
+        onBack={() => setSelected(undefined)}
+        onRefresh={refresh}
+        onSaved={(machines) => {
+          client.setQueryData(queryKey, { ...query.data, machines });
+          setNotice(
+            "Capabilities saved. Review cleanup and acknowledgement status before starting new work.",
+          );
+          void client.invalidateQueries({
+            queryKey: ["workspace", "agents"],
+          });
+        }}
+        onOpenApproval={(conversationId, acknowledgementId) =>
+          openChat({ conversationId, acknowledgementId })
+        }
+      />
+    );
+  }
   return (
-    <WorkspacePage
-      title="Agent machine access"
-      showHeading={false}
+    <AgentMachineListPage
+      selected={!!selected}
+      onBack={() => setSelected(undefined)}
       refreshing={query.isRefetching}
-      onRefresh={
-        !machine
-          ? () => {
-              if (runtime.active) {
-                void refresh().catch((cause) => {
-                  if (runtime.current()) setNotice(machineError(cause));
-                });
-              }
-            }
-          : undefined
-      }
+      onRefresh={() => {
+        if (runtime.active) {
+          void refresh().catch((cause) => {
+            if (runtime.current()) setNotice(machineError(cause));
+          });
+        }
+      }}
     >
       {notice && <Notice message={notice} />}
       {query.isPending && <Label muted>Loading agent machine access…</Label>}
@@ -162,31 +186,31 @@ export function AgentMachinesScreen({
       {selected && query.data && !machine && (
         <Notice message="This machine is no longer available to this agent. Return to the list and review current access." />
       )}
-      {machine && query.data && (
-        <AgentMachineEditor
-          key={`${runtime.epoch}:${route.params.agentId}:${machine.node_id}:${machine.revision}`}
-          machine={machine}
-          agentId={route.params.agentId}
-          ownerId={query.data.agent.owner_id}
-          agentName={query.data.agent.display_name ?? query.data.agent.name}
-          features={query.data.features}
-          unavailable={!!query.error}
-          onBack={() => setSelected(undefined)}
-          onRefresh={refresh}
-          onSaved={(machines) => {
-            client.setQueryData(queryKey, { ...query.data, machines });
-            setNotice(
-              "Capabilities saved. Review cleanup and acknowledgement status before starting new work.",
-            );
-            void client.invalidateQueries({
-              queryKey: ["workspace", "agents"],
-            });
-          }}
-          onOpenApproval={(conversationId, acknowledgementId) =>
-            openChat({ conversationId, acknowledgementId })
-          }
-        />
-      )}
+    </AgentMachineListPage>
+  );
+}
+
+function AgentMachineListPage({
+  selected,
+  onBack,
+  refreshing,
+  onRefresh,
+  children,
+}: PropsWithChildren<{
+  selected: boolean;
+  onBack: () => void;
+  refreshing: boolean;
+  onRefresh: () => void;
+}>) {
+  useWorkspaceBack({ active: selected, defaultRole: "back", onBack });
+  return (
+    <WorkspacePage
+      title="Agent machine access"
+      showHeading={false}
+      refreshing={refreshing}
+      onRefresh={onRefresh}
+    >
+      {children}
     </WorkspacePage>
   );
 }
@@ -198,6 +222,8 @@ export function AgentMachineEditor({
   agentName,
   features,
   unavailable,
+  notice,
+  readError,
   onBack,
   onRefresh,
   onSaved,
@@ -209,6 +235,8 @@ export function AgentMachineEditor({
   agentName: string;
   features: string[];
   unavailable: boolean;
+  notice?: string;
+  readError?: string;
   onBack: () => void;
   onRefresh: () => Promise<AgentMachine | undefined>;
   onSaved: (machines: AgentMachine[]) => void;
@@ -223,6 +251,7 @@ export function AgentMachineEditor({
     acknowledgement_id: string;
   }>();
   const [refreshError, setRefreshError] = useState<string>();
+  const [refreshing, setRefreshing] = useState(false);
   const dirty = JSON.stringify(caps) !== JSON.stringify(machine.capabilities);
   const blocked = write.busy || write.uncertain || !write.active || unavailable;
   const editable =
@@ -246,6 +275,8 @@ export function AgentMachineEditor({
         : undefined,
   });
   async function refresh() {
+    if (write.busy || !write.active) return;
+    setRefreshing(true);
     try {
       const latest = await onRefresh();
       if (!write.current()) return;
@@ -258,10 +289,24 @@ export function AgentMachineEditor({
       setRefreshError(undefined);
     } catch (cause) {
       if (write.current()) setRefreshError(machineError(cause));
+    } finally {
+      setRefreshing(false);
+    }
+  }
+  function reviewRefresh() {
+    if (!write.busy && write.active && !refreshing) {
+      confirmDiscard(dirty, () => void refresh());
     }
   }
   return (
-    <>
+    <WorkspacePage
+      title="Agent machine access"
+      showHeading={false}
+      refreshing={refreshing}
+      onRefresh={reviewRefresh}
+    >
+      {notice && <Notice message={notice} />}
+      {readError && <Notice tone="error" message={readError} />}
       <Card>
         <Label style={machineStyles.heading}>
           {agentName} on {machine.name}
@@ -301,16 +346,14 @@ export function AgentMachineEditor({
             ? `Available (Landlock ABI ${machine.separated?.landlock_abi ?? "unknown"})`
             : (machine.separated?.reason ?? "Unavailable")}
         </Label>
+        <MachineActionRow
+          label="Reload access and recovery status"
+          disabled={write.busy || !write.active || refreshing}
+          onPress={reviewRefresh}
+        />
       </Card>
       {write.error && <Notice tone="error" message={write.error} />}
       {refreshError && <Notice tone="error" message={refreshError} />}
-      <ActionButton
-        compact
-        label="Reload access and recovery status"
-        variant="secondary"
-        disabled={write.busy || !write.active}
-        onPress={() => confirmDiscard(dirty, () => void refresh())}
-      />
       <Card>
         {!editable && (
           <Notice
@@ -462,6 +505,6 @@ export function AgentMachineEditor({
           )}
         </Card>
       )}
-    </>
+    </WorkspacePage>
   );
 }
