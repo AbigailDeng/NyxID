@@ -2,6 +2,12 @@ import assert from "node:assert/strict";
 import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { hookHarness } from "../../features/assistant/assistantHookTestHarness";
+import { dismissWorkspaceSheetAction } from "../../app/navigationHierarchy";
+import type {
+  useWorkspaceBack,
+  workspaceHeaderOptions,
+} from "../../app/WorkspaceHeader";
+import type { WorkspaceSheetHandle } from "./WorkspaceSheetSurface";
 
 type Element = { type: unknown; props: Record<string, any> };
 type Gesture = { dx: number; dy: number; vy: number };
@@ -35,6 +41,12 @@ function setup(
   let closeAttempts = 0;
   let allowedCloses = 0;
   let canClose = true;
+  let guard: (() => Promise<boolean>) | undefined;
+  let onClosed: (() => void) | undefined;
+  let hardwareBack = () => false;
+  const controller: { current: WorkspaceSheetHandle | null } = {
+    current: null,
+  };
   const springs: {
     toValue: number;
     useNativeDriver: boolean;
@@ -74,7 +86,12 @@ function setup(
     "react-native": {
       View: "View",
       useWindowDimensions: () => dimensions,
-      BackHandler: { addEventListener: () => ({ remove() {} }) },
+      BackHandler: {
+        addEventListener: (_: string, callback: () => boolean) => {
+          hardwareBack = callback;
+          return { remove() {} };
+        },
+      },
       AccessibilityInfo: { setAccessibilityFocus() {} },
       findNodeHandle: () => null,
       Pressable: "Pressable",
@@ -161,17 +178,20 @@ function setup(
   ).WorkspaceSheetSurface as (props: {
     onClose: () => void;
     canClose: () => Promise<boolean>;
+    controller: typeof controller;
     children: Element;
   }) => Element;
   harness.mount(() =>
     component({
       children: child,
+      controller,
       canClose: async () => {
         closeAttempts++;
-        return canClose;
+        return guard ? guard() : canClose;
       },
       onClose: () => {
         allowedCloses++;
+        onClosed?.();
       },
     }),
   );
@@ -196,6 +216,14 @@ function setup(
     timings,
     gesture,
     counts: () => ({ closeAttempts, allowedCloses }),
+    controller,
+    hardwareBack: () => hardwareBack(),
+    guardWith: (next: () => Promise<boolean>) => {
+      guard = next;
+    },
+    onClosed: (next: () => void) => {
+      onClosed = next;
+    },
     blockClose: () => {
       canClose = false;
     },
@@ -412,3 +440,163 @@ test("reduced motion dismisses without travelling or springing and accessibility
   assert.equal(env.springs.length, 0);
   assert.equal(env.all()[0]!.props.accessibilityViewIsModal, true);
 });
+
+for (const source of ["Close", "backdrop", "drag", "Android Back", "Escape"]) {
+  test(`dirty ${source} confirms through the surface, cancels responsively and discards to the same chat`, async () => {
+    const env = setup();
+    const guards = new Map<symbol, () => Promise<boolean>>();
+    const alerts: {
+      title: string;
+      buttons: { text: string; onPress?: () => void }[];
+    }[] = [];
+    let header: ReturnType<typeof workspaceHeaderOptions> | undefined;
+    const headerHarness = hookHarness<null>({
+      "react/jsx-runtime": {
+        jsx: (type: unknown, props: Record<string, unknown>) => ({
+          type,
+          props,
+        }),
+      },
+      "react-native": {
+        Alert: {
+          alert: (
+            title: string,
+            _message: string,
+            buttons: (typeof alerts)[number]["buttons"],
+          ) => alerts.push({ title, buttons }),
+        },
+        BackHandler: { addEventListener: () => ({ remove() {} }) },
+        StyleSheet: { create: <T>(styles: T) => styles },
+      },
+      "@react-navigation/native": {
+        useIsFocused: () => true,
+        useNavigation: () => ({
+          setOptions: (next: typeof header) => {
+            header = next;
+          },
+        }),
+        usePreventRemove() {},
+      },
+      "lucide-react-native": {},
+      "../lib/accessibility/WorkspaceInteractionSurface": {},
+      "../lib/accessibility/workspaceAccessibility": {},
+      "../lib/accessibility/workspaceFocus": {},
+      "../theme/ThemeContext": {},
+    });
+    const module = headerHarness.load(
+      fileURLToPath(new URL("../../app/WorkspaceHeader.tsx", import.meta.url)),
+    ) as {
+      useWorkspaceBack: typeof useWorkspaceBack;
+      WorkspaceSheetContext: { value: unknown };
+    };
+    module.WorkspaceSheetContext.value = {
+      registerDismissGuard: (id: symbol, guard: () => Promise<boolean>) => {
+        guards.set(id, guard);
+        return () => {
+          guards.delete(id);
+        };
+      },
+      rootKey: "root",
+      sheetKey: "sheet",
+      onClose: () => env.controller.current!.dismiss(),
+    };
+    headerHarness.mount(() => {
+      module.useWorkspaceBack({
+        active: true,
+        onBack: () => {
+          throw new Error("Outer dismissal must not invoke local Back");
+        },
+        discardOnClose: { title: "Discard draft?", message: "Unsaved changes" },
+      });
+      return null;
+    });
+    env.guardWith(async () => {
+      for (const guard of guards.values()) if (!(await guard())) return false;
+      return true;
+    });
+    const chat = {
+      key: "exact-chat",
+      name: "AssistantContext",
+      params: { conversationId: "conversation-72", agentId: "researcher" },
+    };
+    const state = {
+      key: "root",
+      type: "stack",
+      stale: false as const,
+      index: 2,
+      routeNames: ["Workspace", "AssistantContext", "WorkspaceSheet"],
+      routes: [
+        { key: "workspace", name: "Workspace" },
+        chat,
+        { key: "sheet", name: "WorkspaceSheet" },
+      ],
+    };
+    const closedActions: NonNullable<
+      ReturnType<typeof dismissWorkspaceSheetAction>
+    >[] = [];
+    env.onClosed(() => {
+      const action = dismissWorkspaceSheetAction(state);
+      assert.ok(action);
+      closedActions.push(action);
+    });
+    const close = () => {
+      const button = header?.headerRight?.({
+        canGoBack: true,
+      }) as unknown as Element;
+      assert.ok(button);
+      button.props.onPress();
+    };
+    const attempt = () => {
+      if (source === "Close") close();
+      else if (source === "backdrop") env.backdrop().props.onPress();
+      else if (source === "drag") {
+        env.handlers().onPanResponderMove(null, env.gesture(150));
+        env.handlers().onPanResponderRelease(null, env.gesture(150, 1));
+      } else if (source === "Android Back")
+        assert.equal(env.hardwareBack(), true);
+      else env.all()[0]!.props.onAccessibilityEscape();
+    };
+    const choose = (text: string) => {
+      const button = alerts.at(-1)?.buttons.find((row) => row.text === text);
+      assert.ok(button);
+      button.onPress?.();
+    };
+    attempt();
+    await env.harness.settle();
+    assert.equal(alerts.length, 1);
+    assert.equal(alerts[0]?.title, "Discard draft?");
+    assert.equal(env.counts().allowedCloses, 0);
+    assert.equal(
+      env.timings.length,
+      2,
+      "no exit animation before confirmation",
+    );
+    close();
+    assert.equal(
+      alerts.length,
+      1,
+      "an outstanding confirmation is not duplicated",
+    );
+    choose("Keep editing");
+    await env.harness.settle();
+    assert.equal(env.panel().props.pointerEvents, "auto");
+    assert.equal(env.offset().value, 0);
+    assert.equal(env.all().includes(env.child), true);
+    assert.equal(closedActions.length, 0);
+    assert.deepEqual(env.counts(), { closeAttempts: 1, allowedCloses: 0 });
+    attempt();
+    await env.harness.settle();
+    assert.equal(alerts.length, 2, "cancellation releases the closing lock");
+    choose("Discard");
+    await env.harness.settle();
+    assert.deepEqual(env.counts(), { closeAttempts: 2, allowedCloses: 1 });
+    assert.equal(closedActions.length, 1);
+    const closedAction = closedActions[0]!;
+    assert.ok(closedAction.payload);
+    assert.equal(closedAction.payload.index, 1);
+    assert.equal(closedAction.payload.routes[1], chat);
+    assert.equal(closedAction.target, state.key);
+    headerHarness.unmount();
+    env.harness.unmount();
+  });
+}

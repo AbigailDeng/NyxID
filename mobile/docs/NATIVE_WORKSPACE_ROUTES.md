@@ -53,6 +53,17 @@ Close, backdrop, handle drag and accessibility Escape preflight registered
 `useWorkspaceBack` guards; Android Back preserves local/nested history before
 root dismissal. Successful drag continues out; cancellation returns to rest.
 Sign-out releases route guards and unmounts the account's editor stack.
+
+For iOS simulator checks in an Expo development build, turn off **Tools button**
+in Expo's development menu before testing Close. Its floating native window can
+overlap the drawer's Close target, intercept the tap and leave the accessibility
+snapshot showing only `gearshape.fill`. This does not establish that the app
+entered dismissal. Exercise the actual Close control with the tool out of the
+way, then verify that Keep editing preserves a responsive draft and Discard
+returns to the same conversation and composer draft. The surface tests run the
+real dirty guard through Close, backdrop, drag, Android Back and accessibility
+Escape, including cancellation, repeated dismissal and the retained chat action.
+
 Retained interaction content and custom native header descendants are hidden
 from VoiceOver/TalkBack using explicit root drawer presence, including Android
 when retained navigators still report focus; the conversation stays mounted.
