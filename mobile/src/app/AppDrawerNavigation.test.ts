@@ -186,6 +186,7 @@ function setup() {
     workspaceFocus: { context() {} },
     appLinking: {},
     pushToastStyles: { overlay: {} },
+    appRootStyles: { fill: { flex: 1 } },
     workspaceNavigateAction,
     workspaceChatNavigationAction,
     openWorkspaceSheetAction,
@@ -238,6 +239,11 @@ function setup() {
     dispatched,
     flush,
     drawer: () => find("WorkspaceDrawer"),
+    background: () =>
+      elements(rendered).find(
+        (item) =>
+          item.type === "View" && "accessibilityElementsHidden" in item.props,
+      )!,
     open: () => {
       find("AppNavigator").props.onOpenMenu();
       flush();
@@ -323,6 +329,34 @@ test("management, chat, scanner and login selections wait for actual menu dismis
     env.drawer().props.onDismiss();
     assert.equal(env.dispatched.length, 1);
   }
+});
+
+test("navigation accessibility stays excluded through menu exit and restores after host removal or auth change", () => {
+  const env = setup();
+  assert.equal(env.background().props.accessibilityElementsHidden, false);
+  env.open();
+  assert.equal(env.background().props.accessibilityElementsHidden, true);
+  assert.equal(
+    env.background().props.importantForAccessibility,
+    "no-hide-descendants",
+  );
+  assert.equal(env.background().props.collapsable, false);
+  env.drawer().props.onClose();
+  env.flush();
+  assert.equal(env.drawer().props.visible, false);
+  assert.equal(
+    env.background().props.accessibilityElementsHidden,
+    true,
+    "the native host remains during its exit animation",
+  );
+  env.drawer().props.onDismiss();
+  env.flush();
+  assert.equal(env.background().props.accessibilityElementsHidden, false);
+  assert.equal(env.background().props.importantForAccessibility, "auto");
+  env.open();
+  env.authenticate(false);
+  assert.equal(env.hasDrawer(), false);
+  assert.equal(env.background().props.accessibilityElementsHidden, false);
 });
 
 test("management Chats resolves the latest root state when dismissal completes", () => {

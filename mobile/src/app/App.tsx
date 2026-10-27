@@ -479,6 +479,7 @@ function ThemedAppShell({
   const insets = useSafeAreaInsets();
   const { isAuthenticated } = useAuthSession();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerPresented, setDrawerPresented] = useState(false);
   const pendingDrawerNavigation = useRef<(() => void) | undefined>(undefined);
   const [currentChat, setCurrentChat] = useState<WorkspaceChatTarget>();
   const [accessibility, setAccessibility] = useState<WorkspaceAccessibility>({
@@ -495,15 +496,17 @@ function ThemedAppShell({
     if (!isAuthenticated) {
       pendingDrawerNavigation.current = undefined;
       setDrawerOpen(false);
+      setDrawerPresented(false);
       workspaceFocus.context(undefined, false);
     }
   }, [isAuthenticated]);
-  // Finish dismissing the menu's native modal before presenting another one.
+  // Remove the menu's native host before presenting the next destination.
   const closeDrawerThen = (navigate: () => void) => {
     pendingDrawerNavigation.current = navigate;
     setDrawerOpen(false);
   };
   const onDrawerDismiss = useCallback(() => {
+    setDrawerPresented(false);
     const navigate = pendingDrawerNavigation.current;
     pendingDrawerNavigation.current = undefined;
     navigate?.();
@@ -532,34 +535,47 @@ function ThemedAppShell({
 
   return (
     <>
-      <NavigationContainer
-        ref={navigationRef}
-        linking={appLinking}
-        onReady={() => {
-          trackCurrentRoute();
-          flushPendingChallengeTapNavigation();
-        }}
-        onStateChange={() => {
-          trackCurrentRoute();
-          flushPendingChallengeTapNavigation();
-        }}
+      <View
+        collapsable={false}
+        accessible={false}
+        style={appRootStyles.fill}
+        accessibilityElementsHidden={drawerPresented}
+        importantForAccessibility={
+          drawerPresented ? "no-hide-descendants" : "auto"
+        }
       >
-        <StatusBar style={mode === "dark" ? "light" : "dark"} />
-        <WorkspaceAccessibilityContext.Provider value={accessibility}>
-          <AppNavigator
-            onOpenMenu={() => setDrawerOpen(true)}
-            onNavigationGuardChange={onNavigationGuardChange}
-          />
-        </WorkspaceAccessibilityContext.Provider>
-      </NavigationContainer>
-      {/* ToastOverlay anchors to `top: 0` of its parent and relies on the
+        <NavigationContainer
+          ref={navigationRef}
+          linking={appLinking}
+          onReady={() => {
+            trackCurrentRoute();
+            flushPendingChallengeTapNavigation();
+          }}
+          onStateChange={() => {
+            trackCurrentRoute();
+            flushPendingChallengeTapNavigation();
+          }}
+        >
+          <StatusBar style={mode === "dark" ? "light" : "dark"} />
+          <WorkspaceAccessibilityContext.Provider value={accessibility}>
+            <AppNavigator
+              onOpenMenu={() => {
+                setDrawerPresented(true);
+                setDrawerOpen(true);
+              }}
+              onNavigationGuardChange={onNavigationGuardChange}
+            />
+          </WorkspaceAccessibilityContext.Provider>
+        </NavigationContainer>
+        {/* ToastOverlay anchors to `top: 0` of its parent and relies on the
           screen's SafeAreaView for inset. Mounted globally it has no such
           parent, so give it explicit bounds below the notch. */}
-      <View
-        style={[pushToastStyles.overlay, { top: insets.top }]}
-        pointerEvents="box-none"
-      >
-        <ToastOverlay toast={pushToast} duration={6000} />
+        <View
+          style={[pushToastStyles.overlay, { top: insets.top }]}
+          pointerEvents="box-none"
+        >
+          <ToastOverlay toast={pushToast} duration={6000} />
+        </View>
       </View>
       {isAuthenticated ? (
         <WorkspaceDrawer

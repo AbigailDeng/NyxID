@@ -13,6 +13,7 @@ async function setup(
 ) {
   let visible = initiallyVisible;
   let dismissed = 0;
+  let closeRequests = 0;
   let target: number | null = 90;
   let authEpoch = 0;
   let onDismiss: () => void = () => {
@@ -47,12 +48,13 @@ async function setup(
     props,
     key,
   });
-  const harness = hookHarness<Element>({
+  const harness = hookHarness<Element | null>({
     "../../lib/accessibility/workspaceFocus": { workspaceFocus: focus },
     "react/jsx-runtime": { jsx, jsxs: jsx },
     "react-native": {
       Platform: { OS: platform },
       Modal: "Modal",
+      View: "View",
       Pressable: "Pressable",
       useWindowDimensions: () => ({ width: 400 }),
       AccessibilityInfo: {
@@ -83,6 +85,7 @@ async function setup(
       StyleSheet: { create: <T>(styles: T) => styles },
     },
     "react-native-safe-area-context": { SafeAreaProvider: "SafeAreaProvider" },
+    "react-native-screens": { FullWindowOverlay: "FullWindowOverlay" },
   });
   const component = harness.load(
     fileURLToPath(new URL("./WorkspaceDrawerModal.tsx", import.meta.url)),
@@ -92,11 +95,13 @@ async function setup(
     onDismiss: () => void;
     initialFocusTarget: () => number | null;
     children: null;
-  }) => Element;
+  }) => Element | null;
   harness.mount(() =>
     component({
       visible,
-      onClose() {},
+      onClose: () => {
+        closeRequests++;
+      },
       onDismiss,
       initialFocusTarget: () => target,
       children: null,
@@ -115,9 +120,13 @@ async function setup(
     },
     harness,
     animations,
-    modal: () => harness.value().props,
-    modalKey: () => harness.value().key,
+    modal: () => harness.value()?.props,
+    isMounted: () =>
+      platform === "ios"
+        ? harness.value() !== null
+        : harness.value()?.props.visible,
     dismissed: () => dismissed,
+    closeRequests: () => closeRequests,
     setVisible: (next: boolean) => {
       visible = next;
       harness.render();
@@ -127,7 +136,10 @@ async function setup(
       harness.render();
     },
     show: () => {
-      harness.value().props.onShow();
+      const host = harness.value();
+      assert.ok(host);
+      if (platform === "ios") host.props.children.props.onLayout();
+      else host.props.onShow();
       harness.flush();
     },
     finishAnimation: () => {
@@ -139,32 +151,32 @@ async function setup(
   };
 }
 
-test("iOS waits for native dismissal after the closing animation and notifies once", async () => {
+test("iOS uses a full-window host and hands navigation off only after its removal commit", async () => {
   const env = await setup("ios");
   assert.equal(env.dismissed(), 0);
   env.setVisible(true);
+  assert.equal(env.harness.value()?.type, "FullWindowOverlay");
   env.show();
   env.finishAnimation();
   env.setVisible(false);
-  assert.equal(env.modal().visible, true);
+  assert.equal(env.isMounted(), true);
   assert.equal(env.dismissed(), 0);
   env.finishAnimation();
-  assert.equal(env.modal().visible, false);
-  assert.equal(env.dismissed(), 0);
-  env.modal().onDismiss();
-  env.modal().onDismiss();
+  assert.equal(env.harness.value(), null);
+  assert.equal(env.dismissed(), 1);
+  env.harness.render();
   assert.equal(env.dismissed(), 1);
 });
 
-test("iOS early close before onShow still waits for native dismissal", async () => {
+test("iOS early close removes the host and ignores a retained layout callback", async () => {
   const env = await setup("ios", true);
+  const lateLayout = env.harness.value()!.props.children.props.onLayout;
   assert.equal(env.animations.length, 0);
   env.setVisible(false);
-  assert.equal(env.modal().visible, false);
-  env.show();
-  assert.equal(env.modal().visible, false);
-  assert.equal(env.dismissed(), 0);
-  env.modal().onDismiss();
+  assert.equal(env.isMounted(), false);
+  lateLayout();
+  env.harness.flush();
+  assert.equal(env.isMounted(), false);
   assert.equal(env.dismissed(), 1);
 });
 
@@ -172,12 +184,17 @@ test("the completed dismissal reads the latest callback without repeating after 
   const env = await setup("ios", true);
   env.show();
   env.setVisible(false);
-  env.finishAnimation();
   let latestCalls = 0;
-  env.setOnDismiss(() => latestCalls++);
-  env.modal().onDismiss();
+  env.setOnDismiss(() => {
+    assert.equal(
+      env.isMounted(),
+      false,
+      "handoff observes the removed native host",
+    );
+    latestCalls++;
+  });
+  env.finishAnimation();
   env.harness.render();
-  env.modal().onDismiss();
   assert.equal(latestCalls, 1);
   assert.equal(env.dismissed(), 0);
 });
@@ -187,21 +204,37 @@ test("Android notifies only after mounted=false commits, including an early clos
   env.show();
   env.setVisible(false);
   assert.equal(env.dismissed(), 0);
-  assert.equal(env.modal().visible, true);
+  assert.equal(env.modal()!.visible, true);
   env.finishAnimation();
-  assert.equal(env.modal().visible, false);
+  assert.equal(env.modal()!.visible, false);
   assert.equal(env.dismissed(), 1);
-  assert.equal(env.modal().onDismiss, undefined);
+  assert.equal(env.modal()!.onDismiss, undefined);
   env.harness.render();
   assert.equal(env.dismissed(), 1);
 
   env.setVisible(true);
   env.setVisible(false);
-  assert.equal(env.modal().visible, false);
+  assert.equal(env.modal()!.visible, false);
   assert.equal(env.dismissed(), 2);
 });
 
-test("reopening interrupts the close animation and ignores a stale native dismissal", async () => {
+test("Android native Back and iOS accessibility Escape request the existing parent Close action", async () => {
+  for (const platform of ["ios", "android"] as const) {
+    const env = await setup(platform, true);
+    env.show();
+    if (platform === "android") env.modal()!.onRequestClose();
+    else env.modal()!.children.props.onAccessibilityEscape();
+    assert.equal(env.closeRequests(), 1);
+    assert.equal(
+      env.isMounted(),
+      true,
+      "parent controls the guarded closing lifecycle",
+    );
+    env.harness.unmount();
+  }
+});
+
+test("reopening interrupts the close animation without releasing the current native host", async () => {
   const env = await setup("ios", true);
   env.show();
   env.setVisible(false);
@@ -210,16 +243,14 @@ test("reopening interrupts the close animation and ignores a stale native dismis
   assert.equal(closing.stopped, true);
   closing.complete();
   env.harness.flush();
-  env.modal().onDismiss();
   assert.equal(env.dismissed(), 0);
-  assert.equal(env.modal().visible, true);
+  assert.equal(env.isMounted(), true);
   env.setVisible(false);
   env.finishAnimation();
-  env.modal().onDismiss();
   assert.equal(env.dismissed(), 1);
 });
 
-test("menu focus ownership starts before presentation and ends only at native dismissal", async () => {
+test("menu focus ownership starts before presentation and ends only after host removal", async () => {
   const env = await setup("ios");
   env.focus.context("chat", false);
   env.focus.register(Symbol("chat header"), () => 10, true, "chat");
@@ -227,7 +258,7 @@ test("menu focus ownership starts before presentation and ends only at native di
   env.focus.context("chat", true);
   env.focus.restore(origin);
   env.focus.context("chat", false);
-  env.setVisible(true); // Starts ownership before native onShow/entrance.
+  env.setVisible(true);
   env.flushFocus();
   assert.deepEqual(env.focused, []);
   env.show();
@@ -241,11 +272,7 @@ test("menu focus ownership starts before presentation and ends only at native di
     "closing animation still belongs to the menu",
   );
   env.finishAnimation();
-  assert.equal(env.modal().visible, false);
-  env.focus.restore(origin);
-  env.flushFocus();
-  assert.deepEqual(env.focused, [], "native modal has not dismissed yet");
-  env.modal().onDismiss();
+  assert.equal(env.isMounted(), false);
   env.flushFocus();
   assert.deepEqual(
     env.focused,
@@ -257,14 +284,13 @@ test("menu focus ownership starts before presentation and ends only at native di
   assert.deepEqual(env.focused, [10]);
 });
 
-test("reopening keeps focus ownership across stale dismissal and unmount releases it", async () => {
+test("reopening keeps focus ownership across interrupted dismissal and unmount releases it", async () => {
   const env = await setup("ios", true);
   env.focus.context("chat", false);
   env.focus.register(Symbol("chat header"), () => 10, true, "chat");
   env.show();
   env.setVisible(false);
   env.setVisible(true);
-  env.modal().onDismiss();
   env.focus.restore(env.focus.capture("chat"));
   env.flushFocus();
   assert.deepEqual(env.focused, []);
@@ -274,18 +300,11 @@ test("reopening keeps focus ownership across stale dismissal and unmount release
   assert.deepEqual(env.focused, [10]);
 });
 
-test("each completed iOS menu cycle gets a fresh Modal owner with no nested modal accessibility owner", async () => {
+test("each completed iOS menu cycle removes its window overlay without a UIKit Modal or nested AX owner", async () => {
   const env = await setup("ios");
-  const keys = new Set<unknown>();
   for (let cycle = 0; cycle < 3; cycle++) {
+    assert.equal(env.harness.value(), null);
     env.setVisible(true);
-    const key = env.modalKey();
-    assert.equal(
-      keys.has(key),
-      false,
-      "a completed presentation must not reuse its Modal component",
-    );
-    keys.add(key);
     env.show();
     env.finishAnimation();
     const nodes = (root: Element): Element[] => [
@@ -299,26 +318,16 @@ test("each completed iOS menu cycle gets a fresh Modal owner with no nested moda
         ),
     ];
     assert.equal(
-      nodes(env.harness.value()).some(
-        (node) => node.props.accessibilityViewIsModal,
+      nodes(env.harness.value()!).some(
+        (node) => node.type === "Modal" || node.props.accessibilityViewIsModal,
       ),
       false,
-      "the native Modal owns isolation; no animated child claims modal ownership",
+      "FullWindowOverlay owns isolation without a UIKit modal presenter",
     );
     env.setVisible(false);
     env.finishAnimation();
-    assert.equal(env.modalKey(), key, "do not remount before native onDismiss");
-    env.modal().onDismiss();
-    env.harness.flush();
-    assert.notEqual(env.modalKey(), key);
-    const nextKey = env.modalKey();
-    env.modal().onDismiss();
-    env.harness.flush();
-    assert.equal(
-      env.modalKey(),
-      nextKey,
-      "duplicate dismissals cannot retire the next owner",
-    );
+    assert.equal(env.harness.value(), null);
+    assert.equal(env.dismissed(), cycle + 1);
   }
   env.harness.unmount();
 });
@@ -344,14 +353,11 @@ test("menu Close receives live focus once after native presentation and entrance
         "resolve the current mounted handle",
       );
       env.harness.render();
+      env.show();
       env.flushFocus();
       assert.deepEqual(env.focused, [100], "rerender cannot steal focus");
       env.setVisible(false);
       if (!reduced) env.finishAnimation();
-      if (platform === "ios") {
-        env.modal().onDismiss();
-        env.harness.flush();
-      }
       env.setFocusTarget(110);
       env.setVisible(true);
       env.show();

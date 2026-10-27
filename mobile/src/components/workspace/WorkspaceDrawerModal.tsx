@@ -15,8 +15,10 @@ import {
   Pressable,
   StyleSheet,
   useWindowDimensions,
+  View,
 } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { FullWindowOverlay } from "react-native-screens";
 import { workspaceFocus } from "../../lib/accessibility/workspaceFocus";
 
 export function WorkspaceDrawerModal({
@@ -42,7 +44,6 @@ export function WorkspaceDrawerModal({
   const dismissalPending = useRef(visible);
   const [mounted, setMounted] = useState(visible);
   const [presented, setPresented] = useState(false);
-  const [presentationId, setPresentationId] = useState(0);
   const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
   const focusOwner = useRef(Symbol("navigation-modal")).current;
   const focusRevision = useRef(0);
@@ -62,8 +63,6 @@ export function WorkspaceDrawerModal({
     if (visibleRef.current || !dismissalPending.current) return;
     dismissalPending.current = false;
     workspaceFocus.setModalActive(focusOwner, false);
-    // Reopening gets a new native modal/accessibility owner after full dismissal.
-    setPresentationId((previous) => previous + 1);
     onDismissRef.current?.();
   }, [focusOwner]);
 
@@ -99,9 +98,9 @@ export function WorkspaceDrawerModal({
   }, [visible]);
 
   useEffect(() => {
-    // Android has no native onDismiss event. Its Modal is removed in the
-    // mounted=false commit, so wait for that commit before opening another.
-    if (!mounted && Platform.OS !== "ios") notifyDismissed();
+    // Both native hosts are removed in the mounted=false commit. Wait for
+    // that commit before handing navigation to the next destination.
+    if (!mounted) notifyDismissed();
   }, [mounted, notifyDismissed]);
 
   useEffect(() => {
@@ -149,23 +148,18 @@ export function WorkspaceDrawerModal({
     };
   }, [focusOwner, mounted, presented, progress, reduceMotion, visible]);
 
-  return (
-    <Modal
-      key={presentationId}
-      visible={mounted}
-      transparent
-      animationType="none"
-      statusBarTranslucent
-      navigationBarTranslucent
-      onRequestClose={onClose}
-      onDismiss={Platform.OS === "ios" ? notifyDismissed : undefined}
-      onShow={() => {
-        // Wait for the native modal to appear before starting the entrance.
-        if (visibleRef.current) setPresented(true);
-        else setMounted(false);
-      }}
+  const onPresented = () => {
+    if (visibleRef.current) setPresented(true);
+    else setMounted(false);
+  };
+  const content = (
+    <View
+      collapsable={false}
+      accessible={false}
+      style={styles.root}
+      onLayout={Platform.OS === "ios" ? onPresented : undefined}
+      onAccessibilityEscape={onClose}
     >
-      {/* A modal has its own native root, including its safe-area measurements. */}
       <SafeAreaProvider style={styles.root}>
         <Animated.View
           pointerEvents="none"
@@ -199,6 +193,22 @@ export function WorkspaceDrawerModal({
           {children}
         </Animated.View>
       </SafeAreaProvider>
+    </View>
+  );
+  if (Platform.OS === "ios") {
+    return mounted ? <FullWindowOverlay>{content}</FullWindowOverlay> : null;
+  }
+  return (
+    <Modal
+      visible={mounted}
+      transparent
+      animationType="none"
+      statusBarTranslucent
+      navigationBarTranslucent
+      onRequestClose={onClose}
+      onShow={onPresented}
+    >
+      {content}
     </Modal>
   );
 }
