@@ -65,6 +65,9 @@ preferences use AsyncStorage on this device: default column maximum 758pt,
 wide-window-only width controls and the existing 120pt native composer maximum,
 clamped to keyboard/window space. Reset changes layout only. Shared conditional
 fades use measured overflow/edges, with transcript follow handlers called first.
+Settings identity, label/value and control rows stack at narrow effective widths
+while preserving system text scaling. Display uses fixed-size step icons in
+labelled 44pt targets, with scalable labels/values and wrapping control rows.
 The native semantic text palette now meets 4.5:1 on base/card/cardSoft surfaces.
 No iOS orientation/tablet support, RN-web, native rail, machine capability or
 native voice admission was added. Web UI lift is inherited unchanged from main.

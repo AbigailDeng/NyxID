@@ -1,7 +1,10 @@
 import { ChatDisplaySettings } from "../display/ChatDisplaySettings";
 import { approvalDeliveryWarning } from "./approvalDeliveryPolicy";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import {
+  Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Switch, Text,
+  useWindowDimensions, View,
+} from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
 import type { WorkspaceScreenProps } from "../../app/navigationTypes";
 
@@ -85,7 +88,11 @@ function AccountRow({
   onPress?: () => void;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { width, fontScale } = useWindowDimensions();
+  const styles = useMemo(
+    () => createStyles(colors, width, fontScale),
+    [colors, width, fontScale],
+  );
   const content = (
     <View style={[styles.accountRow, isLast && styles.accountRowLast]}>
       <Text style={styles.accountRowLabel}>{label}</Text>
@@ -144,7 +151,11 @@ function getDisplayNameValue(name?: string | null, provider?: string | null): st
 
 export function AccountSettingsScreen({ navigation }: Props) {
   const { colors, mode, preference, setPreference } = useTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { width, fontScale } = useWindowDimensions();
+  const styles = useMemo(
+    () => createStyles(colors, width, fontScale),
+    [colors, width, fontScale],
+  );
   const flowStyles = useMemo(() => createFlowStyles(colors), [colors]);
   const [toast, setToast] = useState<ToastState | null>(null);
   const queryClient = useQueryClient();
@@ -789,24 +800,31 @@ export function AccountSettingsScreen({ navigation }: Props) {
   );
 }
 
-const createStyles = (c: ThemeColors) => StyleSheet.create({
+const createStyles = (
+  c: ThemeColors,
+  width: number,
+  fontScale: number,
+  // Reserve a full line for labels when scaled text leaves too little row space.
+  stacked = width / fontScale < 340,
+  avatarSize = Math.ceil(44 * Math.max(1, fontScale)),
+) => StyleSheet.create({
   identityHeader: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: stacked ? "column" : "row",
+    alignItems: stacked ? "flex-start" : "center",
     gap: spacing.lg,
     marginBottom: spacing.xxl,
   },
   avatarCircle: {
-    width: 44,
-    height: 44,
+    width: avatarSize,
+    height: avatarSize,
     borderRadius: radius.full,
     backgroundColor: c.primary,
     alignItems: "center",
     justifyContent: "center",
   },
   avatarImage: {
-    width: 44,
-    height: 44,
+    width: avatarSize,
+    height: avatarSize,
     borderRadius: radius.full,
   },
   avatarText: {
@@ -814,7 +832,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.onPrimary,
   },
   identityInfo: {
-    flex: 1,
+    flex: stacked ? undefined : 1,
+    width: stacked ? "100%" : undefined,
     minWidth: 0,
   },
   identityName: {
@@ -829,6 +848,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   // DESIGN.md §Badges: rounded-md (6px), px-2 py-0.5, text-[10px] font-medium.
   // Theme-aware via `successTone` / `dangerTone` so light + dark both render correctly.
   statusBadge: {
+    maxWidth: "100%",
+    flexShrink: 0,
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
     borderRadius: radius.sm,
@@ -863,9 +884,10 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     marginBottom: 0,
   },
   accountRow: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: stacked ? "column" : "row",
+    alignItems: stacked ? "flex-start" : "center",
     justifyContent: "space-between",
+    gap: spacing.sm,
     paddingVertical: spacing.xl,
     borderBottomWidth: 1,
     borderBottomColor: c.borderSoft,
@@ -876,31 +898,46 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   accountRowLabel: {
     ...typeScale.description,
     color: c.textSecondary,
+    minWidth: 0,
+    maxWidth: "100%",
+    flexShrink: 1,
   },
   accountRowRight: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.xs,
+    minWidth: 0,
+    maxWidth: stacked ? "100%" : "60%",
+    flexShrink: 1,
   },
   accountRowValue: {
     ...typeScale.label,
     color: c.textPrimary,
+    minWidth: 0,
+    maxWidth: "100%",
+    flexShrink: 1,
+    textAlign: stacked ? "left" : "right",
   },
   accountRowArrow: {
     ...typeScale.description,
     color: c.textMuted,
   },
   channelRowLeft: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: stacked ? "column" : "row",
+    alignItems: stacked ? "flex-start" : "center",
+    flexWrap: "wrap",
     gap: spacing.sm,
-    flex: 1,
+    flex: stacked ? undefined : 1,
+    maxWidth: "100%",
+    minWidth: 0,
   },
   // DESIGN.md §Badges (`default`/`accent` purple variant): rounded-md, text-[10px]
   // font-medium. `primaryTone` carries the theme-aware bg/border, `primaryOnTint`
   // is the legible text color (light wordmark hex on dark; saturated brand purple
   // on light — the pale lavender disappears on a white card).
   connectedPill: {
+    maxWidth: "100%",
+    flexShrink: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.xs,
@@ -912,10 +949,15 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     paddingVertical: 2,
   },
   connectedPillText: {
+    flexShrink: 1,
     ...typeScale.badge,
     color: c.primaryOnTint,
   },
   linkPill: {
+    minHeight: 44,
+    maxWidth: "100%",
+    flexShrink: 1,
+    justifyContent: "center",
     backgroundColor: c.primaryTone.bg,
     borderWidth: 1,
     borderColor: c.primaryTone.border,
@@ -924,6 +966,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     paddingVertical: 2,
   },
   linkPillText: {
+    flexShrink: 1,
     ...typeScale.badge,
     color: c.primaryOnTint,
   },
@@ -935,7 +978,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   // Same visual treatment as SegmentControl and BottomNavV2 — one selected-state
   // language across the app: rounded-lg container, navActive highlight, sentence-case.
   themeToggleWrap: {
-    flexDirection: "row",
+    flexDirection: stacked ? "column" : "row",
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: c.borderSoft,
@@ -945,7 +988,10 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     marginTop: spacing.sm,
   },
   themeToggleHalf: {
-    flex: 1,
+    flex: stacked ? undefined : 1,
+    minWidth: 0,
+    minHeight: 44,
+    paddingHorizontal: spacing.sm,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -960,6 +1006,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     width: 0,
   },
   themeToggleLabel: {
+    flexShrink: 1,
     ...typeScale.label,
     color: c.textMuted,
   },
@@ -967,9 +1014,10 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.textPrimary,
   },
   systemRow: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: stacked ? "column" : "row",
+    alignItems: stacked ? "flex-start" : "center",
     justifyContent: "space-between",
+    gap: spacing.sm,
     marginTop: spacing.md,
   },
   actionsWrap: {
@@ -994,6 +1042,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   legalRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     justifyContent: "center",
     alignItems: "center",
     gap: spacing.sm,

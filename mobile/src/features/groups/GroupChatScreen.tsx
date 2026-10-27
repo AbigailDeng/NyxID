@@ -831,7 +831,7 @@ function GroupChat({
           <View
             style={[
               styles.composer,
-              { backgroundColor: colors.card, borderColor: colors.border },
+              { backgroundColor: colors.card, borderColor: colors.textMuted },
             ]}
           >
             <Icon

@@ -558,6 +558,11 @@ full-screen. See
   keyboard/window space, reserving transcript space down to a 44pt input. It
   grows with content; the setting never forces blank height. Reset changes only
   these layout values. Web storage and width/index behavior are unchanged.
+- Settings preserves system text scaling. At narrow effective widths, identity,
+  status, label/value and switch rows stack so long text can wrap within cards.
+  Avatar initials retain enough space at the selected text size. Display step
+  controls use fixed-size icons in labelled 44pt targets while labels and values
+  continue to scale; the controls can wrap onto another line.
 - Transcript, multiline input and horizontal attachment/recipient/member strips
   show fades only at measured overflowing edges. Top/start cues are gentler.
   Fades ignore pointer/accessibility input and disappear at revealed edges.
