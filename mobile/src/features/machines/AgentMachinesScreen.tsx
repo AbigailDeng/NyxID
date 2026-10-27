@@ -1,5 +1,8 @@
 import { useRef, useState } from "react";
+import { View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { StatusBadge } from "../../components/StatusBadge";
+import { SectionBadge } from "../../components/SectionBadge";
 import {
   useOpenWorkspaceChat,
   useWorkspaceBack,
@@ -13,6 +16,7 @@ import {
 } from "../../components/workspace/WorkspaceUI";
 import { agentMachinesApi } from "../../lib/api/agentMachinesApi";
 import { MachineSwitch } from "./MachinePolicyScreen";
+import { MachineRowCard, machineStyles } from "./MachinePresentation";
 import {
   confirmDiscard,
   machineError,
@@ -72,30 +76,33 @@ export function AgentMachinesScreen({
     return result.data?.machines.find((row) => row.node_id === selected);
   }
   return (
-    <WorkspacePage title="Agent machine access" showHeading={false}>
+    <WorkspacePage
+      title="Agent machine access"
+      showHeading={false}
+      refreshing={query.isRefetching}
+      onRefresh={
+        !machine
+          ? () => {
+              if (runtime.active) {
+                void refresh().catch((cause) => {
+                  if (runtime.current()) setNotice(machineError(cause));
+                });
+              }
+            }
+          : undefined
+      }
+    >
       {notice && <Notice message={notice} />}
       {query.isPending && <Label muted>Loading agent machine access…</Label>}
       {query.error && (
         <Notice tone="error" message={machineError(query.error)} />
       )}
-      {!machine && (
-        <ActionButton
-          label="Refresh agent machine status"
-          variant="secondary"
-          disabled={!runtime.active || query.isFetching}
-          onPress={() =>
-            void refresh().catch((cause) => {
-              if (runtime.current()) setNotice(machineError(cause));
-            })
-          }
-        />
-      )}
       {query.data && !selected && !query.error && (
         <>
-          <Label>
+          <Label style={machineStyles.heading}>
             {query.data.agent.display_name ?? query.data.agent.name}
           </Label>
-          <Label muted>
+          <Label muted style={machineStyles.metadata}>
             Machine permissions only narrow the local capability ceiling. Saving
             cancels this agent's current work on that machine. External API-key
             and OAuth grants remain on the web.
@@ -104,27 +111,51 @@ export function AgentMachinesScreen({
             <Label muted>No machines are available to this agent.</Label>
           )}
           {query.data.machines.map((row) => (
-            <Card key={row.node_id}>
-              <Label>{row.name}</Label>
-              <Label muted>
-                {selectionRequired(row)
+            <MachineRowCard
+              key={row.node_id}
+              label={`Review ${row.name} access`}
+              summary={[
+                selectionRequired(row)
                   ? "Owner selection required"
                   : row.mode === "separated"
                     ? "Separate workspace and browser"
-                    : "Shared legacy"}{" "}
-                · Revision {row.revision}
-              </Label>
+                    : "Shared legacy",
+                `Revision ${row.revision}`,
+                ...machineAccessState(row),
+              ].join(". ")}
+              onPress={() => setSelected(row.node_id)}
+            >
+              <View style={machineStyles.row}>
+                <Label numberOfLines={1} style={machineStyles.name}>
+                  {row.name}
+                </Label>
+                <StatusBadge
+                  label={`Revision ${row.revision}`}
+                  variant="orgChip"
+                />
+              </View>
+              <View style={machineStyles.badges}>
+                <SectionBadge
+                  label={
+                    selectionRequired(row)
+                      ? "Owner selection required"
+                      : row.mode === "separated"
+                        ? "Separate workspace and browser"
+                        : "Shared legacy"
+                  }
+                  tone={
+                    selectionRequired(row) || row.mode !== "separated"
+                      ? "warning"
+                      : "success"
+                  }
+                />
+              </View>
               {machineAccessState(row).map((message) => (
-                <Label muted key={message}>
+                <Label muted style={machineStyles.metadata} key={message}>
                   {message}
                 </Label>
               ))}
-              <ActionButton
-                label={`Review ${row.name} access`}
-                variant="secondary"
-                onPress={() => setSelected(row.node_id)}
-              />
-            </Card>
+            </MachineRowCard>
           ))}
         </>
       )}
@@ -232,12 +263,29 @@ export function AgentMachineEditor({
   return (
     <>
       <Card>
-        <Label>
+        <Label style={machineStyles.heading}>
           {agentName} on {machine.name}
         </Label>
-        <Label muted>
-          Revision {machine.revision} · {machine.mode ?? "Shared legacy"}
-        </Label>
+        <View style={machineStyles.badges}>
+          <StatusBadge
+            label={`Revision ${machine.revision}`}
+            variant="orgChip"
+          />
+          <SectionBadge
+            label={
+              selectionRequired(machine)
+                ? "Owner selection required"
+                : machine.mode === "separated"
+                  ? "Separate workspace and browser"
+                  : "Shared legacy"
+            }
+            tone={
+              machine.mode === "separated" && !selectionRequired(machine)
+                ? "success"
+                : "warning"
+            }
+          />
+        </View>
         {machine.execution_note && (
           <Label muted>{machine.execution_note}</Label>
         )}
@@ -257,6 +305,7 @@ export function AgentMachineEditor({
       {write.error && <Notice tone="error" message={write.error} />}
       {refreshError && <Notice tone="error" message={refreshError} />}
       <ActionButton
+        compact
         label="Reload access and recovery status"
         variant="secondary"
         disabled={write.busy || !write.active}

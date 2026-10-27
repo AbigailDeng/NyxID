@@ -200,15 +200,19 @@ export function Field({
 
 export function ActionButton({
   label,
+  accessibilityLabel,
   onPress,
   disabled,
   loading,
+  compact = false,
   variant = "primary",
 }: {
   label: string;
+  accessibilityLabel?: string;
   onPress: () => void;
   disabled?: boolean;
   loading?: boolean;
+  compact?: boolean;
   variant?: "primary" | "secondary" | "danger";
 }) {
   const { colors } = useTheme();
@@ -224,18 +228,27 @@ export function ActionButton({
   const content = (
     <View style={styles.buttonContent}>
       {loading ? <ActivityIndicator size="small" color={color} /> : null}
-      <Text style={[styles.buttonLabel, { color }]}>{label}</Text>
+      <Text
+        style={[
+          styles.buttonLabel,
+          compact && styles.compactButtonLabel,
+          { color },
+        ]}
+      >
+        {label}
+      </Text>
     </View>
   );
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={label}
+      accessibilityLabel={accessibilityLabel ?? label}
       accessibilityState={{ disabled: !!blocked, busy: !!loading }}
       onPress={onPress}
       disabled={blocked}
       style={({ pressed }) => [
         styles.button,
+        compact && styles.compactButton,
         { opacity: pressed && !blocked ? 0.8 : 1 },
       ]}
     >
@@ -244,7 +257,7 @@ export function ActionButton({
           colors={[colors.gradientStart, colors.gradientEnd]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
-          style={styles.buttonFill}
+          style={[styles.buttonFill, compact && styles.compactButtonFill]}
         >
           {content}
         </LinearGradient>
@@ -252,6 +265,7 @@ export function ActionButton({
         <View
           style={[
             styles.buttonFill,
+            compact && styles.compactButtonFill,
             {
               backgroundColor:
                 disabled && !loading ? colors.cardSoft : variant === "danger" ? colors.dangerSoftBg : colors.card,
@@ -322,6 +336,13 @@ const styles = StyleSheet.create({
   },
   multiline: { minHeight: 96, textAlignVertical: "top" },
   button: { borderRadius: radius.md, overflow: "hidden" },
+  compactButton: { alignSelf: "flex-start", maxWidth: "100%" },
+  compactButtonLabel: { flexShrink: 1 },
+  compactButtonFill: {
+    minHeight: TOUCH_TARGET,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
   buttonFill: {
     borderRadius: radius.md,
     minHeight: TOUCH_TARGET + 4,

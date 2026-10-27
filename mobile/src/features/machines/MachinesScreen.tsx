@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import type { WorkspaceScreenProps } from "../../app/navigationTypes";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
+import { SegmentControl } from "../../components/SegmentControl";
+import { SectionBadge } from "../../components/SectionBadge";
 import {
   ActionButton,
   Card,
@@ -11,6 +14,15 @@ import {
 } from "../../components/workspace/WorkspaceUI";
 import { SavedLogins } from "./SavedLogins";
 import { MachineDesktopEntries } from "./MachineDesktopEntries";
+import {
+  MachineBadges,
+  MachineCapability,
+  MachineMetadata,
+  MachineRowCard,
+  machineIsolationLabel,
+  machineStyles,
+  machineTabs,
+} from "./MachinePresentation";
 import type { MachineDesktopParams } from "./desktop/desktopRoutes";
 import { machinesApi } from "../../lib/api/machinesApi";
 import {
@@ -33,6 +45,7 @@ export function MachinesScreen({
   const runtime = useMachineRuntime();
   const [selected, setSelected] = useState(route.params?.machine);
   const [tab, setTab] = useState(route.params?.tab);
+  const [refreshing, setRefreshing] = useState(false);
   const [handoffError, setHandoffError] = useState<string>();
   useEffect(() => {
     setSelected(route.params?.machine);
@@ -46,14 +59,25 @@ export function MachinesScreen({
     refetchInterval: runtime.active ? 10_000 : false,
     refetchIntervalInBackground: false,
   });
-  useWorkspaceBack({
-    active: !!selected,
-    onBack: () => setSelected(undefined),
-  });
   const node = inventory.data?.nodes.find((row) => row.id === selected);
   const update = inventory.data?.updates.find(
     (row) => row.node_id === selected,
   );
+  const headerOptions = useMemo(
+    () => ({ title: node?.name ?? "Machines" }),
+    [node?.name],
+  );
+  useWorkspaceBack({
+    active: !!selected,
+    onBack: () => setSelected(undefined),
+    options: headerOptions,
+  });
+  function activity(machine: MachineNode) {
+    navigation.navigate("MachineActivity", {
+      machineId: machine.id,
+      ownerId: machine.owner.id,
+    });
+  }
   async function handoff(path: string) {
     try {
       await openMachineWeb(path);
@@ -61,83 +85,110 @@ export function MachinesScreen({
       if (runtime.current()) setHandoffError(machineError(cause));
     }
   }
+  async function refresh() {
+    if (!runtime.active || inventory.isFetching) return;
+    setRefreshing(true);
+    try {
+      await inventory.refetch();
+    } finally {
+      setRefreshing(false);
+    }
+  }
+  if (!selected && tab === "logins") {
+    return (
+      <SavedLogins
+        inventory={inventory.data}
+        handoffError={handoffError}
+        onWeb={(path) => void handoff(path)}
+        onMachines={() => setTab(undefined)}
+      />
+    );
+  }
   return (
-    <WorkspacePage title={node?.name ?? "Machines"} showHeading={false}>
+    <WorkspacePage
+      title={node?.name ?? "Machines"}
+      showHeading={false}
+      refreshing={refreshing}
+      onRefresh={() => void refresh()}
+    >
+      {!selected && (
+        <SegmentControl
+          segments={machineTabs}
+          activeIndex={0}
+          onPress={(index) => {
+            if (index === 1) setTab("logins");
+          }}
+        />
+      )}
       {handoffError && <Notice tone="error" message={handoffError} />}
       {inventory.isPending && <Label muted>Loading machines…</Label>}
       {inventory.error && (
         <Notice tone="error" message={machineError(inventory.error)} />
       )}
-      <ActionButton
-        label="Refresh machines"
-        variant="secondary"
-        disabled={inventory.isFetching || !runtime.active}
-        onPress={() => void inventory.refetch()}
-      />
       {!selected && (
         <>
-          {tab === "logins" ? (
-            <SavedLogins
-              inventory={inventory.data}
-              onWeb={(path) => void handoff(path)}
-              onMachines={() => setTab(undefined)}
-            />
-          ) : (
-            <>
-              <ActionButton
-                label="Saved logins"
-                variant="secondary"
-                onPress={() => setTab("logins")}
-              />
-              <Label muted>
-                Personal machines and organization machines you administer.
-                Connectivity does not mean a desktop is live.
-              </Label>
-              {inventory.data &&
-                !inventory.error &&
-                inventory.data.nodes.map((machine) => (
-                  <Card key={machine.id}>
-                    <Label>{machine.name}</Label>
-                    <Label muted>
-                      {machine.owner.display_name} ·{" "}
-                      {machine.is_connected ? "Connected" : "Disconnected"} ·{" "}
-                      {machine.status}
-                    </Label>
-                    <Label muted>
-                      {machine.machine?.os} / {machine.machine?.arch}
-                    </Label>
-                    {machine.machine?.shell &&
-                      machine.machine.commands_isolated !== true && (
-                        <Notice
-                          message={
-                            machine.machine.commands_isolated === false
-                              ? "Commands are not isolated"
-                              : "Command isolation is unknown"
+          <Label muted style={machineStyles.metadata}>
+            Personal machines and organization machines you administer.
+            Connectivity does not mean a desktop is live.
+          </Label>
+          {inventory.data &&
+            !inventory.error &&
+            inventory.data.nodes.map((machine) => (
+              <MachineRowCard
+                key={machine.id}
+                label={`Details for ${machine.name}, ${machine.is_connected ? "Online" : "Offline"}, ${machine.owner.display_name}`}
+                summary={`${machineIsolationLabel(machine)}. ${machine.machine?.os}/${machine.machine?.arch}, version ${machine.metadata?.agent_version ?? "unknown"}`}
+                onPress={() => setSelected(machine.id)}
+                actions={
+                  <>
+                    {machine.is_connected &&
+                      (machine.machine?.computer ||
+                        machine.machine?.browser) && (
+                        <ActionButton
+                          compact
+                          label="Desktop"
+                          accessibilityLabel={`View desktop for ${machine.name}`}
+                          variant="secondary"
+                          onPress={() =>
+                            navigation.navigate("MachineDesktop", {
+                              nodeId: machine.id,
+                            })
                           }
                         />
                       )}
                     <ActionButton
-                      label={`Details for ${machine.name}`}
+                      compact
+                      label="Activity"
+                      accessibilityLabel={`Activity for ${machine.name}`}
                       variant="secondary"
-                      onPress={() => setSelected(machine.id)}
+                      onPress={() => activity(machine)}
                     />
-                  </Card>
-                ))}
-              {inventory.data &&
-                !inventory.error &&
-                !inventory.data.nodes.length && (
-                  <Label muted>
-                    No manageable machines. Pair a machine on the web to get
-                    started.
+                  </>
+                }
+              >
+                <View style={machineStyles.row}>
+                  <Label numberOfLines={1} style={machineStyles.name}>
+                    {machine.name}
                   </Label>
-                )}
-              <ActionButton
-                label="Hosted machines and setup on web"
-                variant="secondary"
-                onPress={() => void handoff(machineWebPath())}
-              />
-            </>
-          )}
+                  <MachineBadges node={machine} />
+                </View>
+                <MachineMetadata node={machine} />
+              </MachineRowCard>
+            ))}
+          {inventory.data &&
+            !inventory.error &&
+            !inventory.data.nodes.length && (
+              <Label muted>
+                No manageable machines. Pair a machine on the web to get
+                started.
+              </Label>
+            )}
+          <ActionButton
+            compact
+            label="Hosted machines and setup on web"
+            variant="secondary"
+            onPress={() => void handoff(machineWebPath())}
+          />
         </>
       )}
       {selected && !inventory.isPending && !inventory.error && !node && (
@@ -161,12 +212,7 @@ export function MachinesScreen({
               ownerId: node.owner.id,
             })
           }
-          onActivity={() =>
-            navigation.navigate("MachineActivity", {
-              machineId: node.id,
-              ownerId: node.owner.id,
-            })
-          }
+          onActivity={() => activity(node)}
           onDesktop={(params) => navigation.navigate("MachineDesktop", params)}
         />
       )}
@@ -193,59 +239,70 @@ export function MachineDetails({
   return (
     <>
       <Card>
-        <Label>{node.name}</Label>
-        <Label muted>
-          {node.owner.display_name} ·{" "}
-          {node.owner.kind === "org" ? "Organization Admin" : "Personal"}
-        </Label>
-        <Label muted>
-          {node.is_connected ? "Connected" : "Disconnected"} · {node.status}
-        </Label>
-        <Label muted>
-          {machine.os} / {machine.arch} · v
-          {node.metadata?.agent_version ?? "unknown"}
-        </Label>
-        <Label muted>
+        <View style={machineStyles.badges}>
+          <MachineBadges node={node} />
+        </View>
+        <MachineMetadata node={node} />
+        <Label muted style={machineStyles.metadata}>
+          {node.owner.kind === "org" ? "Organization Admin" : "Personal"} ·
           Workspace roots: {machine.roots.join(", ") || "None reported"}
         </Label>
       </Card>
       <Card>
-        <Label>Local capability ceiling</Label>
-        <Label muted>
+        <Label style={machineStyles.heading}>Local capability ceiling</Label>
+        <Label muted style={machineStyles.metadata}>
           Configured on the machine. Agent permissions can only narrow this
           ceiling.
         </Label>
-        <Label>
-          Commands: {machine.shell ? "Available" : "Off"} · Files:{" "}
-          {machine.files ? "Available" : "Off"}
-        </Label>
-        <Label>
-          Browser: {(machine.browser ?? machine.computer) ? "Available" : "Off"}{" "}
-          · Computer: {machine.computer ? "Available" : "Off"}
-        </Label>
-        <Label muted>
-          Command isolation:{" "}
-          {machine.commands_isolated === true
-            ? "Isolated"
-            : machine.commands_isolated === false
-              ? "Not isolated"
-              : "Unknown; update to check"}
-        </Label>
-        <Label muted>
-          Browser isolation:{" "}
-          {machine.browser_isolated ? "Isolated" : "Not isolated"}
-        </Label>
-        <Label muted>
-          Computer display/permissions:{" "}
-          {machine.computer_ready ? "Ready" : "Unavailable"}
-        </Label>
+        <View style={machineStyles.grid}>
+          <MachineCapability label="Commands" available={machine.shell} />
+          <MachineCapability label="Files" available={machine.files} />
+          <MachineCapability
+            label="Browser"
+            available={machine.browser ?? machine.computer}
+          />
+          <MachineCapability label="Computer" available={machine.computer} />
+        </View>
+        <View style={machineStyles.badges}>
+          <Label muted style={machineStyles.metadata}>
+            Command isolation
+          </Label>
+          <SectionBadge
+            label={
+              machine.commands_isolated === true
+                ? "Isolated"
+                : machine.commands_isolated === false
+                  ? "Not isolated"
+                  : "Unknown; update to check"
+            }
+            tone={machine.commands_isolated === true ? "success" : "warning"}
+          />
+        </View>
+        <View style={machineStyles.badges}>
+          <Label muted style={machineStyles.metadata}>
+            Browser isolation
+          </Label>
+          <SectionBadge
+            label={machine.browser_isolated ? "Isolated" : "Not isolated"}
+            tone={machine.browser_isolated ? "success" : "warning"}
+          />
+        </View>
+        <View style={machineStyles.badges}>
+          <Label muted style={machineStyles.metadata}>
+            Computer display / permissions
+          </Label>
+          <SectionBadge
+            label={machine.computer_ready ? "Ready" : "Unavailable"}
+            tone={machine.computer_ready ? "success" : "warning"}
+          />
+        </View>
         {machine.shell && machine.commands_isolated === false && (
           <Notice message={SINGLE_USER_SHELL_WARNING} />
         )}
       </Card>
       <Card>
-        <Label>Version and updates</Label>
-        <Label muted>
+        <Label style={machineStyles.heading}>Version and updates</Label>
+        <Label muted style={machineStyles.metadata}>
           {update
             ? `${update.current_version} → ${update.target_version} · ${update.phase}${update.code ? ` · ${update.code}` : ""}`
             : "Update metadata unavailable"}
@@ -254,23 +311,26 @@ export function MachineDetails({
         {update?.updater_guidance && (
           <Label muted>{update.updater_guidance}</Label>
         )}
+        <ActionButton label="Owner policy and updates" onPress={onPolicy} />
       </Card>
-      <ActionButton
-        label="Owner policy and updates"
-        variant="secondary"
-        onPress={onPolicy}
-      />
-      <ActionButton
-        label="Machine activity"
-        variant="secondary"
-        onPress={onActivity}
-      />
-      <MachineDesktopEntries nodeId={node.id} onOpen={onDesktop} />
-      <ActionButton
-        label="Open machine on web"
-        variant="secondary"
-        onPress={onWeb}
-      />
+      <Card>
+        <Label style={machineStyles.heading}>Desktop and activity</Label>
+        <View style={machineStyles.actions}>
+          <ActionButton
+            compact
+            label="Machine activity"
+            variant="secondary"
+            onPress={onActivity}
+          />
+          <ActionButton
+            compact
+            label="Open machine on web"
+            variant="secondary"
+            onPress={onWeb}
+          />
+        </View>
+        <MachineDesktopEntries nodeId={node.id} onOpen={onDesktop} />
+      </Card>
     </>
   );
 }

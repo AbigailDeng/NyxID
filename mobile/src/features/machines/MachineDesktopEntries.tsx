@@ -78,6 +78,7 @@ export function MachineDesktopEntries({
       {!query.error &&
         query.data?.rows.map((row) => (
           <ActionButton
+            compact
             key={row.session_id}
             label={`View desktop · ${row.display === "dev" ? "Developer" : "Secure"} · ${row.status}`}
             variant="secondary"
@@ -99,6 +100,7 @@ export function MachineDesktopEntries({
               return null;
             return (
               <ActionButton
+                compact
                 key={`${context.context_id}:${display}`}
                 label={`View desktop · ${context.agent_name} · ${context.actor_label} · ${display === "dev" ? "Developer" : "Secure"}`}
                 variant="secondary"
@@ -118,6 +120,7 @@ export function MachineDesktopEntries({
           <Label muted>No desktop is linked to this conversation.</Label>
         ) : (
           <ActionButton
+            compact
             label="View desktop"
             variant="secondary"
             disabled={!runtime.active}

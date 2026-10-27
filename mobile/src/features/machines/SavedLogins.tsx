@@ -1,11 +1,16 @@
 import { useState } from "react";
+import { View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
+import { SegmentControl } from "../../components/SegmentControl";
+import { StatusBadge } from "../../components/StatusBadge";
+import { SectionBadge } from "../../components/SectionBadge";
 import {
   ActionButton,
   Card,
   Label,
   Notice,
+  WorkspacePage,
 } from "../../components/workspace/WorkspaceUI";
 import { machinesApi } from "../../lib/api/machinesApi";
 import {
@@ -19,13 +24,16 @@ import {
   machineKeys,
   useMachineWrite,
 } from "./MachineUI";
+import { machineStyles, machineTabs } from "./MachinePresentation";
 
 export function SavedLogins({
   inventory,
+  handoffError,
   onWeb,
   onMachines,
 }: {
   inventory?: MachineInventory;
+  handoffError?: string;
   onWeb: (path: string) => void;
   onMachines: () => void;
 }) {
@@ -69,18 +77,27 @@ export function SavedLogins({
     }
   }
   return (
-    <>
-      <ActionButton
-        label="Show machines"
-        variant="secondary"
+    <WorkspacePage
+      title="Saved logins"
+      showHeading={false}
+      refreshing={logins.isRefetching}
+      onRefresh={() => {
+        if (!write.busy && write.active) void refresh();
+      }}
+    >
+      <SegmentControl
+        segments={machineTabs}
+        activeIndex={1}
         disabled={write.busy}
-        onPress={() => confirmDiscard(!!deleting, onMachines)}
+        onPress={(index) => {
+          if (index === 0) confirmDiscard(!!deleting, onMachines);
+        }}
       />
-      <Label>Saved logins</Label>
-      <Label muted>
+      <Label muted style={machineStyles.metadata}>
         Metadata only. Passwords and TOTP secrets are never returned or stored
         by this screen. Create or edit logins on the web.
       </Label>
+      {handoffError && <Notice tone="error" message={handoffError} />}
       {logins.isPending && <Label muted>Loading saved logins…</Label>}
       {logins.error && (
         <Notice tone="error" message={machineError(logins.error)} />
@@ -88,12 +105,6 @@ export function SavedLogins({
       {write.error && <Notice tone="error" message={write.error} />}
       {refreshError && <Notice tone="error" message={refreshError} />}
       {notice && <Notice message={notice} />}
-      <ActionButton
-        label="Refresh saved logins"
-        variant="secondary"
-        disabled={write.busy || !write.active || logins.isFetching}
-        onPress={() => void refresh()}
-      />
       {deleting ? (
         <Card>
           <Label>
@@ -134,19 +145,44 @@ export function SavedLogins({
       ) : (
         logins.data?.map((login) => (
           <Card key={login.id}>
-            <Label>{login.label}</Label>
-            <Label muted>{ownerLabel(login)}</Label>
-            <Label muted>{login.allowed_origins.join(", ")}</Label>
-            {login.username_hint && <Label muted>{login.username_hint}</Label>}
-            <Label muted>
-              Password: {login.has_password ? "Stored" : "None"} · TOTP:{" "}
-              {login.has_totp ? "Stored" : "None"} ·{" "}
+            <View style={machineStyles.row}>
+              <Label numberOfLines={1} style={machineStyles.name}>
+                {login.label}
+              </Label>
+              <StatusBadge label="Saved login" variant="orgChip" />
+            </View>
+            <Label muted style={machineStyles.metadata}>
+              {ownerLabel(login)}
+              {login.username_hint ? ` · ${login.username_hint}` : ""}
+            </Label>
+            <Label muted style={machineStyles.metadata}>
+              {login.allowed_origins.join(", ")}
+            </Label>
+            <View style={machineStyles.badges}>
+              <StatusBadge
+                label={login.has_password ? "Password stored" : "No password"}
+                variant={
+                  login.has_password ? "decisionApproved" : "decisionExpired"
+                }
+              />
+              {login.has_totp ? (
+                <SectionBadge label="TOTP stored" tone="success" />
+              ) : (
+                <StatusBadge
+                  label="No authenticator"
+                  variant="decisionExpired"
+                />
+              )}
+            </View>
+            <Label muted style={machineStyles.metadata}>
               {login.confirm_each_sign_in
                 ? "Confirms every sign-in"
                 : "Uses machine confirmation"}
             </Label>
             <ActionButton
-              label={`Review deletion of ${login.label}`}
+              compact
+              label="Review deletion"
+              accessibilityLabel={`Review deletion of ${login.label}`}
               variant="danger"
               disabled={blocked}
               onPress={() => setDeleting(login)}
@@ -158,11 +194,12 @@ export function SavedLogins({
         <Label muted>No saved logins available.</Label>
       )}
       <ActionButton
+        compact
         label="Create or edit saved logins on web"
         variant="secondary"
         disabled={write.busy}
         onPress={() => onWeb(machineWebPath(undefined, "logins"))}
       />
-    </>
+    </WorkspacePage>
   );
 }

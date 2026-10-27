@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { WorkspaceSheetParamList } from "../../app/navigationTypes";
@@ -10,8 +11,10 @@ import {
   WorkspacePage,
 } from "../../components/workspace/WorkspaceUI";
 import { WorkspaceSelectionField } from "../../components/workspace/WorkspaceSelectionField";
+import { StatusBadge } from "../../components/StatusBadge";
 import { machinesApi } from "../../lib/api/machinesApi";
 import { machineError, machineKeys, useMachineRuntime } from "./MachineUI";
+import { machineStyles } from "./MachinePresentation";
 
 export function MachineActivityScreen({
   route,
@@ -39,8 +42,15 @@ export function MachineActivityScreen({
     retry: false,
   });
   return (
-    <WorkspacePage title="Machine activity" showHeading={false}>
-      <Label muted>
+    <WorkspacePage
+      title="Machine activity"
+      showHeading={false}
+      refreshing={query.isRefetching}
+      onRefresh={() => {
+        if (runtime.active) void query.refetch();
+      }}
+    >
+      <Label muted style={machineStyles.metadata}>
         Metadata only; command contents, credentials and desktop frames are not
         included.
       </Label>
@@ -65,32 +75,47 @@ export function MachineActivityScreen({
       {query.error && (
         <Notice tone="error" message={machineError(query.error)} />
       )}
-      <ActionButton
-        label="Refresh activity"
-        variant="secondary"
-        disabled={!runtime.active || query.isFetching}
-        onPress={() => void query.refetch()}
-      />
       {!query.error &&
         query.data?.entries.map((entry) => (
           <Card key={entry.id}>
-            <Label>
-              {entry.action} · {entry.outcome}
-            </Label>
-            <Label muted>{entry.created_at}</Label>
-            <Label muted>
+            <View style={machineStyles.row}>
+              <Label numberOfLines={1} style={machineStyles.name}>
+                {entry.action}
+              </Label>
+              <StatusBadge
+                label={entry.outcome}
+                variant={
+                  entry.outcome === "completed"
+                    ? "decisionApproved"
+                    : entry.outcome === "failed" || entry.outcome === "denied"
+                      ? "decisionDenied"
+                      : "decisionExpired"
+                }
+              />
+            </View>
+            <Label muted style={machineStyles.metadata}>
               {query.data!.agents.find((agent) => agent.id === entry.agent_id)
                 ?.display_name ??
                 query.data!.agents.find((agent) => agent.id === entry.agent_id)
                   ?.name ??
                 "Unattributed"}
+              {" · "}
+              {entry.created_at}
             </Label>
-            {entry.duration_ms != null && (
-              <Label muted>Duration: {entry.duration_ms} ms</Label>
-            )}
-            {entry.exit_code != null && (
-              <Label muted>Exit code: {entry.exit_code}</Label>
-            )}
+            <View style={machineStyles.badges}>
+              {entry.duration_ms != null && (
+                <StatusBadge
+                  label={`${entry.duration_ms} ms`}
+                  variant="orgChip"
+                />
+              )}
+              {entry.exit_code != null && (
+                <StatusBadge
+                  label={`Exit code: ${entry.exit_code}`}
+                  variant="orgChip"
+                />
+              )}
+            </View>
           </Card>
         ))}
       {query.data && !query.error && !query.data.entries.length && (
@@ -98,6 +123,7 @@ export function MachineActivityScreen({
       )}
       {query.data?.next_cursor && !query.error && (
         <ActionButton
+          compact
           label="Older activity"
           variant="secondary"
           disabled={!runtime.active || query.isFetching}
@@ -106,6 +132,7 @@ export function MachineActivityScreen({
       )}
       {before && (
         <ActionButton
+          compact
           label="Latest activity"
           variant="secondary"
           onPress={() => setBefore(undefined)}
