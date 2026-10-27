@@ -24,7 +24,8 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import { useReducedMotion } from "../../lib/accessibility/useReducedMotion";
-import { useTheme } from "../../theme/ThemeContext";
+import { SheetThemeProvider, useTheme } from "../../theme/ThemeContext";
+import { darkSheetColors, lightSheetColors } from "../../theme/mobileTheme";
 
 export type WorkspaceSheetHandle = { dismiss: () => void };
 
@@ -41,7 +42,8 @@ export function WorkspaceSheetSurface({
   canHandleHardwareBack?: () => boolean;
   controller?: RefObject<WorkspaceSheetHandle | null>;
 }>) {
-  const { colors } = useTheme();
+  const { colors, mode } = useTheme();
+  const sheet = mode === "light" ? lightSheetColors : darkSheetColors;
   const { height, width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const reduced = useReducedMotion();
@@ -166,34 +168,48 @@ export function WorkspaceSheetSurface({
           styles.panel,
           {
             height: Math.max(0, height - gap),
-            backgroundColor: colors.bg,
+            backgroundColor: sheet.bg,
+            shadowColor: colors.shadowColor,
             transform: [{ translateY: offset }],
           },
+          mode === "light" && styles.lightLift,
         ]}
       >
-        <SafeAreaProvider
-          style={styles.fill}
-          initialMetrics={{
-            frame: { x: 0, y: gap, width, height: Math.max(0, height - gap) },
-            insets: {
-              top: 0,
-              left: insets.left,
-              right: insets.right,
-              bottom: insets.bottom,
-            },
-          }}
+        <View
+          style={[
+            styles.surface,
+            { backgroundColor: sheet.bg, borderColor: colors.sheetEdge },
+          ]}
         >
-          <View
-            {...pan.panHandlers}
-            accessible={false}
-            style={styles.handleArea}
+          <SafeAreaProvider
+            style={styles.fill}
+            initialMetrics={{
+              frame: { x: 0, y: gap, width, height: Math.max(0, height - gap) },
+              insets: {
+                top: 0,
+                left: insets.left,
+                right: insets.right,
+                bottom: insets.bottom,
+              },
+            }}
           >
-            <View
-              style={[styles.handle, { backgroundColor: colors.textMuted }]}
-            />
-          </View>
-          <View style={styles.fill}>{children}</View>
-        </SafeAreaProvider>
+            <SheetThemeProvider>
+              <View
+                {...pan.panHandlers}
+                accessible={false}
+                style={styles.handleArea}
+              >
+                <View
+                  style={[
+                    styles.handle,
+                    { backgroundColor: sheet.textSecondary },
+                  ]}
+                />
+              </View>
+              <View style={styles.fill}>{children}</View>
+            </SheetThemeProvider>
+          </SafeAreaProvider>
+        </View>
       </Animated.View>
     </View>
   );
@@ -203,9 +219,21 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   overlay: { flex: 1, justifyContent: "flex-end" },
   dismissArea: { position: "absolute", top: 0, left: 0, right: 0 },
-  panel: {
+  // The outer panel carries the light-mode shadow, so only the inner surface clips.
+  panel: { borderTopLeftRadius: 24, borderTopRightRadius: 24 },
+  lightLift: {
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 1,
+    shadowRadius: 16,
+    elevation: 16,
+  },
+  surface: {
+    flex: 1,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
     overflow: "hidden",
   },
   handleArea: { height: 44, alignItems: "center", justifyContent: "center" },

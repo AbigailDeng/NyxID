@@ -60,6 +60,11 @@ export type ThemeColors = {
   overlayBg: string;
   handleBg: string;
   sheetScrim: string;
+  /** Hairline on the drawer's rounded top edge, separating it from the dimmed chat. */
+  sheetEdge: string;
+  /** Filled chat composer surface and its faint outline. */
+  composerBg: string;
+  composerBorder: string;
   navActive: string;     // active nav row background — neutral white/black alpha, NEVER purple-tinted
   shadowColor: string;
   /**
@@ -142,7 +147,10 @@ export const darkColors: ThemeColors = {
   fabBg: "rgba(7, 6, 14, 1)",
   fabBorder: "rgba(151, 117, 250, 0.35)",
   overlayBg: "#000",
-  sheetScrim: "rgba(0,0,0,0.42)",
+  sheetScrim: "rgba(0,0,0,0.5)",
+  sheetEdge: "rgba(255, 255, 255, 0.16)",
+  composerBg: "#211e2b",
+  composerBorder: "rgba(255, 255, 255, 0.06)",
   handleBg: "rgba(255, 255, 255, 0.15)",
   // DESIGN.md §Usage Rules: "Hover stays neutral (bg-white/[0.03] / bg-white/[0.06])".
   navActive: "rgba(255, 255, 255, 0.06)",
@@ -195,6 +203,9 @@ export const lightColors: ThemeColors = {
   fabBorder: "rgba(151, 117, 250, 0.35)",
   overlayBg: "rgba(0, 0, 0, 0.3)",
   sheetScrim: "rgba(26,23,48,0.24)",
+  sheetEdge: "rgba(26, 23, 48, 0.08)",
+  composerBg: "#FFFFFF",
+  composerBorder: "#DDD9E8",
   handleBg: "rgba(0, 0, 0, 0.12)",
   // DESIGN.md §Usage Rules: idle/hover stays neutral. Light-mode = black-alpha,
   // matching the web pattern of `bg-black/[0.06]` on hover surfaces.
@@ -208,6 +219,30 @@ export const lightColors: ThemeColors = {
   riskHigh:   { bg: "rgba(220, 38, 38, 0.08)",  text: DANGER_LIGHT,  border: "rgba(220, 38, 38, 0.20)" },
   riskMedium: { bg: "rgba(217, 119, 6, 0.08)",  text: WARNING_LIGHT, border: "rgba(217, 119, 6, 0.20)" },
   riskLow:    { bg: "rgba(16, 185, 129, 0.08)", text: SUCCESS_LIGHT, border: "rgba(16, 185, 129, 0.20)" },
+};
+
+/**
+ * Drawer palette: one elevation above the chat it covers. Dark mode cannot rely
+ * on the scrim because the chat is already near-black, so the drawer surface,
+ * its cards and its quieter text tones all step up together.
+ */
+export const darkSheetColors: ThemeColors = {
+  ...darkColors,
+  bg: "#16141e",
+  card: "#1f1c29",
+  cardSoft: "#100e17",
+  border: "#2c2839",
+  borderSoft: "rgba(255, 255, 255, 0.07)",
+  textMuted: "#958dab",
+  textTertiary: "#958dab",
+  navActive: "rgba(255, 255, 255, 0.08)",
+};
+
+export const lightSheetColors: ThemeColors = {
+  ...lightColors,
+  bg: "#FFFFFF",
+  card: "#F8F7FC",
+  cardSoft: "#F3F2F8",
 };
 
 /** @deprecated Use `useTheme()` from ThemeContext instead. */

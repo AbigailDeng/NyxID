@@ -119,6 +119,7 @@ function setup(
       }),
     },
     "../../theme/ThemeContext": {
+      SheetThemeProvider: "SheetThemeProvider",
       useTheme: () => ({
         colors: {
           bg: "#ffffff",

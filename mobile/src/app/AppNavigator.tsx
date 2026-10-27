@@ -51,6 +51,7 @@ import {
   type WorkspaceSheetHandle,
 } from "../components/workspace/WorkspaceSheetSurface";
 import { useTheme } from "../theme/ThemeContext";
+import { darkSheetColors, lightSheetColors } from "../theme/mobileTheme";
 import { fonts } from "../theme/designTokens";
 import {
   WorkspaceSessionContext,
@@ -351,7 +352,9 @@ function WorkspaceSheetRoute({
   navigation,
   route,
 }: NativeStackScreenProps<RootStackParamList, "WorkspaceSheet">) {
-  const { colors } = useTheme();
+  // The route renders outside SheetThemeProvider, so header colors read the drawer palette directly.
+  const { mode } = useTheme();
+  const colors = mode === "light" ? lightSheetColors : darkSheetColors;
   const onOpenMenu = useContext(WorkspaceMenuContext);
   const controller = useRef<WorkspaceSheetHandle | null>(null);
   const guards = useRef(new Map<symbol, () => Promise<boolean>>());

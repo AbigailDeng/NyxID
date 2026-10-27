@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { darkColors, lightColors } from "./mobileTheme";
+import {
+  darkColors,
+  darkSheetColors,
+  lightColors,
+  lightSheetColors,
+} from "./mobileTheme";
 type Rgb = [number, number, number];
 function rgb(hex: string): Rgb {
   return [1, 3, 5].map(
@@ -62,4 +67,43 @@ test("native status labels meet AA on their tinted surfaces", () => {
           `${tone.text} on ${tone.bg} over ${base}`,
         );
       }
+});
+test("drawer surfaces keep text at AA and stand apart from the dimmed chat", () => {
+  for (const [base, sheet] of [
+    [darkColors, darkSheetColors],
+    [lightColors, lightSheetColors],
+  ] as const) {
+    for (const background of [sheet.bg, sheet.card, sheet.cardSoft])
+      for (const foreground of [
+        sheet.textPrimary,
+        sheet.textSecondary,
+        sheet.textMuted,
+        sheet.textTertiary,
+        sheet.primaryOnTint,
+      ])
+        assert.ok(
+          ratio(rgb(foreground), rgb(background)) >= 4.5,
+          `${foreground} on drawer ${background}`,
+        );
+    const dimmedChat = composite(base.sheetScrim, base.bg);
+    // The handle is the drawer's visible affordance against the dimmed chat and its own surface.
+    assert.ok(ratio(rgb(sheet.textSecondary), dimmedChat) >= 3);
+    assert.ok(ratio(rgb(sheet.textSecondary), rgb(sheet.bg)) >= 3);
+    assert.ok(luminance(rgb(sheet.bg)) !== luminance(dimmedChat));
+  }
+  // Dark mode cannot use the chat background: it measured 1.02:1 against the dimmed chat.
+  const dimmedDark = composite(darkColors.sheetScrim, darkColors.bg);
+  assert.ok(ratio(rgb(darkSheetColors.bg), dimmedDark) >= 1.1);
+  assert.ok(
+    ratio(composite(darkColors.sheetEdge, darkSheetColors.bg), dimmedDark) >=
+      1.75,
+  );
+});
+test("composer text and placeholder meet AA on the filled composer", () => {
+  for (const colors of [darkColors, lightColors])
+    for (const foreground of [colors.textPrimary, colors.textMuted])
+      assert.ok(
+        ratio(rgb(foreground), rgb(colors.composerBg)) >= 4.5,
+        `${foreground} on ${colors.composerBg}`,
+      );
 });
