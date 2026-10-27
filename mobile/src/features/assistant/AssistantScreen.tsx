@@ -172,6 +172,10 @@ export function AssistantScreen({
     : assistant.agentId
       ? "Agent"
       : "NyxBot";
+  // Specialists share this screen, so only NyxBot introduces itself as NyxBot.
+  const isNyxBotChat = currentAgent
+    ? currentAgent.kind === "nyxbot"
+    : !assistant.agentId;
   const chatTitle = assistant.conversationId
     ? (conversation?.title ?? "Loading chat…")
     : "New chat";
@@ -964,8 +968,19 @@ export function AssistantScreen({
                 <Text
                   style={[styles.welcomeTitle, { color: colors.textPrimary }]}
                 >
-                  How can I help?
+                  {isNyxBotChat ? "Hi, I'm NyxBot." : "How can I help?"}
                 </Text>
+                {isNyxBotChat ? (
+                  <Text
+                    style={[
+                      styles.welcomeBody,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    I'm here to help you use NyxID, manage your NyxID services
+                    and automate them.
+                  </Text>
+                ) : null}
               </View>
             ) : null
           }
@@ -1675,6 +1690,14 @@ const styles = StyleSheet.create({
     fontSize: 24,
     lineHeight: 32,
     textAlign: "center",
+  },
+  welcomeBody: {
+    fontFamily: fonts.bodyRegular,
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: "center",
+    maxWidth: 300,
+    marginTop: 10,
   },
   thinking: { alignSelf: "flex-start", marginVertical: 10 },
   cardTitle: { fontFamily: fonts.bodySemi },

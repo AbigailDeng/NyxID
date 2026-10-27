@@ -799,3 +799,24 @@ test("private user attribution joins only real via and steering context", () => 
   }
   x.harness.unmount();
 });
+
+test("an empty NyxBot chat introduces NyxBot while specialists keep the neutral prompt", () => {
+  const x = setup();
+  const welcome = () =>
+    elements(
+      expand(
+        x.all().find((node) => node.type === "FlatList")!.props
+          .ListEmptyComponent,
+      ),
+    )
+      .flatMap((node) => node.props.children)
+      .filter((child: unknown) => typeof child === "string")
+      .join(" ");
+  assert.match(welcome(), /Hi, I'm NyxBot\./);
+  assert.match(welcome(), /help you use NyxID, manage your NyxID services/);
+  x.assistant.agent.kind = "specialist";
+  x.harness.render();
+  assert.doesNotMatch(welcome(), /NyxBot/);
+  assert.match(welcome(), /How can I help\?/);
+  x.harness.unmount();
+});
