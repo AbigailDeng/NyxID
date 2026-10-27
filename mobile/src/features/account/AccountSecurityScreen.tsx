@@ -399,10 +399,8 @@ export function AccountSecurityScreen() {
   const privateDisabled = privateAction !== null || !isConnected;
 
   return (
-    <WorkspacePage
-      title="Account & security"
-      subtitle="Manage your identity and protect access to NyxID."
-    >
+    <WorkspacePage showHeading={false} title="Account & security">
+      <Label muted>Manage your identity and protect access to NyxID.</Label>
       {!isConnected ? (
         <Notice message="You're offline. Connect to update account settings." />
       ) : null}
