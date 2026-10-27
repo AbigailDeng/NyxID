@@ -187,7 +187,7 @@ export function Field({
           styles.input,
           {
             color: colors.textPrimary,
-            borderColor: colors.border,
+            borderColor: colors.controlBorder,
             backgroundColor: colors.cardSoft,
           },
           props.multiline && styles.multiline,
@@ -214,7 +214,9 @@ export function ActionButton({
   const { colors } = useTheme();
   const blocked = disabled || loading;
   const color =
-    variant === "primary"
+    blocked && !loading
+      ? colors.textTertiary
+      : variant === "primary"
       ? colors.onPrimary
       : variant === "danger"
         ? colors.danger
@@ -234,10 +236,10 @@ export function ActionButton({
       disabled={blocked}
       style={({ pressed }) => [
         styles.button,
-        { opacity: blocked ? 0.45 : pressed ? 0.8 : 1 },
+        { opacity: pressed && !blocked ? 0.8 : 1 },
       ]}
     >
-      {variant === "primary" ? (
+      {variant === "primary" && !(disabled && !loading) ? (
         <LinearGradient
           colors={[colors.gradientStart, colors.gradientEnd]}
           start={{ x: 0, y: 0 }}
@@ -252,10 +254,10 @@ export function ActionButton({
             styles.buttonFill,
             {
               backgroundColor:
-                variant === "danger" ? colors.dangerSoftBg : colors.card,
+                disabled && !loading ? colors.cardSoft : variant === "danger" ? colors.dangerSoftBg : colors.card,
               borderWidth: 1,
               borderColor:
-                variant === "danger" ? colors.dangerTone.border : colors.border,
+                variant === "danger" ? colors.danger : colors.controlBorder,
             },
           ]}
         >

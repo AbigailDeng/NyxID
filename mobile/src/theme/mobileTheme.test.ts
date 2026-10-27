@@ -107,3 +107,35 @@ test("composer text and placeholder meet AA on the filled composer", () => {
         `${foreground} on ${colors.composerBg}`,
       );
 });
+
+test("selected, interactive, error and disabled labels keep AA on zinc surfaces", () => {
+  for (const colors of [darkColors, lightColors, darkSheetColors, lightSheetColors]) {
+    for (const base of [colors.bg, colors.card, colors.cardSoft]) {
+      for (const surface of [composite(colors.navActive, base), composite(colors.ghostBg, base)]) {
+        for (const text of [colors.textPrimary, colors.textSecondary, colors.ghostText])
+          assert.ok(ratio(rgb(text), surface) >= 4.5, `${text} on selected/interactive ${base}`);
+      }
+      assert.ok(ratio(rgb(colors.primary), rgb(base)) >= 4.5, `accent text on ${base}`);
+      assert.ok(ratio(rgb(colors.danger), composite(colors.dangerSoftBg, base)) >= 4.5);
+      // Inactive controls are exempt in WCAG; native labels still remain readable.
+      assert.ok(ratio(rgb(colors.textTertiary), rgb(colors.cardSoft)) >= 4.5);
+      assert.ok(ratio(rgb(colors.controlBorder), rgb(base)) >= 3, `control edge on ${base}`);
+    }
+    assert.ok(ratio(rgb(colors.bg), rgb(colors.textPrimary)) >= 3, "submit glyph");
+    assert.ok(ratio(rgb(colors.textPrimary), rgb(colors.composerBg)) >= 3, "submit circle");
+  }
+});
+
+test("white CTA labels meet AA throughout normal and pressed native gradients", () => {
+  for (const colors of [darkColors, lightColors]) {
+    for (const [start, end] of [
+      [colors.gradientStart, colors.gradientEnd],
+      [colors.gradientStartPressed, colors.gradientEndPressed],
+    ]) {
+      for (let step = 0; step <= 20; step++) {
+        const fill = rgb(start!).map((value, index) => value + (rgb(end!)[index]! - value) * step / 20) as Rgb;
+        assert.ok(ratio(rgb(colors.onPrimary), fill) >= 4.5);
+      }
+    }
+  }
+});
