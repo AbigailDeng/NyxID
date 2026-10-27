@@ -223,7 +223,7 @@ export function withWorkspaceFallback(
       ? "Machines"
       : detail.name.startsWith("Automation")
         ? "Automations"
-        : detail.name === "AccountSecurity"
+        : detail.name === "AccountSecurity" || detail.name === "UsageCredits"
           ? "AccountSettings"
           : detail.name === "ActivityDetail"
             ? "Activity"

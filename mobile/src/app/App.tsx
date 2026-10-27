@@ -627,6 +627,12 @@ function ThemedAppShell({
               );
             });
           }}
+          onUsageCredits={() => {
+            closeDrawerThen(() => {
+              if (!navigationRef.isReady()) return;
+              navigationRef.dispatch(openWorkspaceSheetAction("UsageCredits"));
+            });
+          }}
           onLoginCode={() => {
             closeDrawerThen(() => {
               if (!navigationRef.isReady()) return;

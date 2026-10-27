@@ -71,6 +71,7 @@ const sheetOptions = {
     "AutomationRuns",
     "AutomationPreferences",
     "AccountSecurity",
+    "UsageCredits",
     "DeviceLogin",
     "AgentKeyLogin",
     "TermsOfService",
@@ -240,6 +241,7 @@ test("cold detail links have an appropriate module inside the same drawer", () =
     ["automations/automation-1/runs", "AutomationRuns", "Automations"],
     ["automations/preferences", "AutomationPreferences", "Automations"],
     ["account/security", "AccountSecurity", "AccountSettings"],
+    ["account/usage", "UsageCredits", "AccountSettings"],
   ]) {
     const state = linkedState(path!);
     assert.deepEqual(

@@ -157,3 +157,15 @@ Selecting the current thread retains its unsent draft; changing thread follows
 the existing History behavior and clears the old draft. A new chat starts a
 fresh draft for the selected agent. The hierarchy owns one scroll host, retaining
 pinned headers and the bounded previews/all-items browser.
+
+Usage & credits is registered inside the management drawer, with entries in
+Settings and the side-menu account area. The menu finishes native dismissal
+before opening it. It uses Stream B's read-only screen and optional period/owner
+parameters. The web account-panel URL `/assistant?panel=billing` is accepted by
+the native link parser; `panelPeriod` selects 24h/7d/30d, and supported chat/crew
+parameters retain the addressed conversation underneath. Cold nested Back opens
+Settings, and Close returns to that chat. The native `/account/usage` route also
+accepts period/ownerId; the screen verifies owner eligibility. Web purchase,
+service and tab parameters are not forwarded as native actions. This navigation
+adds no wallet/provisioning/checkout request. Wallet availability and API support
+remain the read-only screen's responsibility.

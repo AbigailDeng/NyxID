@@ -22,6 +22,7 @@ import {
   ScanQrCode,
   ShieldCheck,
   X,
+  WalletCards,
 } from "lucide-react-native";
 import { useQuery } from "@tanstack/react-query";
 import { getCurrentUserProfileRequest } from "../../lib/api/http";
@@ -59,6 +60,7 @@ export function WorkspaceDrawer({
   onNavigate,
   onScan,
   onLoginCode,
+  onUsageCredits,
   currentChat,
   onOpenChat,
   onCreateAgent,
@@ -71,6 +73,7 @@ export function WorkspaceDrawer({
   onNavigate: (route: WorkspaceRoute) => void;
   onScan: () => void;
   onLoginCode: () => void;
+  onUsageCredits: () => void;
   currentChat?: WorkspaceChatTarget;
   onOpenChat: (target: WorkspaceChatTarget) => void;
   onCreateAgent: () => void;
@@ -195,6 +198,29 @@ export function WorkspaceDrawer({
           />
           <ScrollEdgeFades edges={scroll.edges} color={colors.cardSoft} />
         </View>
+        <View style={[styles.accountArea, { borderColor: colors.border }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open usage and credits"
+            accessibilityState={{ selected: currentRoute === "UsageCredits" }}
+            onPress={onUsageCredits}
+            style={({ pressed }) => [
+              styles.row,
+              {
+                backgroundColor:
+                  pressed || currentRoute === "UsageCredits"
+                    ? colors.navActive
+                    : "transparent",
+              },
+            ]}
+          >
+            <WalletCards size={19} color={colors.textSecondary} />
+            <Text style={[styles.rowText, { color: colors.textPrimary }]}>
+              Usage & credits
+            </Text>
+            <ChevronRight size={16} color={colors.textMuted} />
+          </Pressable>
+        </View>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Open account settings"
@@ -251,6 +277,7 @@ export function WorkspaceDrawer({
 }
 
 const styles = StyleSheet.create({
+  accountArea: { borderTopWidth: 1, paddingHorizontal: 16, paddingTop: 6 },
   panel: { flex: 1, borderRightWidth: 1 },
   brandRow: {
     flexShrink: 0,

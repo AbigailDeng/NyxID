@@ -68,6 +68,14 @@ export const navigationLinkingConfig: NonNullable<
         AutomationRuns: { path: "automations/:id/runs", parse: { id: String } },
         AutomationPreferences: "automations/preferences",
         AccountSecurity: "account/security",
+        UsageCredits: {
+          path: "account/usage",
+          parse: {
+            period: (value: string) =>
+              ["24h", "7d", "30d"].includes(value) ? value : "30d",
+            ownerId: String,
+          },
+        },
       },
     },
     AssistantContext: { path: "chat/:conversationId", parse: assistantParams },

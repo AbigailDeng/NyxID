@@ -769,6 +769,8 @@ export function AccountSettingsScreen({ navigation }: Props) {
 
         {/* Actions */}
         <View style={styles.actionsWrap}>
+          <PrimaryButton refreshLabelOnFontScaleChange label="Usage & credits" kind="ghost"
+            onPress={() => navigation.push("UsageCredits")} />
           <PrimaryButton refreshLabelOnFontScaleChange label="Profile & account security" kind="ghost"
             onPress={() => navigation.push("AccountSecurity")} />
           <PrimaryButton refreshLabelOnFontScaleChange label="Generate terminal login code" kind="ghost" disabled={isOffline}

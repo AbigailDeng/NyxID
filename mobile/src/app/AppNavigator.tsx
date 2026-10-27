@@ -1,3 +1,4 @@
+import { UsageCreditsScreen } from "../features/billing/UsageCreditsScreen";
 import { WorkspaceInteractionSurface } from "../lib/accessibility/WorkspaceInteractionSurface";
 import { workspaceFocus } from "../lib/accessibility/workspaceFocus";
 import {
@@ -562,6 +563,11 @@ function WorkspaceSheetRoute({
             name="ActivityDetail"
             component={ActivityDetailScreen}
             options={{ title: "Approval detail" }}
+          />
+          <SheetStack.Screen
+            name="UsageCredits"
+            component={UsageCreditsScreen}
+            options={{ title: "Usage & credits" }}
           />
           <SheetStack.Screen
             name="AccountSecurity"

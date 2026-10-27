@@ -6,7 +6,7 @@ import * as Notifications from "expo-notifications";
 import { Linking } from "react-native";
 import type { RootStackParamList } from "./navigationTypes";
 import { navigationLinkingConfig } from "./navigationLinking";
-import { withWorkspaceFallback } from "./navigationHierarchy";
+import { workspaceStateFromPath } from "./workspaceCanonicalLinks";
 import { capture } from "../lib/telemetry";
 import type { LinkType } from "../lib/telemetry-schema";
 
@@ -201,7 +201,7 @@ export const appLinking: LinkingOptions<RootStackParamList> = {
   prefixes: ["nyxid://"],
   config: navigationLinkingConfig,
   getStateFromPath: (path, options) =>
-    withWorkspaceFallback(getStateFromPath(path, options)),
+    workspaceStateFromPath(path, (next) => getStateFromPath(next, options)),
   async getInitialURL() {
     try {
       const directUrl = await Linking.getInitialURL();

@@ -33,6 +33,7 @@ in `navigationHierarchy.ts` and `workspaceChatNavigation.ts`.
 | SheetStack / AutomationRuns | Existing run history; cold fallback Automations. |
 | SheetStack / AutomationPreferences | Existing preferences; cold fallback Automations. |
 | SheetStack / ActivityDetail | Approval challenge details; cold fallback Approvals. |
+| SheetStack / UsageCredits | Read-only Usage & credits from Settings or the side-menu account area. `/assistant?panel=billing&panelPeriod=24h\|7d\|30d` opens this drawer screen; `/account/usage?period=&ownerId=` is the native route. Cold nested Back returns to Settings; Close restores the addressed chat/crew. |
 | SheetStack / AccountSecurity | Existing security/MFA flows; cold fallback Settings. |
 | SheetStack / DeviceLogin | Signed-in QR/device approval; scanner is local state. Verification stays above the keyboard; in-flight writes block dismissal. |
 | SheetStack / AgentKeyLogin | Signed-in Agent Key/device/login-code flows; scoped selection and transient step-up. |

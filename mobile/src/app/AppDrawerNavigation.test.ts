@@ -350,6 +350,10 @@ test("management, chat, scanner and login selections wait for actual menu dismis
         openWorkspaceSheetAction("DeviceLogin", { start_scanner: true }),
     },
     {
+      choose: (drawer: Element) => drawer.props.onUsageCredits(),
+      expected: () => openWorkspaceSheetAction("UsageCredits"),
+    },
+    {
       choose: (drawer: Element) => drawer.props.onLoginCode(),
       expected: () => openWorkspaceSheetAction("AgentKeyLogin", { mint: true }),
     },
@@ -545,6 +549,7 @@ test("signing out clears every queued selection before a stale dismissal callbac
     (drawer: Element) => drawer.props.onCreateAgent(),
     (drawer: Element) => drawer.props.onCreateGroup(),
     (drawer: Element) => drawer.props.onLoginCode(),
+    (drawer: Element) => drawer.props.onUsageCredits(),
   ]) {
     const env = setup();
     env.open();

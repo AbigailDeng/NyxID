@@ -11,6 +11,7 @@ import type {
   NativeStackNavigationProp,
   NativeStackScreenProps,
 } from "@react-navigation/native-stack";
+import type { UsageCreditsRouteParams } from "../features/billing/UsageCreditsScreen";
 import type { MachineDesktopRouteParams } from "../features/machines/desktopEntry";
 
 export type AssistantParams = {
@@ -64,6 +65,7 @@ export type WorkspaceSheetParamList = SharedEntryParamList & {
   AutomationPreferences: undefined;
   ActivityDetail: { challengeId: string };
   AccountSecurity: undefined;
+  UsageCredits: UsageCreditsRouteParams | undefined;
 };
 
 export type RootStackParamList = SharedEntryParamList & {
