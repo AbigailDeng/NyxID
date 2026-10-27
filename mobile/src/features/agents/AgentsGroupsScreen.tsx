@@ -32,7 +32,7 @@ export function AgentsGroupsScreen({
       </View>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={tab === "agents" ? "New agent" : "New group"}
+        accessibilityLabel={tab === "agents" ? "New agent" : "New crew"}
         accessibilityState={{ disabled: !isConnected }}
         disabled={!isConnected}
         onPress={tab === "agents" ? onCreateAgent : onCreateGroup}
@@ -51,7 +51,7 @@ export function AgentsGroupsScreen({
   if (tab === "groups") {
     return (
       <WorkspacePage
-        title="Groups"
+        title="Crews"
         subtitle="Bring your agents together in one conversation"
       >
         {tabs}
@@ -84,7 +84,7 @@ function AgentsGroupsTabs({
         <Pressable
           key={tab}
           accessibilityRole="tab"
-          accessibilityLabel={tab === "agents" ? "Agents" : "Groups"}
+          accessibilityLabel={tab === "agents" ? "Agents" : "Crews"}
           accessibilityState={{ selected: value === tab }}
           onPress={() => onChange(tab)}
           style={[
@@ -101,7 +101,7 @@ function AgentsGroupsTabs({
                 value === tab ? colors.primaryOnTint : colors.textSecondary,
             }}
           >
-            {tab === "agents" ? "Agents" : "Groups"}
+            {tab === "agents" ? "Agents" : "Crews"}
           </Label>
         </Pressable>
       ))}

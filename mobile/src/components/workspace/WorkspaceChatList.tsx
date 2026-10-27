@@ -382,10 +382,10 @@ export function WorkspaceChatList({
         </>
       ) : null}
       <SectionHeading
-        label="Group chats"
+        label="Crews"
         count={allGroups.length}
         expanded={sections.groups}
-        createLabel="New group"
+        createLabel="New crew"
         onCreate={onCreateGroup}
         createDisabled={!active}
         onPress={() =>
@@ -395,17 +395,17 @@ export function WorkspaceChatList({
       {sections.groups ? (
         <>
           {groups.isPending ? (
-            <DrawerMessage text="Loading groups…" loading={active} />
+            <DrawerMessage text="Loading crews..." loading={active} />
           ) : null}
           {groups.isError ? (
             <DrawerMessage
-              text="Couldn’t load groups."
+              text="Couldn’t load crews."
               retry={() => void groups.refetch()}
               disabled={!active}
             />
           ) : null}
           {groups.isSuccess && !allGroups.length ? (
-            <DrawerMessage text="No groups yet." />
+            <DrawerMessage text="No crews yet." />
           ) : null}
           {boundedDrawerPreview(
             allGroups,
@@ -413,7 +413,7 @@ export function WorkspaceChatList({
           ).map(groupRow)}
           {allGroups.length > DRAWER_PREVIEW_LIMIT ? (
             <MoreButton
-              label={`View all groups (${allGroups.length})`}
+              label={`View all crews (${allGroups.length})`}
               onPress={() => setBrowser({ kind: "groups" })}
             />
           ) : null}
@@ -425,7 +425,7 @@ export function WorkspaceChatList({
             browser.kind === "agents"
               ? "All agents"
               : browser.kind === "groups"
-                ? "All groups"
+                ? "All crews"
                 : agent
                   ? chatAgentLabel(agent)
                   : "Agent chats"
@@ -437,7 +437,7 @@ export function WorkspaceChatList({
             browser.kind === "agents"
               ? "Choose an agent to browse its chats."
               : browser.kind === "groups"
-                ? "Each group has one shared conversation."
+                ? "Each crew has one shared conversation."
                 : !agent
                   ? "This agent is no longer available. Choose another agent to start a chat."
                   : agent.can_use === false
@@ -508,7 +508,7 @@ export function WorkspaceChatList({
             browser.kind === "agents"
               ? "No agents available."
               : browser.kind === "groups"
-                ? "No groups yet."
+                ? "No crews yet."
                 : !agent
                   ? "This agent is no longer available."
                   : agent.can_use === false
@@ -639,7 +639,7 @@ function GroupChatRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Open group chat ${group.name}`}
+      accessibilityLabel={`Open crew ${group.name}`}
       accessibilityState={{ selected }}
       onPress={onPress}
       style={({ pressed }) => [

@@ -63,7 +63,7 @@ function setup(tab: "agents" | "groups", online = true) {
   const button = all.find(
     (row) =>
       row.props.accessibilityLabel ===
-      (tab === "agents" ? "New agent" : "New group"),
+      (tab === "agents" ? "New agent" : "New crew"),
   );
   assert.ok(button);
   return { created, button, all };

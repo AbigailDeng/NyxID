@@ -331,7 +331,7 @@ function WorkspacePages() {
       <Tabs.Screen
         name="Agents"
         component={AgentsRoute}
-        options={{ title: "Agents & Groups" }}
+        options={{ title: "Agents & Crews" }}
       />
       <Tabs.Screen
         name="Plugins"
@@ -495,7 +495,7 @@ function WorkspaceSheetRoute({
             name="GroupEditor"
             component={GroupEditorRoute}
             options={({ route }) => ({
-              title: route.params?.groupId ? "Group settings" : "Create group",
+              title: route.params?.groupId ? "Crew settings" : "New crew",
             })}
           />
           <SheetStack.Screen
@@ -672,7 +672,7 @@ export function AppNavigator({
                       onOpenMenu,
                       onBack: navigation.goBack,
                     }),
-                    title: "Group",
+                    title: "Crew",
                   })}
                 />
                 <Stack.Screen

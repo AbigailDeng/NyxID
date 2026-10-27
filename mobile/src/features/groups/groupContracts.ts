@@ -136,14 +136,14 @@ const groupName = z
   .trim()
   .refine(
     (value) => [...value].length >= 1 && [...value].length <= MAX_GROUP_NAME,
-    "Use a group name between 1 and 60 characters.",
+    "Use a crew name between 1 and 60 characters.",
   );
 const distinct = (values: readonly string[]) =>
   new Set(values).size === values.length;
 const members = z
   .array(groupReferenceSchema)
   .min(1, "Pick at least one agent.")
-  .max(MAX_GROUP_MEMBERS, "A group has at most 8 agents.")
+  .max(MAX_GROUP_MEMBERS, "A crew has at most 8 agents.")
   .refine(distinct, "Choose each agent only once.");
 const participants = z
   .array(z.string().uuid())
@@ -164,7 +164,7 @@ export const groupCreateSchema = z
       context.addIssue({
         code: "custom",
         path: ["participant_user_ids"],
-        message: "Participants require an organization group.",
+        message: "Participants require an organization crew.",
       });
   });
 export const groupUpdateSchema = z
@@ -187,7 +187,7 @@ export const groupUpdateSchema = z
     ) {
       context.addIssue({
         code: "custom",
-        message: "Leave the group separately from editing its settings.",
+        message: "Leave the crew separately from editing its settings.",
       });
     }
     if (

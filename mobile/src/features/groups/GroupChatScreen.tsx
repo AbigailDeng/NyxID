@@ -244,7 +244,7 @@ function GroupChat({
     const settings = () => (
       <WorkspaceHeaderVisibility>
         <Icon
-          label="Group settings"
+          label="Crew settings"
           onPress={onSettings}
           disabled={!group || chat.sending || uploads.session.sending}
         >
@@ -260,13 +260,13 @@ function GroupChat({
               numberOfLines={1}
               style={[styles.headerTitle, { color: colors.textPrimary }]}
             >
-              {group?.name ?? "Group"}
+              {group?.name ?? "Crew"}
             </Text>
             <Text
               numberOfLines={1}
               style={[styles.headerSubtitle, { color: colors.textSecondary }]}
             >
-              {group?.owner?.name ?? "Personal"} · Group
+              {group?.owner?.name ?? "Personal"} · Crew
             </Text>
           </View>
         </WorkspaceHeaderVisibility>
@@ -389,7 +389,7 @@ function GroupChat({
         setLocalError(
           cause instanceof Error
             ? cause.message
-            : "The message was not delivered. Refresh the group before trying again.",
+            : "The message was not delivered. Refresh the crew before trying again.",
         );
     } finally {
       sendLock.current = false;
@@ -469,7 +469,7 @@ function GroupChat({
 
   return (
     <WorkspacePage
-      title={group?.name ?? "Group"}
+      title={group?.name ?? "Crew"}
       showHeading={false}
       scroll={false}
       contentStyle={styles.chatPage}
@@ -486,16 +486,16 @@ function GroupChat({
             tone="error"
             message={
               chat.recoveryRequired
-                ? "This message may have been delivered. Refresh the group and check its history before sending again."
+                ? "This message may have been delivered. Refresh the crew and check its history before sending again."
                 : (localError ??
                   chat.actionError ??
                   (chat.error instanceof Error
                     ? chat.error.message
-                    : "Could not load this group."))
+                    : "Could not load this crew."))
             }
           />
           <ActionButton
-            label="Refresh group"
+            label="Refresh crew"
             variant="secondary"
             disabled={
               !chat.active ||
@@ -591,7 +591,7 @@ function GroupChat({
           ListEmptyComponent={
             chat.isPending ? (
               <ActivityIndicator
-                accessibilityLabel="Loading group"
+                accessibilityLabel="Loading crew"
                 color={colors.primary}
               />
             ) : group ? (
@@ -682,7 +682,7 @@ function GroupChat({
                 </Label>
                 {expired ? (
                   <Label muted>
-                    This request expired. Refresh the group for its latest
+                    This request expired. Refresh the crew for its latest
                     state.
                   </Label>
                 ) : action.authored_skill ? (
@@ -774,13 +774,13 @@ function GroupChat({
           )}
           {!liveMembers.length && (
             <Label muted>
-              All agents have been removed or destroyed. This group is
+              All agents have been removed or destroyed. This crew is
               read-only.
             </Label>
           )}
           {!canParticipate && (
             <Label muted>
-              This group is read-only for your current organization role.
+              This crew is read-only for your current organization role.
             </Label>
           )}
           {(uploads.error || uploads.notice) && (
@@ -849,8 +849,8 @@ function GroupChat({
             />
             <AssistantMentionInput
               generation={composerGeneration}
-              accessibilityLabel="Message the group"
-              placeholder="Message the group"
+              accessibilityLabel="Message the crew"
+              placeholder="Message the crew"
               value={draft}
               mentions={mentions}
               onChangeText={(value) => {
@@ -861,7 +861,7 @@ function GroupChat({
               renderActions={(mentionAction) => (
                 <ChatComposerRow>
                   <ComposerAttachButton
-                    label="Attach files or photos to group"
+                    label="Attach files or photos to crew"
                     busy={uploads.picking}
                     disabled={
                       blocked ||
@@ -880,7 +880,7 @@ function GroupChat({
                   />
                   <ComposerSubmitButton
                     kind="send"
-                    label="Send group message"
+                    label="Send crew message"
                     busy={chat.sending}
                     disabled={!canSend}
                     onPress={() => void send()}

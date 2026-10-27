@@ -10,9 +10,9 @@ in `navigationHierarchy.ts` and `workspaceChatNavigation.ts`.
 | --- | --- |
 | ChatTabs / Assistant | Main personal or specialist chat; compact identity/history/details/new-chat header. |
 | Root / AssistantContext | Contextual chat; full interaction surface, native Back. |
-| Root / GroupChat | Group conversation; actual name/ownership context/settings in one header, member details in the chip strip. |
+| Root / GroupChat | Crew conversation; actual name/ownership context/settings in one header, member details in the chip strip. |
 | Tabs / Automations | Drawer module; AutomationDetail, Editor, Runs, Preferences. Agent-scoped entry preserves its filter. |
-| Tabs / Agents | Agents & Groups drawer module; AgentCreate, AgentDetail, AgentSkills, GroupEditor. Choosing a chat dismisses the drawer. |
+| Tabs / Agents | Agents & Crews drawer module; AgentCreate, AgentDetail, AgentSkills, GroupEditor. Choosing a chat dismisses the drawer. |
 | Tabs / Plugins | Connectors and Skills; existing local overview/advanced/history/skill/version/draft/review subflows stay inside the drawer; ServiceSetup reuses connection setup. |
 | Tabs / Services | Existing connections/catalog and local setup/detail/credential/removal states inside the drawer. |
 | Tabs / Machines | Personal/org Admin inventory and read-only local ceiling/detail; `/assistant/machines?machine={id}` selects local detail; `?tab=logins` selects Saved logins. Cold entry retains Assistant underneath; local Back returns to inventory. Managed/hosted/setup routes hand off to Web. |
@@ -21,7 +21,7 @@ in `navigationHierarchy.ts` and `workspaceChatNavigation.ts`.
 | SheetStack / Pages | Retains the seven module routes above. Initial module is Agents. |
 | SheetStack / AgentCreate | Personal specialist form; dirty dismissal confirmation and pending-write guard. |
 | SheetStack / AgentDetail | Specialist profile, permissions, model and related actions; creation/details use the same screen implementation. |
-| SheetStack / GroupEditor | Create/edit group, ownership and membership; dirty/pending guards. Cold edit fallback is Agents → Groups. |
+| SheetStack / GroupEditor | Create/edit crew, ownership and membership; dirty/pending guards. Cold edit fallback is Agents → Crews. |
 | SheetStack / ServiceSetup | Connection setup/manage; cold nested Back returns to Plugins. |
 | SheetStack / MachinePolicy | Owner confirmation/single-user login policy and separate automatic-update save; explicit update confirmation. Dirty/pending/uncertain-result guards. Cold fallback Machines. |
 | SheetStack / MachineActivity | Metadata activity with Agent/unattributed filters and cursor pages; cold fallback Machines. |
@@ -45,7 +45,7 @@ Cold management links get a Workspace/Assistant beneath the sheet. Existing
 chat routes, keys and parameters survive fallback and repeated selections.
 `navigationHierarchy.test.ts` covers each sheet registration, module routing,
 shared entries, challenges, nested Back/fallback, repeated open/close, and exact
-chat restoration. `workspaceChatNavigation.test.ts` covers contextual/group
+chat restoration. `workspaceChatNavigation.test.ts` covers contextual/crew
 handoff and race-safe retained identities. Native drawer guard tests cover
 pending writes, dirty cancellation, hidden editors and forced sign-out.
 

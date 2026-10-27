@@ -171,7 +171,7 @@ export function useGroupChat(groupId: string) {
             setError(
               refused
                 ? groupError(cause)
-                : "Connection interrupted. This message may have been delivered. Refresh the group and check its history before sending again.",
+                : "Connection interrupted. This message may have been delivered. Refresh the crew and check its history before sending again.",
             );
           }
           // Unknown delivery consumes uploads: the server may have claimed them.

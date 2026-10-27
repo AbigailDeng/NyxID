@@ -150,7 +150,7 @@ test("refresh replaces newest range while retaining loaded history and oldest cu
         ...current,
         group: { ...group, id: "nyxg-1123456789abcdef0123456789abcdef" },
       }),
-    /different groups/,
+    /different crews/,
   );
 });
 test("group management derives from participating group role with legacy personal support", () => {

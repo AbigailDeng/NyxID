@@ -246,7 +246,7 @@ function setup({
     },
     field: (label: string) => find("WorkspaceSelectionField", label),
     button: (label: string) => find("ActionButton", label),
-    name: (value: string) => find("Field", "Group name").onChangeText(value),
+    name: (value: string) => find("Field", "Name").onChangeText(value),
     hasButton: (label: string) =>
       elements(harness.flush()).some(
         (item) => item.type === "ActionButton" && item.props.label === label,
@@ -343,7 +343,7 @@ test("ownership Apply resets dependent drafts and pins creator for a new organiz
   assert.deepEqual(env.calls, []);
   env.name("New research group");
   env.field("Members").onChange(["org-lead"]);
-  env.button("Create group").onPress();
+  env.button("Create crew").onPress();
   await env.harness.settle();
   assert.deepEqual(env.calls, [
     {
@@ -458,7 +458,7 @@ test("drawer dismissal asks before dropping a group draft and clears after rever
   assert.equal(env.closeGuard(), undefined);
   env.name("Unsaved research group");
   assert.deepEqual(plain(env.closeGuard()), {
-    title: "Discard group changes?",
+    title: "Discard crew changes?",
     message: "Your changes have not been saved.",
   });
   env.name(group.name);

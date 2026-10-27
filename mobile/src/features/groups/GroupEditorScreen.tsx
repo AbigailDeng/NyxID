@@ -175,7 +175,7 @@ function GroupEditor({
     if (!dirty) setExitTo({ kind: "back" });
     else
       Alert.alert(
-        "Discard group changes?",
+        "Discard crew changes?",
         "Your changes have not been saved.",
         [
           { text: "Keep editing", style: "cancel" },
@@ -191,12 +191,12 @@ function GroupEditor({
     active: !exitTo && (dirty || busy),
     defaultRole: "back",
     disabled: !exitTo && busy,
-    label: groupId ? "Back to group" : "Back to groups",
+    label: groupId ? "Back to crew" : "Back to crews",
     onBack: back,
     discardOnClose:
       !exitTo && dirty
         ? {
-            title: "Discard group changes?",
+            title: "Discard crew changes?",
             message: "Your changes have not been saved.",
           }
         : undefined,
@@ -233,12 +233,12 @@ function GroupEditor({
       });
       if (!valid.success)
         throw new Error(
-          valid.error.issues[0]?.message ?? "Review the group details.",
+          valid.error.issues[0]?.message ?? "Review the crew details.",
         );
       let saved: Group;
       if (!groupId) {
         if (org && (!orgEnabled || !enabledOrgs.some((row) => row.id === org)))
-          throw new Error("You cannot create a group for this organization.");
+          throw new Error("You cannot create a crew for this organization.");
         saved = await groupsApi.create(valid.data);
       } else {
         const patch: GroupUpdate = {};
@@ -255,7 +255,7 @@ function GroupEditor({
         const latest = await groupsApi.detail(groupId);
         if (!groupCanManage(latest))
           throw new Error(
-            "You can no longer manage this group. Reopen it to review access.",
+            "You can no longer manage this crew. Reopen it to review access.",
           );
         const ids = (values: readonly string[]) =>
           [...values].sort().join("\n");
@@ -271,11 +271,11 @@ function GroupEditor({
             latest.lead_agent_id !== baseline!.lead_agent_id)
         ) {
           throw new Error(
-            "This group changed elsewhere. Your draft is kept. Go back and reopen settings to review the latest changes.",
+            "This crew changed elsewhere. Your draft is kept. Go back and reopen settings to review the latest changes.",
           );
         }
         if (!live.available())
-          throw new Error("Reconnect and keep group settings open to save.");
+          throw new Error("Reconnect and keep crew settings open to save.");
         saved = await groupsApi.update(groupId, patch);
       }
       if (scope.current.mounted && scope.current.epoch === getAuthEpoch()) {
@@ -296,14 +296,14 @@ function GroupEditor({
     )
       return;
     Alert.alert(
-      kind === "delete" ? `Delete ${baseline.name}?` : "Leave group?",
+      kind === "delete" ? `Delete ${baseline.name}?` : "Leave crew?",
       kind === "delete"
-        ? "The group and its messages will be deleted. Your agents and their own threads stay. This cannot be undone."
-        : "The creator or a participating Admin must remain. Leaving as the last participant deletes the group. Wait for your running turns to finish.",
+        ? "The crew and its messages will be deleted. Your agents and their own threads stay. This cannot be undone."
+        : "The creator or a participating Admin must remain. Leaving as the last participant deletes the crew. Wait for your running turns to finish.",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: kind === "delete" ? "Delete group" : "Leave group",
+          text: kind === "delete" ? "Delete crew" : "Leave crew",
           style: "destructive",
           onPress: () =>
             void perform(async () => {
@@ -332,22 +332,22 @@ function GroupEditor({
     );
   }
   return (
-    <WorkspacePage showHeading={false} title={groupId ? "Group settings" : "Create group"}>
+    <WorkspacePage showHeading={false} title={groupId ? "Crew settings" : "New crew"}>
       {error && <Notice message={error} tone="error" />}
       {(agents.isPending || (!!groupId && detail.isPending)) && (
         <ActivityIndicator
-          accessibilityLabel="Loading group editor"
+          accessibilityLabel="Loading crew editor"
           color={colors.primary}
         />
       )}
       {(agents.isError || detail.isError) && (
         <>
           <Notice
-            message="Could not load the group's agents and settings."
+            message="Could not load the crew's agents and settings."
             tone="error"
           />
           <ActionButton
-            label="Retry group editor"
+            label="Retry crew editor"
             variant="secondary"
             onPress={() => {
               void agents.refetch();
@@ -362,8 +362,8 @@ function GroupEditor({
             <Card>
               <WorkspaceSelectionField
                 label="Ownership"
-                title="Choose group owner"
-                description="Choose where this group belongs. Changing ownership resets its selected agents and participants."
+                title="Choose crew owner"
+                description="Choose where this crew belongs. Changing ownership resets its selected agents and participants."
                 options={[
                   { value: "personal", label: "Personal" },
                   ...enabledOrgs.map((row) => ({
@@ -402,32 +402,32 @@ function GroupEditor({
               />
               {(orgs.isError || features.isError) && (
                 <Label muted>
-                  Organization choices could not be loaded. Personal groups
+                  Organization choices could not be loaded. Personal crews
                   remain available.
                 </Label>
               )}
               {!!enabledOrgs.length && !orgEnabled && (
-                <Label muted>Organization groups are not enabled.</Label>
+                <Label muted>Organization crews are not enabled.</Label>
               )}
             </Card>
           )}
           {baseline?.owner?.type === "org" && (
             <Notice
-              message={`${baseline.owner.name} · ${canManage ? "You can manage this group." : "Only the creator and participating Admins manage this group."}`}
+              message={`${baseline.owner.name} · ${canManage ? "You can manage this crew." : "Only the creator and participating Admins manage this crew."}`}
             />
           )}
           <Field
-            label="Group name"
+            label="Name"
             value={name}
             onChangeText={setName}
-            placeholder="Northstar team"
+            placeholder="Launch crew"
             editable={!disabled}
           />
           <Card>
             <WorkspaceSelectionField
               label="Members"
-              title="Choose group agents"
-              description={`Choose up to ${GROUP_MAX_MEMBERS} agents. Apply updates this draft; save the group to keep your changes.`}
+              title="Choose crew agents"
+              description={`Choose up to ${GROUP_MAX_MEMBERS} agents. Apply updates this draft; save the crew to keep your changes.`}
               options={eligible.map((agent) => ({
                 value: agent.id,
                 label: agent.display_name ?? agent.name,
@@ -465,8 +465,8 @@ function GroupEditor({
             <Card>
               <WorkspaceSelectionField
                 label="Participants"
-                title="Choose group participants"
-                description={`Choose up to ${GROUP_MAX_PARTICIPANTS} organization Admins and Members. The creator is included when creating a group.`}
+                title="Choose crew participants"
+                description={`Choose up to ${GROUP_MAX_PARTICIPANTS} organization Admins and Members. The creator is included when creating a crew.`}
                 options={[
                   ...availablePeople.map((person) => ({
                     value: person.user_id,
@@ -491,7 +491,7 @@ function GroupEditor({
                         )?.display_name ?? "Selected participant",
                       description:
                         !groupId && id === identity.data?.id
-                          ? "Creator · included when creating a group"
+                          ? "Creator · included when creating a crew"
                           : "No longer listed as an eligible organization member. Remove this participant before saving.",
                       disabled: !groupId && id === identity.data?.id,
                     })),
@@ -526,7 +526,7 @@ function GroupEditor({
                 <WorkspaceSelectionField
                   label="Lead agent"
                   title="Choose the lead agent"
-                  description="Messages use the lead agent when no recipient or previous recipient is selected. Choose from this group's selected agents."
+                  description="Messages use the lead agent when no recipient or previous recipient is selected. Choose from this crew's selected agents."
                   options={eligible
                     .filter((agent) => members.includes(agent.id))
                     .map((agent) => ({
@@ -552,7 +552,7 @@ function GroupEditor({
           </Label>
           {canManage && (
             <ActionButton
-              label={groupId ? "Save changes" : "Create group"}
+              label={groupId ? "Save changes" : "Create crew"}
               onPress={() => void save()}
               loading={busy}
               disabled={
@@ -568,7 +568,7 @@ function GroupEditor({
           )}
           {baseline && currentGroup && groupCanLeave(currentGroup) && (
             <ActionButton
-              label="Leave group"
+              label="Leave crew"
               variant="secondary"
               disabled={busy || !live.active}
               onPress={() => confirmDestructive("leave")}
@@ -576,7 +576,7 @@ function GroupEditor({
           )}
           {baseline && canManage && (
             <ActionButton
-              label="Delete group"
+              label="Delete crew"
               variant="danger"
               disabled={busy || !live.active}
               onPress={() => confirmDestructive("delete")}

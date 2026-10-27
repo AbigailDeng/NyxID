@@ -39,7 +39,7 @@ const approvedResponse = z.object({
 export function createGroupsApi(request: JsonRequest) {
   const sameGroup = <T extends { id: string }>(id: string, group: T): T => {
     if (group.id !== id)
-      throw new Error("The server returned a different group. Please reload.");
+      throw new Error("The server returned a different crew. Please reload.");
     return group;
   };
   async function organizations(signal?: AbortSignal) {

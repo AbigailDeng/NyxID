@@ -243,7 +243,7 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     );
   const groupRows = () =>
     all().filter((row) =>
-      /^Open group chat /.test(row.props.accessibilityLabel ?? ""),
+      /^Open crew /.test(row.props.accessibilityLabel ?? ""),
     );
   const historyQuery = () => {
     const latest = historyQueries.at(-1);
@@ -296,7 +296,7 @@ test("agent and group creation buttons stay separate from section disclosure", (
   const env = setup();
   const expandedBefore = env.agentRows().length;
   env.press("New agent");
-  env.press("New group");
+  env.press("New crew");
   assert.deepEqual(env.creations, ["agent", "group"]);
   assert.deepEqual(env.selections, []);
   assert.equal(env.agentRows().length, expandedBefore);
@@ -306,7 +306,7 @@ test("agent and group creation buttons stay separate from section disclosure", (
 
 test("offline drawer creation buttons are disabled while saved previews remain available", () => {
   const env = setup(undefined, { online: false });
-  for (const label of ["New agent", "New group"]) {
+  for (const label of ["New agent", "New crew"]) {
     const button = env.label(label);
     assert.equal(button.props.disabled, true);
     assert.equal(button.props.accessibilityState.disabled, true);
@@ -325,14 +325,14 @@ test("agent and group previews stay at five rows and their sections collapse ind
   );
   assert.equal(env.historyQuery().enabled, false);
   assert.equal(env.groupRows().length, 0);
-  env.press("Expand group chats");
+  env.press("Expand crews");
   assert.equal(env.groupRows().length, 5);
   assert.equal(env.agentRows().length, 5);
   env.press("Collapse agent chats");
   assert.equal(env.agentRows().length, 0);
   assert.equal(env.chatRows().length, 0);
   assert.equal(env.groupRows().length, 5);
-  env.press("Collapse group chats");
+  env.press("Collapse crews");
   assert.equal(env.groupRows().length, 0);
   env.press("Expand agent chats");
   assert.equal(env.agentRows().length, 5);
@@ -422,11 +422,11 @@ test("a current group outside the first five is pinned and the all-groups browse
       .groupRows()
       .some(
         (row) =>
-          row.props.accessibilityLabel === "Open group chat Group 1" &&
+          row.props.accessibilityLabel === "Open crew Group 1" &&
           row.props.accessibilityState.selected,
       ),
   );
-  env.more("View all groups (8)");
+  env.more("View all crews (8)");
   assert.equal(env.browser().items.length, 8);
   const hidden = groups[1]!;
   env.pressBrowserItem(hidden.id);
@@ -437,7 +437,7 @@ test("a current group outside the first five is pinned and the all-groups browse
       .groupRows()
       .some(
         (row) =>
-          row.props.accessibilityLabel === "Open group chat Group 2" &&
+          row.props.accessibilityLabel === "Open crew Group 2" &&
           row.props.accessibilityState.selected,
       ),
   );
@@ -730,8 +730,8 @@ test("an earlier dismissal callback cannot replay a later browser selection", ()
 
 test("group selection also waits for the child browser dismissal before opening the parent chat", () => {
   const env = setup();
-  env.press("Expand group chats");
-  env.more("View all groups (8)");
+  env.press("Expand crews");
+  env.more("View all crews (8)");
   const model = env.browser();
   const selected = model.items[0];
   const control = elements(model.renderItem(selected)).find(

@@ -14,7 +14,7 @@ import { groupError, groupKeys, useGroupAvailability } from "./useGroupRuntime";
 import { livePollInterval } from "../../lib/api/assistantLiveTransport";
 import { useGroupsLive } from "./useGroupsLive";
 
-/** Content only: the Agents & Groups hub owns its heading and tabs. */
+/** Content only: the Agents & Crews hub owns its heading and tabs. */
 export function GroupsList({
   onOpenGroup,
   onCreate,
@@ -48,11 +48,11 @@ export function GroupsList({
   return (
     <>
       {!online && (
-        <Notice message="You're offline. Reconnect to refresh your groups." />
+        <Notice message="You're offline. Reconnect to refresh your crews." />
       )}
       {query.isPending && (
         <ActivityIndicator
-          accessibilityLabel="Loading groups"
+          accessibilityLabel="Loading crews"
           color={colors.primary}
         />
       )}
@@ -61,7 +61,7 @@ export function GroupsList({
           <Notice tone="error" message={groupError(query.error)} />
           <ActionButton
             variant="secondary"
-            label="Retry groups"
+            label="Retry crews"
             onPress={() => void query.refetch()}
             disabled={!active}
           />
@@ -71,7 +71,7 @@ export function GroupsList({
         <Pressable
           key={group.id}
           accessibilityRole="button"
-          accessibilityLabel={`Open group ${group.name}`}
+          accessibilityLabel={`Open crew ${group.name}`}
           onPress={() => onOpenGroup(group.id)}
         >
           <Card>
@@ -111,12 +111,13 @@ export function GroupsList({
         <Card>
           <Label>Work together</Label>
           <Label muted>
-            Create a group for you and your agents to share one conversation.
+            Put several agents in one chat. Mention one with @ to ask it
+            directly; NyxBot answers the rest.
           </Label>
         </Card>
       )}
       <ActionButton
-        label="Create group"
+        label="Create crew"
         onPress={onCreate}
         disabled={!active}
       />

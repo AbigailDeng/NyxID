@@ -119,7 +119,7 @@ export function mergeGroupPage(
   if (!current)
     return { ...incoming, messages: mergeGroupMessages([], incoming.messages) };
   if (current.group.id !== incoming.group.id)
-    throw new Error("Cannot combine messages from different groups.");
+    throw new Error("Cannot combine messages from different crews.");
   if (mode === "older")
     return {
       ...current,

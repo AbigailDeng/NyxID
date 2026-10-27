@@ -28,7 +28,7 @@ const session = createGroupLiveSession({
           AppState.currentState !== "active" ||
           !onlineManager.isOnline()
         )
-          throw new Error("Group notification subscription is inactive.");
+          throw new Error("Crew notification subscription is inactive.");
         return requestAuthenticatedResponse("/assistant/nyxagent/live", {
           method: "GET",
           headers: { Accept: "text/event-stream" },

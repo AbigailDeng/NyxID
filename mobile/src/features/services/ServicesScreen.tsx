@@ -548,7 +548,7 @@ export function ServicesScreen({
               ) : (
                 <Label muted style={styles.cardDescription}>
                   Ask your agent to use {providerName}. For a specialist, first
-                  select this connection in Agents & Groups → choose the agent →
+                  select this connection in Agents & Crews → choose the agent →
                   Service permissions, then save.
                 </Label>
               )}

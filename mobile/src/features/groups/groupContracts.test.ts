@@ -236,9 +236,9 @@ test("transport refuses invalid outgoing bodies and cross-group responses", asyn
   );
   await assert.rejects(api.post(ID, { text: "hi", recipient_agent_ids: [] }));
   assert.equal(calls, 0);
-  await assert.rejects(api.detail(ID), /different group/);
-  await assert.rejects(api.update(ID, { name: "X" }), /different group/);
-  await assert.rejects(api.messages(ID), /different group/);
+  await assert.rejects(api.detail(ID), /different crew/);
+  await assert.rejects(api.update(ID, { name: "X" }), /different crew/);
+  await assert.rejects(api.messages(ID), /different crew/);
 });
 
 test("identity reads personal capability flags with safe defaults", async () => {

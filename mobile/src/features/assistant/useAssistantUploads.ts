@@ -135,7 +135,7 @@ export function useAssistantUploads({
           }
         },
         createDraft: (signal) => {
-          if (groupId) throw new Error("Open a saved group to attach files.");
+          if (groupId) throw new Error("Open a saved crew to attach files.");
           return assistantUploadsApi.createDraft(agentId, signal);
         },
         prepareDraft: async (id, signal) => {
