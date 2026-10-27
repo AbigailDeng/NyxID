@@ -586,8 +586,22 @@ full-screen. See
   base/card/cardSoft surfaces; essential drawer/composer controls meet 3:1.
 
 Native support remains portrait iPhone on iOS and Android phone, with wide
-Android windows as a secondary layout. Eligible private chats expose a separate
-waveform action for voice conversations when the server enables
-`assistant:voice`; group chats support dictation. Dictation requires a build
-containing the speech recognition module. iPad, additional orientations,
-RN-web, machines and new backend capabilities remain outside native support.
+Android windows as a secondary layout. Eligible private chats expose a
+voice-conversation mode in the trailing composer button when the server enables
+`assistant:voice`: an empty composer shows the waveform, text or attachments
+show Send, and an active reply shows Stop. Dictation keeps its own microphone
+and requires a build containing the speech recognition module; group chats
+support dictation.
+
+The native Machines drawer supports personal machines and organization machines
+the signed-in person administers. It includes inventory, read-only local
+capability and isolation details, guarded owner policy and update actions,
+saved-login metadata and removal, activity, and revisioned per-agent machine
+access. Context changes open the exact owner action card for review. Managed
+and hosted setup, saved-login creation, and external API-key/OAuth grants use
+web handoffs. Desktop entries from machine detail and private-chat tool cards
+open a full-screen route with machine, conversation, context and display
+selectors preserved. The viewer requires native privacy protection and a
+compatible server; live-frame, performance and app-switcher verification remain
+release gates. This describes mobile behavior only. iPad, additional
+orientations and RN-web remain outside native support.
