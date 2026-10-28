@@ -84,7 +84,7 @@ Each field falls back to the other profile if its primary is empty. Both empty f
 | `APP_NAME` | `NyxID Mobile` | Home-screen display name |
 | `APP_SLUG` | `nyxid-mobile` | Expo project slug |
 | `APP_SCHEME` | `nyxid` | Custom URL scheme for deep links |
-| `APP_VERSION` | `1.0.1` | Marketing version (`CFBundleShortVersionString`) |
+| `APP_VERSION` | `1.0.4` | Marketing version (`CFBundleShortVersionString`) |
 
 ### Apple submit credentials (account-wide)
 
@@ -206,7 +206,7 @@ pnpm bump:android    # PROD_ANDROID_VERSION_CODE → N+1
 pnpm bump:both       # both
 ```
 
-For NyxID's existing TestFlight history on `fun.chrono-ai.nyxid`, the last accepted iOS build was **34**. The first build under this pipeline should be `PROD_IOS_BUILD_NUMBER=35`.
+The repository matches NyxID's current TestFlight build on `fun.chrono-ai.nyxid`: **1.0.4 (36)**. For a new upload, keep `APP_VERSION=1.0.4` and set a higher `PROD_IOS_BUILD_NUMBER` in your local `.env.prod`; `pnpm bump:ios` advances an existing build number of 36 to 37. Later uploads must continue to increase the build number.
 
 ## Troubleshooting / cleaning
 
