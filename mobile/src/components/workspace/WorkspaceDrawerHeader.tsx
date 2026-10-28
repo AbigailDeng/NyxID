@@ -4,7 +4,12 @@ import { useTheme } from "../../theme/ThemeContext";
 import { fonts } from "../../theme/designTokens";
 
 /** iOS centers native stack titles; every nested drawer route shares this row. */
-export function WorkspaceDrawerHeader({
+export function WorkspaceDrawerHeader(props: NativeStackHeaderProps) {
+  // This export is also the navigator's directly invoked `header` callback.
+  return <WorkspaceDrawerHeaderContent {...props} />;
+}
+
+function WorkspaceDrawerHeaderContent({
   options,
   back,
   route,

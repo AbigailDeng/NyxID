@@ -20,11 +20,7 @@ import {
   View,
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import Markdown, {
-  MarkdownIt,
-  type RenderRules,
-} from "react-native-markdown-display";
-import * as WebBrowser from "expo-web-browser";
+import { AssistantMarkdownBody } from "../assistant/AssistantMarkdownBody";
 import { Check, Plus, Settings2, X } from "lucide-react-native";
 import {
   ActionButton,
@@ -72,7 +68,6 @@ import {
   AssistantMessageFooter,
   AssistantMessageTime,
 } from "../assistant/AssistantMessageFooter";
-import { assistantSelectableMarkdown } from "../assistant/assistantSelectableMarkdown";
 import { useAssistantUploads } from "../assistant/useAssistantUploads";
 import {
   appendDictation,
@@ -82,10 +77,6 @@ import {
   ComposerDictationButton,
   ComposerDictationReview,
 } from "../assistant/ComposerDictation";
-import {
-  safeAssistantLinkUrl,
-  assistantMarkdownOptions,
-} from "../assistant/assistantMarkdown";
 import { useTranscriptScrollFollow } from "../assistant/useTranscriptScrollFollow";
 import {
   NO_RECIPIENT_EDITS,
@@ -118,9 +109,6 @@ export type GroupChatScreenProps = {
   onOpenConversation?: (target: GroupConversationTarget) => void;
   onOpenAgent?: (id: string) => void;
 };
-const groupMarkdown = MarkdownIt(assistantMarkdownOptions);
-groupMarkdown.validateLink = (url: string) =>
-  safeAssistantLinkUrl(url) !== null;
 
 export function GroupChatScreen(props: GroupChatScreenProps) {
   const { epoch } = useGroupAvailability();
@@ -928,28 +916,6 @@ function GroupMessage({
         <GroupMachineReceipts groupId={group?.id} message={message} />
       </View>
     );
-  const link = (url: string) => {
-    const safe = safeAssistantLinkUrl(url);
-    if (safe) void WebBrowser.openBrowserAsync(safe).catch(() => undefined);
-    return false;
-  };
-  const rules: RenderRules = {
-    ...assistantSelectableMarkdown,
-    image: (node) => (
-      <Text
-        key={node.key}
-        style={{ color: colors.primaryOnTint }}
-        onPress={() => {
-          if (typeof node.attributes.src === "string")
-            link(node.attributes.src);
-        }}
-      >
-        {typeof node.attributes.alt === "string" && node.attributes.alt.trim()
-          ? node.attributes.alt
-          : "Image"}
-      </Text>
-    ),
-  };
   return (
     <View
       style={[
@@ -1002,36 +968,10 @@ function GroupMessage({
       {user ? (
         <Label selectable>{message.text}</Label>
       ) : (
-        <Markdown
-          markdownit={groupMarkdown}
-          mergeStyle
-          style={{
-            body: {
-              color: colors.textPrimary,
-              fontSize: 14,
-              lineHeight: 23,
-              fontFamily: fonts.bodyRegular,
-            },
-            paragraph: { marginTop: 0, marginBottom: 8 },
-            link: { color: colors.primaryOnTint },
-            fence: {
-              backgroundColor: colors.cardSoft,
-              color: colors.textPrimary,
-              borderColor: colors.border,
-              fontFamily: fonts.mono,
-            },
-            code_inline: {
-              backgroundColor: colors.cardSoft,
-              color: colors.textPrimary,
-            },
-            heading1: { fontSize: 22, color: colors.textPrimary },
-            heading2: { fontSize: 18, color: colors.textPrimary },
-          }}
-          rules={rules}
-          onLinkPress={link}
-        >
-          {sanitizeAssistantMessageContent(message.text)}
-        </Markdown>
+        <AssistantMarkdownBody
+          variant="crew"
+          text={sanitizeAssistantMessageContent(message.text)}
+        />
       )}
       {!!message.activities?.length && (
         <AssistantActivityDisclosure

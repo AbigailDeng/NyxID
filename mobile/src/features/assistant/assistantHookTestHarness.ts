@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import { memo } from "react";
 
 type Effect = {
   dependencies?: unknown[];
@@ -32,6 +33,7 @@ export function hookHarness<T>(mocks: Record<string, unknown>) {
   let renderHook: () => T;
   let value: T;
   const react = {
+    memo,
     createContext: <V>(value: V) => ({ value, Provider: "ContextProvider" }),
     useContext: <V>(context: { value: V }) => context.value,
     useRef: <V>(initial: V) => {

@@ -78,6 +78,7 @@ test("crew header shows member identity and narrows recipients through its picke
     "@tanstack/react-query": {
       useQuery: () => ({ data: { agents: members } }),
     },
+    "../assistant/AssistantMarkdownBody": { AssistantMarkdownBody: "Markdown" },
     "react-native-markdown-display": {
       __esModule: true,
       default: "Markdown",

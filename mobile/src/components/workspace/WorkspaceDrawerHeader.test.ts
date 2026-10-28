@@ -20,15 +20,18 @@ test("nested drawer headers keep Back/title/Close in a left-aligned 18pt row", (
     fileURLToPath(new URL("./WorkspaceDrawerHeader.tsx", import.meta.url)),
   ).WorkspaceDrawerHeader as any;
   h.mount(() =>
-    Header({
-      back: {},
-      route: { name: "UsageCredits" },
-      options: {
-        title: "Usage & credits",
-        headerLeft: () => "Back",
-        headerRight: () => "Close",
-      },
-    }),
+    (() => {
+      const element = Header({
+        back: {},
+        route: { name: "UsageCredits" },
+        options: {
+          title: "Usage & credits",
+          headerLeft: () => "Back",
+          headerRight: () => "Close",
+        },
+      });
+      return element.type(element.props);
+    })(),
   );
   const [back, title, close] = h.value().props.children;
   assert.equal(back, "Back");
@@ -54,4 +57,27 @@ test("nested drawer headers keep Back/title/Close in a left-aligned 18pt row", (
   );
   for (const override of drawer.matchAll(/header:\s*(\w+)/g))
     assert.equal(override[1], "WorkspaceDrawerHeader");
+});
+
+test("drawer header options return an element without borrowing navigator hooks", () => {
+  let calls = 0;
+  const h = hookHarness<any>({
+    "react/jsx-runtime": { jsx: (type: any, props: any) => ({ type, props }) },
+    "react-native": { StyleSheet: { create: (value: any) => value } },
+    "../../theme/ThemeContext": {
+      useTheme: () => {
+        calls++;
+        throw new Error("Hooks must run only when React renders the child");
+      },
+    },
+  });
+  const Header = h.load(
+    fileURLToPath(new URL("./WorkspaceDrawerHeader.tsx", import.meta.url)),
+  ).WorkspaceDrawerHeader as any;
+  for (const name of ["Machines", "UsageCredits", "GroupEditor", "Machines"]) {
+    const element = Header({ route: { name }, options: { title: name } });
+    assert.equal(calls, 0);
+    assert.equal(typeof element.type, "function");
+    assert.equal(element.props.route.name, name);
+  }
 });

@@ -10,7 +10,14 @@ import {
   ScrollEdgeFades,
   useScrollEdges,
 } from "../../components/workspace/ScrollEdgeFades";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -27,10 +34,7 @@ import { useNavigation } from "@react-navigation/native";
 import { useQuery } from "@tanstack/react-query";
 import type { NativeStackNavigationOptions } from "@react-navigation/native-stack";
 import * as WebBrowser from "expo-web-browser";
-import Markdown, {
-  MarkdownIt,
-  type RenderRules,
-} from "react-native-markdown-display";
+import { AssistantMarkdownBody } from "./AssistantMarkdownBody";
 import { Check, MoreHorizontal, SquarePen, X } from "lucide-react-native";
 import type {
   AssistantParams,
@@ -76,7 +80,6 @@ import { sanitizeAssistantMessageContent } from "./assistantChatContent";
 import { AssistantWorkingContext } from "./AssistantWorkingContext";
 import { AssistantMessageFooter } from "./AssistantMessageFooter";
 import { canReplyFeedback } from "./assistantFeedback";
-import { assistantSelectableMarkdown } from "./assistantSelectableMarkdown";
 import { AssistantAttachmentView } from "./AssistantAttachmentView";
 import { AssistantPendingUploads } from "./AssistantPendingUploads";
 import {
@@ -112,10 +115,7 @@ import {
 import { assistantVoiceFeatures } from "../../lib/api/assistantVoiceApi";
 import { assistantUploadsApi } from "../../lib/api/assistantUploadsApi";
 import { getAuthEpoch } from "../../lib/auth/authEpoch";
-import {
-  assistantMarkdownOptions,
-  safeAssistantLinkUrl,
-} from "./assistantMarkdown";
+import { safeAssistantLinkUrl } from "./assistantMarkdown";
 import { retryInput } from "./assistantState";
 import type {
   AssistantAcknowledgement,
@@ -128,11 +128,6 @@ type AssistantScreenProps = {
     params?: AssistantParams;
   };
 };
-
-// Both persisted and streamed replies share Web's automatic URL recognition.
-const assistantMarkdown = MarkdownIt(assistantMarkdownOptions);
-assistantMarkdown.validateLink = (url: string) =>
-  safeAssistantLinkUrl(url) !== null;
 
 export function AssistantScreen({
   route,
@@ -401,31 +396,34 @@ export function AssistantScreen({
     }
   }
 
-  function openSafeLink(url: string): boolean {
-    const href = safeAssistantLinkUrl(url);
-    if (!href) return false;
-    const automation = parseAutomationLink(href, NYXID_FRONTEND_URL);
-    if (automation?.kind === "invalid") {
-      Alert.alert("Could not open automation", automation.message);
-    } else if (automation?.kind === "automation") {
-      if (automation.params.setup) {
-        navigation.dispatch(
-          openWorkspaceSheetAction("AutomationEditor", automation.params),
-        );
+  const openSafeLink = useCallback(
+    (url: string): boolean => {
+      const href = safeAssistantLinkUrl(url);
+      if (!href) return false;
+      const automation = parseAutomationLink(href, NYXID_FRONTEND_URL);
+      if (automation?.kind === "invalid") {
+        Alert.alert("Could not open automation", automation.message);
+      } else if (automation?.kind === "automation") {
+        if (automation.params.setup) {
+          navigation.dispatch(
+            openWorkspaceSheetAction("AutomationEditor", automation.params),
+          );
+        } else {
+          navigation.dispatch(
+            workspaceNavigateAction("Automations", {
+              agentId: undefined,
+              setup: undefined,
+              ...automation.params,
+            }),
+          );
+        }
       } else {
-        navigation.dispatch(
-          workspaceNavigateAction("Automations", {
-            agentId: undefined,
-            setup: undefined,
-            ...automation.params,
-          }),
-        );
+        void WebBrowser.openBrowserAsync(href).catch(() => undefined);
       }
-    } else {
-      void WebBrowser.openBrowserAsync(href).catch(() => undefined);
-    }
-    return false;
-  }
+      return false;
+    },
+    [navigation],
+  );
 
   useEffect(() => {
     if (
@@ -597,80 +595,6 @@ export function AssistantScreen({
     );
   }
 
-  const markdownStyle = {
-    body: {
-      color: colors.textPrimary,
-      fontFamily: fonts.bodyRegular,
-      fontSize: 14,
-      lineHeight: 23,
-    },
-    paragraph: { marginTop: 0, marginBottom: 10 },
-    heading1: {
-      fontFamily: fonts.displaySemi,
-      fontSize: 22,
-      lineHeight: 29,
-      color: colors.textPrimary,
-    },
-    heading2: {
-      fontFamily: fonts.displaySemi,
-      fontSize: 18,
-      lineHeight: 25,
-      color: colors.textPrimary,
-    },
-    link: {
-      color: colors.primaryOnTint,
-      textDecorationLine: "underline" as const,
-    },
-    code_inline: {
-      fontFamily: fonts.mono,
-      backgroundColor: colors.cardSoft,
-      color: colors.textPrimary,
-    },
-    fence: {
-      fontFamily: fonts.mono,
-      fontSize: 12,
-      backgroundColor: colors.cardSoft,
-      color: colors.textPrimary,
-      borderColor: colors.border,
-      borderRadius: radius.md,
-    },
-    blockquote: {
-      backgroundColor: colors.cardSoft,
-      borderColor: colors.primary,
-      color: colors.textSecondary,
-    },
-    table: { borderColor: colors.border },
-    tr: { borderColor: colors.border },
-  };
-  const markdownRules: RenderRules = {
-    ...assistantSelectableMarkdown,
-    link: (node, children) => (
-      <Text
-        key={node.key}
-        accessibilityRole="link"
-        style={markdownStyle.link}
-        onPress={() => openSafeLink(node.attributes.href)}
-      >
-        {children}
-      </Text>
-    ),
-    // Match Web: model-provided remote images require an explicit link tap.
-    image: (node) => (
-      <Text
-        key={node.key}
-        style={{ color: colors.primaryOnTint }}
-        onPress={() => {
-          if (typeof node.attributes.src === "string")
-            openSafeLink(node.attributes.src);
-        }}
-      >
-        {typeof node.attributes.alt === "string" && node.attributes.alt.trim()
-          ? node.attributes.alt
-          : "Image"}
-      </Text>
-    ),
-  };
-
   function renderMessage({
     item,
     index,
@@ -789,14 +713,10 @@ export function AssistantScreen({
             </Text>
           ) : null
         ) : (
-          <Markdown
-            markdownit={assistantMarkdown}
-            style={markdownStyle}
-            rules={markdownRules}
+          <AssistantMarkdownBody
+            text={sanitizeAssistantMessageContent(item.text)}
             onLinkPress={openSafeLink}
-          >
-            {sanitizeAssistantMessageContent(item.text)}
-          </Markdown>
+          />
         )}
         {item.attachments
           .filter(
@@ -1140,14 +1060,10 @@ export function AssistantScreen({
                           />
                         ))}
                     {liveText ? (
-                      <Markdown
-                        markdownit={assistantMarkdown}
-                        style={markdownStyle}
-                        rules={markdownRules}
+                      <AssistantMarkdownBody
+                        text={liveText}
                         onLinkPress={openSafeLink}
-                      >
-                        {liveText}
-                      </Markdown>
+                      />
                     ) : null}
                     {liveAttachments
                       .filter(

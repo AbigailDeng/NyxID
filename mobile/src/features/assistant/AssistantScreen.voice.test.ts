@@ -234,6 +234,7 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
       },
     },
     "expo-web-browser": { openBrowserAsync: async () => {} },
+    "./AssistantMarkdownBody": { AssistantMarkdownBody: "Markdown" },
     "react-native-markdown-display": {
       default: "Markdown",
       MarkdownIt: () => ({}),

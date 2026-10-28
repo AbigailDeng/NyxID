@@ -9,11 +9,13 @@ import { fonts } from "../../theme/designTokens";
 import { formatRelativeTimeFromMs } from "../../lib/time";
 
 /** iOS centers native title views; a shared row anchors identity beside Menu/Back. */
-export function ChatHeaderFrame({
-  options,
-  back,
-  route,
-}: NativeStackHeaderProps) {
+export function ChatHeaderFrame(props: NativeStackHeaderProps) {
+  // Navigation invokes `header` as a render callback, inside the navigator.
+  // Hooks belong to the child component's own React render.
+  return <ChatHeaderContent {...props} />;
+}
+
+function ChatHeaderContent({ options, back, route }: NativeStackHeaderProps) {
   const { colors } = useTheme();
   const props = { canGoBack: !!back, tintColor: colors.textPrimary };
   return (

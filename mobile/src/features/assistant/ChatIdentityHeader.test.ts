@@ -150,8 +150,8 @@ test("shared custom header anchors Menu/Back then flexible identity then existin
   for (const back of [undefined, { title: "Back" }]) {
     const x = setup();
     const calls: any[] = [];
-    x.h.mount(() =>
-      x.ChatHeaderFrame({
+    x.h.mount(() => {
+      const element = x.ChatHeaderFrame({
         back,
         route: { name: "Assistant" },
         options: {
@@ -162,8 +162,9 @@ test("shared custom header anchors Menu/Back then flexible identity then existin
           headerTitle: () => ({ type: "Identity", props: {} }),
           headerRight: () => ({ type: "NewChatAndOptions", props: {} }),
         },
-      }),
-    );
+      });
+      return (element.type as (props: any) => E)(element.props);
+    });
     assert.equal(x.h.value().type, "SafeAreaView");
     assert.equal(x.h.value().props.edges[0], "top");
     const row = x.h.value().props.children;
@@ -176,5 +177,39 @@ test("shared custom header anchors Menu/Back then flexible identity then existin
     assert.equal(children[2].type, "NewChatAndOptions");
     assert.equal(calls[0].canGoBack, !!back);
     x.h.unmount();
+  }
+});
+
+test("navigation can invoke chat header options repeatedly without calling hooks", () => {
+  let hookCalls = 0;
+  const h = hookHarness<E>({
+    ...mocks,
+    "../../theme/ThemeContext": {
+      useTheme: () => {
+        hookCalls++;
+        return { colors };
+      },
+    },
+  });
+  const { ChatHeaderFrame } = h.load(
+    fileURLToPath(new URL("./ChatIdentityHeader.tsx", import.meta.url)),
+  ) as { ChatHeaderFrame: (props: any) => E };
+  for (const state of ["home", "private", "crew", "home"]) {
+    const options = {
+      header: ChatHeaderFrame,
+      title: state,
+      headerTitle: () => ({ type: "Identity", props: { name: state } }),
+    };
+    const element = options.header({
+      options,
+      route: { name: state },
+      back: state === "crew" ? {} : undefined,
+    });
+    assert.equal(hookCalls, 0, "option callback must not run component hooks");
+    assert.equal(typeof element.type, "function");
+    h.mount(() => (element.type as (props: any) => E)(element.props));
+    assert.equal(hookCalls, 1);
+    h.unmount();
+    hookCalls = 0;
   }
 });
