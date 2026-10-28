@@ -90,6 +90,22 @@ const pages: WorkspaceSearchEntry[] = [
     keywords: ["recent", "history", "threads"],
     target: { kind: "page", name: "WorkspaceRecents" },
   },
+  {
+    key: "quick:scanner",
+    label: "Scan QR code",
+    keywords: ["camera", "quick action"],
+    target: {
+      kind: "settings",
+      name: "DeviceLogin",
+      params: { start_scanner: true },
+    },
+  },
+  {
+    key: "quick:terminal",
+    label: "Terminal login code",
+    keywords: ["device", "quick action"],
+    target: { kind: "settings", name: "AgentKeyLogin", params: { mint: true } },
+  },
 ];
 const settings: WorkspaceSearchEntry[] = [
   {
@@ -209,28 +225,32 @@ export function workspaceSearchSections(
       ? [
           {
             title: "Agents",
-            data: availableAgents.map((agent): WorkspaceSearchEntry => ({
-              key: `agent:${agent.id}`,
-              label: agent.display_name || agent.name,
-              hint: agent.kind === "nyxbot" ? "NyxBot" : `@${agent.name}`,
-              keywords: [agent.name, "agent", agent.owner_name ?? ""],
-              target: {
-                kind: "chat",
-                target: { kind: "agent", agentId: agent.id },
-              },
-            })),
+            data: availableAgents.map(
+              (agent): WorkspaceSearchEntry => ({
+                key: `agent:${agent.id}`,
+                label: agent.display_name || agent.name,
+                hint: agent.kind === "nyxbot" ? "NyxBot" : `@${agent.name}`,
+                keywords: [agent.name, "agent", agent.owner_name ?? ""],
+                target: {
+                  kind: "chat",
+                  target: { kind: "agent", agentId: agent.id },
+                },
+              }),
+            ),
           },
           {
             title: "Crews",
-            data: crews.map((crew): WorkspaceSearchEntry => ({
-              key: `crew:${crew.id}`,
-              label: crew.name,
-              keywords: ["group", "crew"],
-              target: {
-                kind: "chat",
-                target: { kind: "group", groupId: crew.id },
-              },
-            })),
+            data: crews.map(
+              (crew): WorkspaceSearchEntry => ({
+                key: `crew:${crew.id}`,
+                label: crew.name,
+                keywords: ["group", "crew"],
+                target: {
+                  kind: "chat",
+                  target: { kind: "group", groupId: crew.id },
+                },
+              }),
+            ),
           },
         ]
       : []),

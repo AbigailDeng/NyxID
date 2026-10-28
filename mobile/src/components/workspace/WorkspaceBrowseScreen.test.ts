@@ -2,13 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { fileURLToPath, URL } from "node:url";
 import { hookHarness } from "../../features/assistant/assistantHookTestHarness";
-import { lightColors } from "../../theme/mobileTheme";
+import { darkColors, lightColors } from "../../theme/mobileTheme";
+import { sidebarSectionTitle } from "./workspaceSidebarStyles";
 import * as search from "./workspaceSearchModel";
 
 type E = { type: any; props: Record<string, any> };
 const nodes = (n: any): E[] =>
   n?.props ? [n, ...[n.props.children].flat(Infinity).flatMap(nodes)] : [];
-function setup(recents = false, initialAgent?: string, history = false) {
+function setup(
+  recents = false,
+  initialAgent?: string,
+  history = false,
+  dark = false,
+) {
   let epoch = 7,
     focused = true,
     refreshed = 0,
@@ -52,6 +58,7 @@ function setup(recents = false, initialAgent?: string, history = false) {
       {
         id: "crew",
         name: "Design crew",
+        members: [{ id: "helper", name: "helper-handle", kind: "specialist" }],
         working_agent_ids: [],
         last_message_at: "2026-10-27T00:00:00Z",
         message_count: 2,
@@ -89,7 +96,34 @@ function setup(recents = false, initialAgent?: string, history = false) {
       StyleSheet: { create: (v: any) => v },
       Keyboard: { dismiss: () => keyboardDismissals++ },
     },
-    "lucide-react-native": { Search: "Search", X: "X" },
+    "lucide-react-native": Object.fromEntries(
+      [
+        "Search",
+        "X",
+        "CalendarClock",
+        "Monitor",
+        "Plug",
+        "ShieldCheck",
+        "UserPlus",
+        "Users",
+        "MessagesSquare",
+        "ScanQrCode",
+        "Terminal",
+        "Settings",
+        "Bell",
+        "SunMoon",
+        "LockKeyhole",
+        "CircleDollarSign",
+        "FileText",
+        "Moon",
+        "Sun",
+        "MessageSquare",
+      ].map((name) => [name, name]),
+    ),
+    "../AgentAvatar": {
+      AgentAvatar: "AgentAvatar",
+      AgentAvatarStack: "AgentAvatarStack",
+    },
     "@react-navigation/native": { useIsFocused: () => focused },
     "@tanstack/react-query": {
       useQuery: (options: any) => {
@@ -101,6 +135,7 @@ function setup(recents = false, initialAgent?: string, history = false) {
                 id: "helper",
                 name: "helper-handle",
                 display_name: "Research helper",
+                kind: "specialist",
                 status: "idle",
               },
               { id: "nyxbot", name: "NyxBot", kind: "nyxbot", status: "idle" },
@@ -114,7 +149,7 @@ function setup(recents = false, initialAgent?: string, history = false) {
     "../../lib/api/agentsApi": { agentsApi: { list: () => ({}) } },
     "../../theme/ThemeContext": {
       useTheme: () => ({
-        colors: lightColors,
+        colors: dark ? darkColors : lightColors,
         setPreference: (v: string) => themes.push(v),
       }),
     },
@@ -237,6 +272,88 @@ test("Search filters loaded real sources and opens chats, agents, crews, pages a
   assert.equal(x.counts().agentRefresh, 1);
   assert.equal(x.query().queryKey[3], 7);
   x.h.unmount();
+});
+
+test("Search destinations use their sidebar glyphs and actual agent/crew identity marks", () => {
+  const x = setup();
+  const expected = new Map([
+    ["Automations", "CalendarClock"],
+    ["Machines", "Monitor"],
+    ["Plugins", "Plug"],
+    ["Activity", "ShieldCheck"],
+    ["Create new agent", "UserPlus"],
+    ["Scan QR code", "ScanQrCode"],
+    ["Terminal login code", "Terminal"],
+  ]);
+  for (const [label, icon] of expected) {
+    const row = x.result(label);
+    assert.ok(
+      nodes(row).some((node) => node.type === icon),
+      label,
+    );
+  }
+  for (const [query, label, icon] of [
+    ["settings", "Settings: Profile", "Settings"],
+    ["settings", "Settings: Account & security", "ShieldCheck"],
+    ["settings", "Settings: Display", "SunMoon"],
+    ["settings", "Settings: Notifications", "Bell"],
+    ["usage", "Usage & credits", "CircleDollarSign"],
+  ]) {
+    x.type(query!);
+    assert.ok(
+      nodes(x.result(label!)).some((node) => node.type === icon),
+      label,
+    );
+  }
+  x.type("helper-handle");
+  const agent = nodes(x.result("Research helper")).find(
+    (node) => node.type === "AgentAvatar",
+  )!;
+  assert.equal(agent.props.agent.id, "helper");
+  x.type("design");
+  const crew = nodes(x.result("Design crew")).find(
+    (node) => node.type === "AgentAvatarStack",
+  )!;
+  assert.equal(crew.props.agents[0].id, "helper");
+  x.type("");
+  x.result("Scan QR code").props.onPress();
+  x.result("Terminal login code").props.onPress();
+  assert.deepEqual(
+    x.actions.map((action) => [action.kind, action.name, { ...action.params }]),
+    [
+      ["settings", "DeviceLogin", { start_scanner: true }],
+      ["settings", "AgentKeyLogin", { mint: true }],
+    ],
+  );
+  x.h.unmount();
+});
+
+test("every Search group and See all heading shares the sidebar's 16pt semibold primary style in both themes", () => {
+  for (const dark of [false, true]) {
+    const x = setup(false, undefined, false, dark);
+    const colors = dark ? darkColors : lightColors;
+    for (const query of ["", "settings", "theme", "helper", "design"]) {
+      x.type(query);
+      for (const section of x.list().props.sections) {
+        const heading = x.list().props.renderSectionHeader({ section });
+        const style = Object.assign({}, ...heading.props.style);
+        assert.equal(heading.props.accessibilityRole, "header");
+        assert.equal(style.fontSize, sidebarSectionTitle.fontSize);
+        assert.equal(style.fontFamily, sidebarSectionTitle.fontFamily);
+        assert.equal(style.color, colors.textPrimary);
+        assert.ok(style.paddingTop >= 20);
+      }
+    }
+    x.h.unmount();
+    const all = setup(true, undefined, false, dark);
+    const heading = all.list().props.ListHeaderComponent;
+    const style = Object.assign({}, ...heading.props.style);
+    assert.equal(heading.props.children, "Recent chats");
+    assert.equal(style.fontSize, sidebarSectionTitle.fontSize);
+    assert.equal(style.fontFamily, sidebarSectionTitle.fontFamily);
+    assert.equal(style.color, colors.textPrimary);
+    all.h.unmount();
+  }
 });
 
 test("Search shows no-result/offline states and stale account/focus selections are inert", () => {

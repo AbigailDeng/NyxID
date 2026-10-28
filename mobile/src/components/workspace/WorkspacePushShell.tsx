@@ -81,6 +81,14 @@ export function WorkspacePushShell(props: Props) {
   const acknowledgedClosed = useRef(false);
   const latest = useRef(props);
   latest.current = props;
+  function restoreContent(fadeIn = false) {
+    const hidden = contentChanging.value || contentOpacity.value < 1;
+    fadeGeneration.current++;
+    contentChanging.value = false;
+    cancelAnimation(contentOpacity);
+    contentOpacity.value =
+      hidden && fadeIn && !reduced ? withTiming(1, { duration: 180 }) : 1;
+  }
   if (!props.presented || props.visible) acknowledgedClosed.current = false;
   useLayoutEffect(() => {
     workspaceFocus.setModalActive(
@@ -96,6 +104,8 @@ export function WorkspacePushShell(props: Props) {
       cancelAnimation(offset);
       cancelAnimation(contentOpacity);
       fadeGeneration.current++;
+      contentChanging.value = false;
+      contentOpacity.value = 1;
       workspaceFocus.setModalActive(focusOwner, false);
     };
   }, [focusOwner, offset]);
@@ -117,24 +127,27 @@ export function WorkspacePushShell(props: Props) {
             onHidden();
         };
         if (reduced) {
-          contentOpacity.value = 0;
+          contentOpacity.value = 1;
           complete();
-        } else
+        } else {
+          const recover = () => {
+            if (mounted.current && fadeGeneration.current === id)
+              restoreContent();
+          };
           contentOpacity.value = withTiming(0, { duration: 120 }, (done) => {
             "worklet";
             if (done) runOnJS(complete)();
+            else runOnJS(recover)();
           });
+        }
       },
       reveal() {
-        contentChanging.value = false;
-        fadeGeneration.current++;
-        cancelAnimation(contentOpacity);
-        contentOpacity.value = reduced ? 1 : withTiming(1, { duration: 180 });
+        restoreContent(true);
       },
     };
     return () => {
       controller.current = null;
-      fadeGeneration.current++;
+      restoreContent();
     };
   }, [props.contentTransition, reduced, contentOpacity]);
 
@@ -153,6 +166,7 @@ export function WorkspacePushShell(props: Props) {
       Math.abs(offset.value - (open ? openWidth : 0)) > 0.5
     )
       return;
+    if (!open) restoreContent();
     setSettledOpen(open);
     if (!open && state.presented && !acknowledgedClosed.current) {
       acknowledgedClosed.current = true;
@@ -175,6 +189,7 @@ export function WorkspacePushShell(props: Props) {
     [openWidth],
   );
   useEffect(() => {
+    if (!props.visible && contentChanging.value) restoreContent();
     reconcileEndpoint(props.visible);
   }, [props.visible, props.presented]);
   useEffect(() => {
@@ -221,6 +236,7 @@ export function WorkspacePushShell(props: Props) {
       generation.current++;
       cancelAnimation(offset);
       offset.value = 0;
+      restoreContent();
       setSettledOpen(false);
       programmatic.value = false;
       endpoint.current = undefined;

@@ -526,6 +526,27 @@ function ThemedAppShell({
   const didNavigate = useRef(false);
   const awaitingPaint = useRef<string | null>(null);
   const paintedPage = useRef<string | null>(null);
+  const selectionWatchdog = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  const revealContent = useCallback(() => {
+    clearTimeout(selectionWatchdog.current);
+    selectionWatchdog.current = undefined;
+    awaitingPaint.current = null;
+    contentTransition.current?.reveal();
+  }, []);
+  const cancelSelection = useCallback(() => {
+    // Fence an outstanding fade callback before making the current root visible.
+    pendingDrawerNavigation.current = null;
+    revealContent();
+  }, [revealContent]);
+  useEffect(
+    () => () => {
+      clearTimeout(selectionWatchdog.current);
+      pendingDrawerNavigation.current = null;
+    },
+    [],
+  );
   const priorSheet = useRef<{ open: boolean; content: string }>({
     open: false,
     content: "",
@@ -540,6 +561,7 @@ function ThemedAppShell({
     const content = workspaceContentIdentity(state);
     if (
       (pendingDrawerNavigation.current &&
+        !didNavigate.current &&
         workspaceDestinationMatches(state, pendingDrawerNavigation.current)) ||
       (priorSheet.current.open &&
         !next.sheetOpen &&
@@ -548,8 +570,7 @@ function ThemedAppShell({
       didNavigate.current = true;
       awaitingPaint.current = content;
       if (paintedPage.current === content) {
-        contentTransition.current?.reveal();
-        awaitingPaint.current = null;
+        revealContent();
         setDrawerOpen(false);
       }
     }
@@ -561,9 +582,7 @@ function ThemedAppShell({
   };
   useEffect(() => {
     if (!isAuthenticated) {
-      contentTransition.current?.reveal();
-      pendingDrawerNavigation.current = null;
-      awaitingPaint.current = null;
+      cancelSelection();
       paintedPage.current = null;
       didNavigate.current = false;
       drawerOrigin.current = undefined;
@@ -594,8 +613,16 @@ function ThemedAppShell({
     pendingDrawerNavigation.current = action;
     if (workspaceDestinationMatches(navigationRef.getRootState(), action)) {
       didNavigate.current = true;
+      revealContent();
       setDrawerOpen(false);
     } else {
+      // Layout/focus events can be missed by a retained native screen. A failed
+      // animation must never leave an authenticated app permanently invisible.
+      selectionWatchdog.current = setTimeout(() => {
+        if (pendingDrawerNavigation.current !== action) return;
+        cancelSelection();
+        setDrawerOpen(false);
+      }, 2000);
       const dispatch = () => {
         if (
           authenticatedNow.current &&
@@ -609,15 +636,14 @@ function ThemedAppShell({
     }
   };
   const onDrawerDismiss = useCallback(() => {
-    pendingDrawerNavigation.current = null;
-    awaitingPaint.current = null;
+    cancelSelection();
     pendingMenuFocus.current = didNavigate.current
       ? undefined
       : drawerOrigin.current;
     didNavigate.current = false;
     drawerOrigin.current = undefined;
     setDrawerPresented(false);
-  }, []);
+  }, [cancelSelection]);
   const navigateFromDrawer = (route: WorkspaceRoute) => {
     if (!authenticatedNow.current || !navigationRef.isReady()) return;
     if (route === "Assistant") return openChatFromDrawer({ kind: "home" });
@@ -648,11 +674,17 @@ function ThemedAppShell({
   }
   function changeSidebar(open: boolean) {
     if (open) {
-      if (!isAuthenticated || accessibility.sheetOpen || navigationBlocked)
+      if (
+        !isAuthenticated ||
+        accessibility.sheetOpen ||
+        navigationBlocked ||
+        pendingDrawerNavigation.current ||
+        didNavigate.current
+      )
         return;
       revealSidebar();
-    }
-    if (!pendingDrawerNavigation.current) setDrawerOpen(open);
+    } else cancelSelection();
+    setDrawerOpen(open);
   }
 
   const renderWorkspace = (children: ReactNode) => (
@@ -757,9 +789,7 @@ function ThemedAppShell({
             onNavigationGuardChange={onNavigationGuardChange}
             onEdgeBackChange={onEdgeBackChange}
             onNavigationCancelled={() => {
-              contentTransition.current?.reveal();
-              pendingDrawerNavigation.current = null;
-              awaitingPaint.current = null;
+              cancelSelection();
             }}
             onWorkspacePagePainted={(identity) => {
               paintedPage.current = identity;
@@ -769,8 +799,7 @@ function ThemedAppShell({
                 workspaceContentIdentity(navigationRef.getRootState()) ===
                   identity
               ) {
-                awaitingPaint.current = null;
-                contentTransition.current?.reveal();
+                revealContent();
                 setDrawerOpen(false);
               }
             }}

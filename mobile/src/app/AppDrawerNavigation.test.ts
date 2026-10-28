@@ -79,6 +79,8 @@ function shellSource() {
 function setup(deferFade = false) {
   const fades: (() => void)[] = [];
   const sequence: string[] = [];
+  let timerId = 0;
+  const timers = new Map<number, { callback: () => void; delay: number }>();
   let rootState = fixture();
   let authenticated = true;
   let authEpoch = 0;
@@ -178,6 +180,11 @@ function setup(deferFade = false) {
       return { jsx, jsxs: jsx, Fragment: "Fragment" };
     },
     ...react,
+    setTimeout: (callback: () => void, delay: number) => {
+      timers.set(++timerId, { callback, delay });
+      return timerId;
+    },
+    clearTimeout: (id: number) => timers.delete(id),
     useTheme: () => ({ mode: "dark" }),
     useSafeAreaInsets: () => ({ top: 40 }),
     useAuthSession: () => ({ isAuthenticated: authenticated }),
@@ -264,6 +271,13 @@ function setup(deferFade = false) {
   };
   return {
     sequence,
+    watchdogs: () => [...timers.values()],
+    expireWatchdog: () => {
+      const pending = [...timers.values()];
+      timers.clear();
+      for (const timer of pending) timer.callback();
+      flush();
+    },
     finishFade: () => fades.shift()?.(),
     dispatched,
     focus,
@@ -503,7 +517,7 @@ test("Discard closes only after the deferred guarded action commits, retaining t
 });
 
 test("selecting an already active root closes once without requiring a navigation event", () => {
-  const env = setup();
+  const env = setup(true);
   env.setState(
     apply(
       env.state(),
@@ -515,6 +529,94 @@ test("selecting an already active root closes once without requiring a navigatio
   env.flush();
   assert.equal(env.shell().props.visible, false);
   assert.equal(env.dispatched.length, 0);
+  assert.equal(env.sequence.includes("fade out"), false);
+  assert.equal(env.watchdogs().length, 0);
+  env.finishFade();
+  assert.equal(env.dispatched.length, 0);
+});
+
+test("sliver close while waiting for a new root paint restores content and ignores late paint", () => {
+  const env = setup(true);
+  env.open();
+  env.drawer().props.onNavigate("Machines");
+  env.finishFade();
+  env.commitLast(false);
+  assert.equal(env.shell().props.visible, true);
+  env.shell().props.onOpenChange(false);
+  env.flush();
+  assert.equal(env.shell().props.visible, false);
+  assert.equal(env.sequence.at(-1), "fade in");
+  assert.equal(env.watchdogs().length, 0);
+  const count = env.sequence.length;
+  env.paint();
+  env.changedNavigation();
+  assert.equal(
+    env.sequence.length,
+    count,
+    "late paint/state cannot rearm a cancelled transition",
+  );
+  env.drawer().props.onDismiss();
+  env.flush();
+  assert.equal(env.shell().props.presented, false);
+});
+
+test("a close interrupts fade-out and fences its delayed root dispatch", () => {
+  const env = setup(true);
+  env.open();
+  env.drawer().props.onNavigate("Machines");
+  env.shell().props.onOpenChange(false);
+  env.flush();
+  assert.equal(env.shell().props.visible, false);
+  assert.equal(env.sequence.at(-1), "fade in");
+  env.finishFade();
+  assert.equal(env.dispatched.length, 0);
+  assert.equal(env.watchdogs().length, 0);
+  env.drawer().props.onDismiss();
+  env.flush();
+  env.open();
+  env.drawer().props.onNavigate("Automations");
+  env.finishFade();
+  env.commitLast();
+  assert.equal(env.dispatched.length, 1);
+  assert.equal(env.shell().props.visible, false);
+});
+
+test("the paint watchdog recovers a lost fade callback or root paint without replaying navigation", () => {
+  for (const interrupted of ["fade", "paint"]) {
+    const env = setup(true);
+    env.open();
+    env.drawer().props.onNavigate("Machines");
+    env.drawer().props.onNavigate("Automations");
+    if (interrupted === "paint") {
+      env.finishFade();
+      env.commitLast(false);
+    }
+    const [watchdog] = env.watchdogs();
+    assert.equal(watchdog?.delay, 2000);
+    env.expireWatchdog();
+    assert.equal(env.shell().props.visible, false);
+    assert.equal(env.sequence.at(-1), "fade in");
+    env.finishFade();
+    env.paint();
+    assert.equal(env.dispatched.length, interrupted === "paint" ? 1 : 0);
+    env.drawer().props.onDismiss();
+    env.flush();
+    assert.equal(env.shell().props.presented, false);
+  }
+});
+
+test("normal matching paint cancels the watchdog and unrelated state changes cannot restart the fade", () => {
+  const env = setup(true);
+  env.open();
+  env.drawer().props.onNavigate("Machines");
+  env.finishFade();
+  env.commitLast();
+  assert.equal(env.watchdogs().length, 0);
+  env.changedNavigation();
+  env.paint();
+  assert.equal(env.sequence.filter((step) => step === "fade in").length, 1);
+  env.expireWatchdog();
+  assert.equal(env.dispatched.length, 1);
 });
 
 test("Settings presents over the expanded sidebar and dismissal preserves the exact page and open state", () => {

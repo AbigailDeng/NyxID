@@ -107,6 +107,32 @@ const dnsWork: ServiceConnection = {
   },
 };
 
+test("Added rows render catalog brand slugs for suffixed production instances even before catalog loads", () => {
+  const slugs = ["api-github", "api-notion", "api-google-workspace"];
+  const view = setup({
+    connections: slugs.map((slug, index) => ({
+      ...personal,
+      id: `production-key-${index}`,
+      slug: `${slug}-${index + 2}`,
+      catalog_service_slug: slug,
+    })),
+    catalog: [],
+  });
+  assert.deepEqual(
+    view
+      .all()
+      .filter((row) => row.type === "ServiceIcon")
+      .map((row) => row.props.slug),
+    slugs,
+  );
+  view.connector("service:api-github");
+  assert.equal(
+    view.all().find((row) => row.type === "ServiceIcon")?.props.slug,
+    "api-github",
+  );
+  view.harness.unmount();
+});
+
 function setup({
   connections = [personal, dnsPersonal, dnsWork],
   catalog = [github, cloudflare, slack],

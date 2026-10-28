@@ -208,6 +208,7 @@ function setup(reduced = false) {
     settings,
     handlers: () => handlers,
     offset: () => shared[0]!.value,
+    opacity: () => find("workspace-slab-content").props.style[1].read().opacity,
     style: () => find("workspace-content-slab").props.style[2].read(),
     lastComplete: (done = true) => {
       timings.at(-1)!.complete(done);
@@ -511,10 +512,74 @@ test("cancelled and unmounted fades cannot dispatch stale roots; reduced motion 
   assert.equal(swaps, 0);
   const reduced = setup(true);
   reduced.contentTransition.current.fadeOut(() => swaps++);
+  assert.equal(
+    reduced.opacity(),
+    1,
+    "reduced motion never hides content while waiting for paint",
+  );
   reduced.contentTransition.current.reveal();
   assert.equal(swaps, 1);
   assert.equal(reduced.timings.length, 0);
   reduced.harness.unmount();
+});
+
+test("closing during a pending fade restores opacity and the settled content's AX and pointer access", () => {
+  for (const close of ["sliver", "controlled"]) {
+    const x = setup();
+    let swaps = 0;
+    x.set({ visible: true, presented: true });
+    x.lastComplete();
+    x.contentTransition.current.fadeOut(() => swaps++);
+    const staleFade = x.timings.at(-1)!;
+    assert.equal(x.opacity(), 0);
+    if (close === "sliver") {
+      x.find("workspace-sidebar-close-sliver").props.onPress();
+      x.render();
+    } else x.set({ visible: false });
+    assert.equal(x.opacity(), 1);
+    staleFade.complete(true);
+    assert.equal(swaps, 0, "cancelled fade cannot swap roots after close");
+    x.lastComplete();
+    assert.equal(x.offset(), 0);
+    assert.equal(x.find("workspace-sidebar-base").props.pointerEvents, "none");
+    assert.equal(
+      x.find("workspace-sidebar-base").props.accessibilityElementsHidden,
+      true,
+    );
+    assert.equal(
+      x.find("workspace-slab-content").props.accessibilityElementsHidden,
+      false,
+    );
+    assert.equal(x.harness.value().props.pointerEvents, "auto");
+    assert.equal(
+      x
+        .all()
+        .some((node) => node.props.testID === "workspace-sidebar-close-sliver"),
+      false,
+    );
+    x.harness.unmount();
+  }
+});
+
+test("an interrupted fade restores visibility and stale interruption cannot cancel a newer fade", () => {
+  const x = setup();
+  let swaps = 0;
+  x.set({ visible: true, presented: true });
+  x.lastComplete();
+  x.contentTransition.current.fadeOut(() => swaps++);
+  const first = x.timings.at(-1)!;
+  first.complete(false);
+  assert.equal(x.opacity(), 1);
+  assert.equal(swaps, 0);
+  x.contentTransition.current.fadeOut(() => swaps++);
+  const second = x.timings.at(-1)!;
+  first.complete(false);
+  assert.equal(x.opacity(), 0);
+  second.complete(true);
+  assert.equal(swaps, 1);
+  x.contentTransition.current.reveal();
+  assert.equal(x.opacity(), 1);
+  x.harness.unmount();
 });
 
 // Reproduced on device: a cancelled edge gesture left presented=true while the

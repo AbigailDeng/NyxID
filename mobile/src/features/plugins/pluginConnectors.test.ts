@@ -53,6 +53,31 @@ test("canonical catalog slugs group every credential despite divergent proxy pat
   );
 });
 
+test("production instance suffixes never replace the canonical catalog brand slug", () => {
+  const slugs = ["api-github", "api-notion", "api-google-workspace"];
+  const connections = slugs.map((slug, index) => ({
+    ...connection,
+    id: `connection-${index}`,
+    slug: `${slug}-${index + 2}`,
+    catalog_service_slug: slug,
+  }));
+  for (const entries of [[], slugs.map((slug) => ({ ...catalog, slug }))]) {
+    const result = deriveConnectorItems(connections, entries);
+    assert.deepEqual(
+      result.added.map((item) => item.iconSlug),
+      slugs,
+    );
+    assert.deepEqual(
+      result.added.map((item) => item.connections[0]?.slug),
+      connections.map((item) => item.slug),
+    );
+    assert.deepEqual(
+      result.added.map((item) => item.manageKeyIds?.[0]),
+      connections.map((item) => item.id),
+    );
+  }
+});
+
 test("disabled stays Added and mixed connections are Enabled only with a healthy route", () => {
   const off = { ...connection, is_active: false };
   const disabled = deriveConnectorItems([off], [catalog]);

@@ -11,7 +11,30 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { Search, X } from "lucide-react-native";
+import {
+  Search,
+  X,
+  CalendarClock,
+  Monitor,
+  Plug,
+  ShieldCheck,
+  UserPlus,
+  Users,
+  MessagesSquare,
+  ScanQrCode,
+  Terminal,
+  Settings,
+  Bell,
+  SunMoon,
+  LockKeyhole,
+  CircleDollarSign,
+  FileText,
+  Moon,
+  Sun,
+  MessageSquare,
+} from "lucide-react-native";
+import { AgentAvatar, AgentAvatarStack } from "../AgentAvatar";
+import { sidebarSectionTitle } from "./workspaceSidebarStyles";
 import { useIsFocused } from "@react-navigation/native";
 import { useQuery } from "@tanstack/react-query";
 import type { ContentScreenProps } from "../../app/navigationTypes";
@@ -40,6 +63,29 @@ import {
 
 const recentKey = (item: WorkspaceRecent) => item.key;
 const searchKey = (item: WorkspaceSearchEntry) => item.key;
+const destinationIcons: Record<string, typeof Search> = {
+  "page:automations": CalendarClock,
+  "page:machines": Monitor,
+  "page:logins": Monitor,
+  "page:plugins": Plug,
+  "page:activity": ShieldCheck,
+  "page:agents": Users,
+  "page:create-agent": UserPlus,
+  "page:recents": MessagesSquare,
+  "quick:scanner": ScanQrCode,
+  "quick:terminal": Terminal,
+  "settings:profile": Settings,
+  "settings:security": ShieldCheck,
+  "settings:display": SunMoon,
+  "settings:privacy": LockKeyhole,
+  "settings:notifications": Bell,
+  "settings:usage": CircleDollarSign,
+  "settings:terms": FileText,
+  "settings:privacy-policy": LockKeyhole,
+  "theme:light": Sun,
+  "theme:dark": Moon,
+  "theme:system": Monitor,
+};
 
 function useBrowseData(agentId?: string) {
   const focused = useIsFocused();
@@ -172,7 +218,9 @@ export function WorkspaceRecentsScreen({
             accessibilityRole="button"
             accessibilityLabel="New chat"
             style={styles.more}
-            onPress={() => openChat({ kind: "agent", agentId: route.params?.agentId })}
+            onPress={() =>
+              openChat({ kind: "agent", agentId: route.params?.agentId })
+            }
           >
             <Text style={{ color: colors.textPrimary }}>New chat</Text>
           </Pressable>
@@ -219,6 +267,14 @@ export function WorkspaceRecentsScreen({
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         contentContainerStyle={styles.list}
+        ListHeaderComponent={
+          <Text
+            accessibilityRole="header"
+            style={[styles.heading, { color: colors.textPrimary }]}
+          >
+            {history ? "Chats" : "Recent chats"}
+          </Text>
+        }
         refreshControl={
           <RefreshControl
             refreshing={data.refreshing}
@@ -303,33 +359,57 @@ export function WorkspaceSearchScreen({
     [navigation, data.epoch, data.focused, setPreference],
   );
   const renderItem = useCallback(
-    ({ item }: { item: WorkspaceSearchEntry }) => (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`${item.label}${item.hint ? `, ${item.hint}` : ""}`}
-        style={({ pressed }) => [
-          styles.result,
-          { backgroundColor: pressed ? colors.navActive : "transparent" },
-        ]}
-        onPress={() => select(item.target)}
-      >
-        <Text
-          numberOfLines={2}
-          style={[styles.resultTitle, { color: colors.textPrimary }]}
+    ({ item }: { item: WorkspaceSearchEntry }) => {
+      const target = item.target;
+      const chat = target.kind === "chat" ? target.target : undefined;
+      const agent =
+        chat?.kind === "agent" && !chat.conversationId
+          ? data.agents.find((row) => row.id === chat.agentId)
+          : undefined;
+      const crew =
+        chat?.kind === "group"
+          ? data.crews.find((row) => row.id === chat.groupId)
+          : undefined;
+      const Icon = destinationIcons[item.key] ?? MessageSquare;
+      return (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${item.label}${item.hint ? `, ${item.hint}` : ""}`}
+          style={({ pressed }) => [
+            styles.result,
+            { backgroundColor: pressed ? colors.navActive : "transparent" },
+          ]}
+          onPress={() => select(item.target)}
         >
-          {item.label}
-        </Text>
-        {!!item.hint && (
+          {agent ? (
+            <AgentAvatar agent={agent} size="sm" />
+          ) : crew ? (
+            <AgentAvatarStack
+              agents={crew.members}
+              size="sm"
+              surface={colors.bg}
+            />
+          ) : (
+            <Icon size={20} color={colors.textSecondary} accessible={false} />
+          )}
           <Text
             numberOfLines={2}
-            style={[styles.hint, { color: colors.textMuted }]}
+            style={[styles.resultTitle, { color: colors.textPrimary }]}
           >
-            {item.hint}
+            {item.label}
           </Text>
-        )}
-      </Pressable>
-    ),
-    [colors, select],
+          {!!item.hint && (
+            <Text
+              numberOfLines={2}
+              style={[styles.hint, { color: colors.textMuted }]}
+            >
+              {item.hint}
+            </Text>
+          )}
+        </Pressable>
+      );
+    },
+    [colors, select, data.agents, data.crews],
   );
   return (
     <WorkspacePage
@@ -366,7 +446,7 @@ export function WorkspaceSearchScreen({
         renderSectionHeader={({ section }) => (
           <Text
             accessibilityRole="header"
-            style={[styles.heading, { color: colors.textSecondary }]}
+            style={[styles.heading, { color: colors.textPrimary }]}
           >
             {section.title}
           </Text>
@@ -433,11 +513,10 @@ const styles = StyleSheet.create({
   },
   filterLabel: { fontFamily: fonts.bodyRegular, fontSize: 13 },
   heading: {
-    fontFamily: fonts.bodySemi,
-    fontSize: 13,
+    ...sidebarSectionTitle,
     paddingHorizontal: 12,
-    paddingTop: 18,
-    paddingBottom: 8,
+    paddingTop: 22,
+    paddingBottom: 10,
   },
   result: {
     minHeight: 48,
