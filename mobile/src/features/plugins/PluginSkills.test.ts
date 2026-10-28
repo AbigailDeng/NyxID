@@ -3,7 +3,6 @@ import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { hookHarness } from "../assistant/assistantHookTestHarness";
 import * as skillTypes from "./pluginSkillsTypes";
-import { skillModalBackAction } from "./skillModalNavigation";
 import type { AssistantAgent } from "../agents/agentContracts";
 
 type Element = { type: unknown; props: Record<string, any>; key?: string };
@@ -85,7 +84,8 @@ const preview = {
 function setup({
   wrapperOnly = false,
   agentId,
-}: { wrapperOnly?: boolean; agentId?: string } = {}) {
+  draftOnly = false,
+}: { wrapperOnly?: boolean; agentId?: string; draftOnly?: boolean } = {}) {
   const calls: { method: string; args: any[] }[] = [];
   const queries = new Map<string, QueryOptions>();
   const state = new Map<string, any>();
@@ -93,7 +93,42 @@ function setup({
   let epoch = 1;
   let requestedAgent = agentId;
   let manager: Element | undefined;
-  const changes: boolean[] = [];
+  const dirty: boolean[] = [];
+  const onDirty = (value: boolean) => dirty.push(value);
+  const proposal = {
+    id: "proposal",
+    revision: 1,
+    status: "pending",
+    draft: {
+      name: "Draft",
+      description: "",
+      skill_md: "# Draft",
+      kind: "new",
+      rationale: "",
+      safety_notes: "",
+      files: [],
+    },
+  };
+  let routePage: any;
+  let routeView = "detail";
+  const routes: { name: string; params: any }[] = [];
+  const navigation = {
+    push: (name: string, params: any) => {
+      routes.push(JSON.parse(JSON.stringify({ name, params })));
+      routePage = params;
+      routeView = (
+        {
+          SkillDetail: "detail",
+          SkillVersions: "versions",
+          SkillHistory: "history",
+          SkillDraft: "draft",
+        } as Record<string, string>
+      )[name]!;
+      harness.render();
+    },
+    goBack: () => {},
+    popTo: (name: string, params: any) => navigation.push(name, params),
+  };
   const record =
     (method: string, value?: unknown) =>
     async (...args: any[]) => {
@@ -143,7 +178,10 @@ function setup({
   state.set("proposals", response({ proposals: [] }));
   const client = { invalidateQueries: record("invalidate") };
   const harness = hookHarness<Element>({
-    "../../components/AgentAvatar": { AgentAvatar: "AgentAvatar", AgentAvatarStack: "AgentAvatarStack" },
+    "../../components/AgentAvatar": {
+      AgentAvatar: "AgentAvatar",
+      AgentAvatarStack: "AgentAvatarStack",
+    },
     "react/jsx-runtime": {
       jsx: (type: unknown, props: unknown, key?: string) => ({
         type,
@@ -175,7 +213,10 @@ function setup({
       },
       StyleSheet: { create: (styles: unknown) => styles },
     },
-    "@react-navigation/native": { useIsFocused: () => focused },
+    "@react-navigation/native": {
+      useIsFocused: () => focused,
+      useNavigation: () => navigation,
+    },
     "@react-native-community/netinfo": { addEventListener: () => () => {} },
     "@tanstack/react-query": {
       useQueryClient: () => client,
@@ -234,21 +275,31 @@ function setup({
       useTheme: () => ({ colors: { primaryTone: {} } }),
     },
     "./skillDraftSubmission": { submitSkillDraft: async () => {} },
-    "./skillModalNavigation": { skillModalBackAction },
+    "../../app/WorkspaceHeader": {
+      useWorkspaceBack: () => {},
+      useOpenWorkspaceChat: () => () => {},
+    },
     "./pluginSkillsTypes": skillTypes,
     "./authoredSkillReviewState": {},
     "./SkillLibrary": { SkillLibrary: "SkillLibrary" },
   });
-  const { PluginSkills } = harness.load(
+  const { PluginSkills, SkillDraftEditor } = harness.load(
     fileURLToPath(new URL("./PluginSkills.tsx", import.meta.url)),
   ) as {
     PluginSkills: (props: unknown) => Element;
+    SkillDraftEditor: (props: unknown) => Element;
   };
-  const detailChange = (open: boolean) => changes.push(open);
   harness.mount(() => {
+    if (draftOnly)
+      return SkillDraftEditor({
+        agentId: first.id,
+        proposal,
+        onBusy: () => {},
+        onDirty,
+        onSaved: async () => {},
+      });
     const wrapper = PluginSkills({
       agentId: requestedAgent,
-      onDetailChange: detailChange,
     });
     manager = elements(wrapper).find(
       (item) =>
@@ -258,7 +309,11 @@ function setup({
     if (wrapperOnly || !manager) return wrapper;
     // Execute the real private child with the same hook runtime. The wrapper
     // remains mounted and its hook order is stable for each manager fixture.
-    return (manager.type as (props: unknown) => Element)(manager.props);
+    return (manager.type as (props: unknown) => Element)({
+      ...manager.props,
+      skillPage: routePage,
+      view: routeView,
+    });
   });
   const find = (predicate: (item: Element) => boolean) => {
     const item = elements(harness.flush()).find(predicate);
@@ -270,7 +325,8 @@ function setup({
     calls,
     queries,
     state,
-    changes,
+    routes,
+    dirty,
     manager: () => manager!,
     sheet: () => find((item) => item.type === "WorkspaceSelectionSheet"),
     hasSheet: () =>
@@ -278,7 +334,8 @@ function setup({
         (item) => item.type === "WorkspaceSelectionSheet",
       ),
     library: () => find((item) => item.type === "SkillLibrary"),
-    modal: () => find((item) => item.type === "Modal"),
+    hasModal: () =>
+      elements(harness.flush()).some((item) => item.type === "Modal"),
     control: (label: string) =>
       find(
         (item) =>
@@ -576,7 +633,16 @@ test("catalog review opens original identity without mutating and exact attach r
         "Build a weekly sales report.",
       );
     env.harness.flush();
-    assert.equal(env.modal().props.visible, true);
+    assert.equal(env.hasModal(), false);
+    assert.deepEqual(env.routes.at(-1), {
+      name: "SkillDetail",
+      params: {
+        agentId: first.id,
+        skillId: "catalog-opaque",
+        name: "weekly_report",
+        description: "Build a weekly sales report.",
+      },
+    });
     assert.equal(env.queries.get("versions")?.queryKey[4], "catalog-opaque");
     assert.equal(env.queries.get("versions")?.enabled, true);
     assert.equal(
@@ -585,6 +651,7 @@ test("catalog review opens original identity without mutating and exact attach r
       "opening a catalog result must not attach it",
     );
     env.control("Attach exact version").props.onPress();
+    assert.equal(env.routes.at(-1)?.name, "SkillVersions");
     env.harness.flush();
     assert.equal(env.control("Attach skill").props.disabled, true);
     env.control(`Select version ${version.version}`).props.onPress();
@@ -596,6 +663,7 @@ test("catalog review opens original identity without mutating and exact attach r
     await env.harness.settle();
     const written = env.calls.find((call) => call.method === "write")!;
     assert.ok(written);
+    assert.equal(env.routes.at(-1)?.name, "SkillDetail");
     assert.equal(written.args[0], first.id);
     assert.equal(written.args[1].expected_revision, 7);
     assert.equal(written.args[1].skills.length, 2);
@@ -611,6 +679,21 @@ test("catalog review opens original identity without mutating and exact attach r
       env.calls.filter((call) => call.method === "agent-detail").length,
       1,
     );
+  } finally {
+    env.unmount();
+  }
+});
+
+test("skill draft editor reports real edits and clearing back to the saved baseline", () => {
+  const env = setup({ draftOnly: true });
+  try {
+    assert.equal(env.dirty.at(-1), false);
+    env.control("Skill description").props.onChangeText("Unsaved description");
+    env.harness.flush();
+    assert.equal(env.dirty.at(-1), true);
+    env.control("Skill description").props.onChangeText("");
+    env.harness.flush();
+    assert.equal(env.dirty.at(-1), false);
   } finally {
     env.unmount();
   }

@@ -868,13 +868,7 @@ export function AssistantScreen({
       <NativeAuthoredSkillReview
         acknowledgement={row}
         initiallyOpen={row.id === route?.params?.acknowledgementId}
-        disabled={Boolean(assistant.deciding) || assistant.loadingOlder}
-        online={assistant.online}
-        onDecision={(choice) => assistant.decide(row.id, choice)}
-        onRefresh={() => {
-          if (conversation?.id)
-            return assistant.openConversation(conversation.id);
-        }}
+        conversationId={assistant.conversationId!}
       />
     );
   }

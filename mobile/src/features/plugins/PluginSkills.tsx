@@ -1,27 +1,18 @@
 import { AgentAvatar } from "../../components/AgentAvatar";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
-  Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Switch,
   Text,
   View,
 } from "react-native";
-import { useIsFocused } from "@react-navigation/native";
+import { useIsFocused, useNavigation } from "@react-navigation/native";
 import NetInfo from "@react-native-community/netinfo";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  BookOpen,
-  Check,
-  ChevronDown,
-  ChevronLeft,
-  X,
-} from "lucide-react-native";
-import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { BookOpen, Check, ChevronDown } from "lucide-react-native";
 import { WorkspaceSelectionSheet } from "../../components/workspace/WorkspaceSelectionField";
 import {
   ActionButton,
@@ -29,6 +20,7 @@ import {
   Field,
   Label,
   Notice,
+  WorkspacePage,
 } from "../../components/workspace/WorkspaceUI";
 import { agentsApi } from "../../lib/api/agentsApi";
 import { assistantApi } from "../../lib/api/assistantApi";
@@ -38,7 +30,15 @@ import { fonts } from "../../theme/designTokens";
 import { useTheme } from "../../theme/ThemeContext";
 import type { AssistantAgent } from "../agents/agentContracts";
 import { submitSkillDraft } from "./skillDraftSubmission";
-import { skillModalBackAction } from "./skillModalNavigation";
+import type {
+  ContentScreenProps,
+  SkillPageParams,
+  WorkspaceNavigationProp,
+} from "../../app/navigationTypes";
+import {
+  useOpenWorkspaceChat,
+  useWorkspaceBack,
+} from "../../app/WorkspaceHeader";
 import { SkillLibrary, type SkillLibraryTab } from "./SkillLibrary";
 import {
   assertSkillRevision,
@@ -72,11 +72,9 @@ type OpenChat = (context: {
 export function PluginSkills({
   agentId,
   onOpenChat,
-  onDetailChange,
 }: {
   agentId?: string;
   onOpenChat?: OpenChat;
-  onDetailChange?: (open: boolean) => void;
 }) {
   const { colors } = useTheme();
   const focused = useIsFocused();
@@ -205,23 +203,107 @@ export function PluginSkills({
           agent={agent}
           features={features.data ?? []}
           onOpenChat={onOpenChat}
-          onDetailChange={onDetailChange}
         />
       )}
     </View>
   );
 }
 
+type SkillView = "detail" | "versions" | "history" | "draft";
+const skillRoutes = {
+  detail: "SkillDetail",
+  versions: "SkillVersions",
+  history: "SkillHistory",
+  draft: "SkillDraft",
+} as const;
+
+export function PluginSkillPage({
+  route,
+}: ContentScreenProps<
+  "SkillDetail" | "SkillVersions" | "SkillHistory" | "SkillDraft"
+>) {
+  const openChat = useOpenWorkspaceChat();
+  const focused = useIsFocused();
+  const agent = useQuery({
+    queryKey: ["workspace", "agents", "detail", route.params.agentId],
+    queryFn: ({ signal }) => agentsApi.detail(route.params.agentId, signal),
+    enabled: focused,
+    retry: false,
+  });
+  const features = useQuery({
+    queryKey: [...ROOT, "features"],
+    queryFn: ({ signal }) => api.features(signal),
+    enabled: focused,
+    retry: false,
+  });
+  const view = (Object.keys(skillRoutes) as SkillView[]).find(
+    (key) => skillRoutes[key] === route.name,
+  )!;
+  return (
+    <WorkspacePage title={route.params.name} showHeading={false}>
+      {agent.isPending && (
+        <ActivityIndicator accessibilityLabel="Loading skill agent" />
+      )}
+      {agent.isError && <Notice tone="error" message={failure(agent.error)} />}
+      {agent.data &&
+        (agent.data.agent.can_maintain === false ||
+          agent.data.agent.status === "destroyed") && (
+          <Notice message="This agent is unavailable or your maintenance access changed." />
+        )}
+      {agent.data &&
+        agent.data.agent.can_maintain !== false &&
+        agent.data.agent.status !== "destroyed" && (
+          <AgentSkillsManager
+            key={route.key}
+            agent={agent.data.agent}
+            features={features.data ?? []}
+            onOpenChat={openChat}
+            skillPage={route.params}
+            view={view}
+          />
+        )}
+    </WorkspacePage>
+  );
+}
+
+function SkillPageGuard({
+  busy,
+  dirty,
+  confirmDetach,
+  onBack,
+}: {
+  busy: boolean;
+  dirty: boolean;
+  confirmDetach: boolean;
+  onBack: () => void;
+}) {
+  useWorkspaceBack({
+    active: confirmDetach,
+    onBack,
+    defaultRole: "back",
+    disabled: busy,
+    discardOnClose: dirty
+      ? {
+          title: "Discard skill draft changes?",
+          message: "Your unsaved skill draft changes will be lost.",
+        }
+      : undefined,
+  });
+  return null;
+}
+
 function AgentSkillsManager({
   agent,
   features,
   onOpenChat,
-  onDetailChange,
+  skillPage,
+  view = "detail",
 }: {
   agent: AssistantAgent;
   features: string[];
   onOpenChat?: OpenChat;
-  onDetailChange?: (open: boolean) => void;
+  skillPage?: SkillPageParams;
+  view?: SkillView;
 }) {
   const { colors } = useTheme();
   const client = useQueryClient();
@@ -231,19 +313,20 @@ function AgentSkillsManager({
   const [catalogInput, setCatalogInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [detail, setDetail] = useState<{
-    id: string;
-    name: string;
-    description?: string | null;
-  }>();
-  const [view, setView] = useState<"detail" | "versions" | "history" | "draft">(
-    "detail",
-  );
+  const navigation = useNavigation<WorkspaceNavigationProp>();
+  const detail = skillPage
+    ? {
+        id: skillPage.skillId,
+        name: skillPage.name,
+        description: skillPage.description,
+      }
+    : undefined;
+  const proposalId = skillPage?.proposalId;
+  const [dirty, setDirty] = useState(false);
   const [versionPage, setVersionPage] = useState(1);
   const [selectedVersion, setSelectedVersion] = useState<SkillVersion>();
   const [testing, setTesting] = useState(false);
   const [confirmDetach, setConfirmDetach] = useState(false);
-  const [proposalId, setProposalId] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
@@ -304,35 +387,20 @@ function AgentSkillsManager({
     enabled: focused && Boolean(detail) && view === "draft",
     retry: false,
   });
-  useEffect(() => {
-    onDetailChange?.(Boolean(detail));
-    return () => onDetailChange?.(false);
-  }, [Boolean(detail), onDetailChange]);
-
   function openSkill(id: string, name: string, description?: string | null) {
-    setDetail({ id, name, description });
-    setView("detail");
-    setSelectedVersion(undefined);
-    setVersionPage(1);
-    setTesting(false);
-    setConfirmDetach(false);
-    setProposalId(undefined);
-    setError(undefined);
-    setNotice(undefined);
+    navigation.push("SkillDetail", {
+      agentId: agent.id,
+      skillId: id,
+      name,
+      description,
+    });
   }
-  function close() {
-    if (!lock.current && !editorLock.current && !busy) setDetail(undefined);
-  }
-  function back() {
-    const action = skillModalBackAction(
-      view !== "detail",
-      lock.current || editorLock.current || busy,
-    );
-    if (action === "close") close();
-    if (action === "parent") {
-      setView("detail");
-      setConfirmDetach(false);
-    }
+  function openView(next: SkillView, proposal?: string) {
+    if (skillPage)
+      navigation.push(skillRoutes[next], {
+        ...skillPage,
+        proposalId: proposal,
+      });
   }
   function editorBusy(value: boolean) {
     editorLock.current = value;
@@ -396,8 +464,9 @@ function AgentSkillsManager({
             ? "Skill status updated."
             : "Exact skill version attached.",
       );
-      if (change.type === "detach") setDetail(undefined);
-      else if (change.type === "attach") setView("detail");
+      if (change.type === "detach") navigation.goBack();
+      else if (change.type === "attach")
+        navigation.popTo("SkillDetail", skillPage!);
     });
   }
   const pins = current.data?.skills ?? [];
@@ -413,582 +482,534 @@ function AgentSkillsManager({
     <View style={styles.stack}>
       {!detail && notice && <Notice tone="success" message={notice} />}
       {!detail && error && <Notice tone="error" message={error} />}
-      <SkillLibrary
-        agentName={titleOf(agent)}
-        tab={libraryTab}
-        onTabChange={setLibraryTab}
-        query={libraryTab === "added" ? addedQuery : catalogInput}
-        onQueryChange={libraryTab === "added" ? setAddedQuery : setCatalogInput}
-        added={{
-          items: pins.map((item) => ({
-            id: item.skill_id,
-            name: item.name,
-            description:
-              current.data?.metadata[item.skill_id]?.description ?? "",
-            version: item.version,
-            disabled: item.disabled,
-          })),
-          known: Boolean(current.data),
-          loading: current.isPending,
-          error: current.isError ? failure(current.error) : undefined,
-          onRetry: () => {
-            void current.refetch();
-          },
-        }}
-        catalog={{
-          items: waitingForQuery ? [] : (catalog.data?.items ?? []),
-          known: !waitingForQuery && Boolean(catalog.data),
-          loading: waitingForQuery || catalog.isPending || catalog.isFetching,
-          error:
-            !waitingForQuery && catalog.isError
-              ? failure(catalog.error)
-              : undefined,
-          onRetry: () => {
-            void catalog.refetch();
-          },
-        }}
-        page={page}
-        totalPages={catalog.data?.total_pages ?? 1}
-        onPageChange={setPage}
-        onOpenSkill={openSkill}
-      />
-      <Modal
-        visible={Boolean(detail)}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={back}
-      >
-        <SafeAreaProvider>
-          <SafeAreaView style={[styles.modal, { backgroundColor: colors.bg }]}>
-            <View style={[styles.modalHeader, { borderColor: colors.border }]}>
-              {view !== "detail" ? (
-                <Pressable
-                  style={styles.iconButton}
-                  accessibilityRole="button"
-                  accessibilityLabel="Back to skill"
-                  disabled={busy}
-                  onPress={back}
-                >
-                  <ChevronLeft size={22} color={colors.textPrimary} />
-                </Pressable>
-              ) : (
-                <View style={styles.iconButton} accessible={false} />
-              )}
-              <Text
-                numberOfLines={1}
-                accessibilityRole="header"
-                style={[styles.modalTitle, { color: colors.textPrimary }]}
-              >
-                {view === "versions"
-                  ? "Skill versions"
-                  : view === "history"
-                    ? "Skill history"
-                    : view === "draft"
-                      ? "Edit skill draft"
-                      : detail?.name}
-              </Text>
-              <Pressable
-                style={styles.iconButton}
-                accessibilityRole="button"
-                accessibilityLabel="Close skill"
+      {!skillPage && (
+        <SkillLibrary
+          agentName={titleOf(agent)}
+          tab={libraryTab}
+          onTabChange={setLibraryTab}
+          query={libraryTab === "added" ? addedQuery : catalogInput}
+          onQueryChange={
+            libraryTab === "added" ? setAddedQuery : setCatalogInput
+          }
+          added={{
+            items: pins.map((item) => ({
+              id: item.skill_id,
+              name: item.name,
+              description:
+                current.data?.metadata[item.skill_id]?.description ?? "",
+              version: item.version,
+              disabled: item.disabled,
+            })),
+            known: Boolean(current.data),
+            loading: current.isPending,
+            error: current.isError ? failure(current.error) : undefined,
+            onRetry: () => {
+              void current.refetch();
+            },
+          }}
+          catalog={{
+            items: waitingForQuery ? [] : (catalog.data?.items ?? []),
+            known: !waitingForQuery && Boolean(catalog.data),
+            loading: waitingForQuery || catalog.isPending || catalog.isFetching,
+            error:
+              !waitingForQuery && catalog.isError
+                ? failure(catalog.error)
+                : undefined,
+            onRetry: () => {
+              void catalog.refetch();
+            },
+          }}
+          page={page}
+          totalPages={catalog.data?.total_pages ?? 1}
+          onPageChange={setPage}
+          onOpenSkill={openSkill}
+        />
+      )}
+      {skillPage && (
+        <View style={styles.stack}>
+          <SkillPageGuard
+            busy={busy}
+            dirty={dirty}
+            confirmDetach={confirmDetach}
+            onBack={() =>
+              confirmDetach ? setConfirmDetach(false) : navigation.goBack()
+            }
+          />
+          {error && (
+            <>
+              <Notice tone="error" message={error} />
+              <ActionButton
+                label="Reload current skills"
+                variant="secondary"
                 disabled={busy}
-                onPress={close}
-              >
-                <X size={21} color={colors.textSecondary} />
-              </Pressable>
-            </View>
-            <ScrollView
-              keyboardShouldPersistTaps="handled"
-              automaticallyAdjustKeyboardInsets
-              contentContainerStyle={styles.modalContent}
-            >
-              {error && (
+                onPress={() => void refresh().then(() => setError(undefined))}
+              />
+            </>
+          )}
+          {notice && <Notice tone="success" message={notice} />}
+          {view === "detail" && detail && (
+            <>
+              <View style={styles.detailIdentity}>
+                <View
+                  style={[
+                    styles.icon,
+                    { backgroundColor: colors.primaryTone.bg },
+                  ]}
+                >
+                  <BookOpen size={26} color={colors.primaryOnTint} />
+                </View>
+                <View style={styles.flex}>
+                  <Label style={styles.cardTitle}>{detail.name}</Label>
+                  <Label muted>
+                    {pin ? `Attached to ${titleOf(agent)}` : "Ornn catalog"}
+                  </Label>
+                </View>
+              </View>
+              {(metadata?.description ?? detail.description) && (
+                <Label muted>
+                  {metadata?.description ?? detail.description}
+                </Label>
+              )}
+              <Card>
+                <Label muted style={styles.caption}>
+                  Pinned version
+                </Label>
+                <Label mono>{pin?.version ?? "Not attached"}</Label>
+                {pin && (
+                  <Label muted style={styles.caption}>
+                    {metadata?.size_bytes !== undefined
+                      ? `${metadata.size_bytes.toLocaleString()} bytes · `
+                      : ""}
+                    {pin.dependencies.length} pinned dependencies
+                  </Label>
+                )}
+              </Card>
+              {pin?.disabled && (
+                <Notice
+                  message={
+                    canDisable
+                      ? "Enable this skill before updating its version. Changing a version will never turn it on automatically."
+                      : "This skill is disabled. Version updates require it to be enabled first; enabling is unavailable for your current rollout."
+                  }
+                />
+              )}
+              <ActionButton
+                label={pin ? "Choose exact version" : "Attach exact version"}
+                variant="secondary"
+                disabled={busy || !current.data}
+                onPress={() => {
+                  openView("versions");
+                  setVersionPage(1);
+                  setSelectedVersion(undefined);
+                }}
+              />
+              {pin && (
                 <>
-                  <Notice tone="error" message={error} />
+                  <Card>
+                    <Label>Test attached skill</Label>
+                    <Label muted style={styles.caption}>
+                      Read the exact package this agent uses.
+                    </Label>
+                    <ActionButton
+                      label={
+                        tested.isFetching && testing
+                          ? "Testing attached skill…"
+                          : "Read pinned package"
+                      }
+                      variant="secondary"
+                      loading={testing && tested.isFetching}
+                      disabled={busy}
+                      onPress={() => {
+                        if (testing) void tested.refetch();
+                        else setTesting(true);
+                      }}
+                    />
+                    {testing && tested.isError && (
+                      <Notice
+                        tone="error"
+                        message={`Test failed: ${failure(tested.error)}`}
+                      />
+                    )}
+                    {testing &&
+                      tested.data &&
+                      !tested.isFetching &&
+                      !tested.isError && (
+                        <>
+                          <Notice
+                            tone={tested.data.readable ? "success" : "info"}
+                            message={
+                              tested.data.readable
+                                ? `Test passed: the agent reads ${tested.data.name} ${tested.data.version} (${tested.data.size_bytes.toLocaleString()} bytes).`
+                                : `${tested.data.name} ${tested.data.version} is disabled, so the agent does not read it.`
+                            }
+                          />
+                          {tested.data.excerpt ? (
+                            <Label
+                              selectable
+                              mono
+                              style={[
+                                styles.excerpt,
+                                { backgroundColor: colors.cardSoft },
+                              ]}
+                            >
+                              {tested.data.excerpt}
+                            </Label>
+                          ) : null}
+                        </>
+                      )}
+                  </Card>
+                  {canDisable && (
+                    <Card>
+                      <View style={styles.row}>
+                        <View style={styles.flex}>
+                          <Label>{pin.disabled ? "Disabled" : "Enabled"}</Label>
+                          <Label muted style={styles.caption}>
+                            Use this skill in future agent turns
+                          </Label>
+                        </View>
+                        <Switch
+                          accessibilityLabel={`Use ${pin.name}`}
+                          value={!pin.disabled}
+                          disabled={busy || !current.data}
+                          onValueChange={(enabled) =>
+                            void change({
+                              type: "toggle",
+                              skillId: pin.skill_id,
+                              disabled: !enabled,
+                            })
+                          }
+                        />
+                      </View>
+                    </Card>
+                  )}
+                  {canImprove && (
+                    <Card>
+                      <Label>Edit / improve skill</Label>
+                      <Label muted style={styles.caption}>
+                        Edit a copy. The current attached version stays in use
+                        until you publish from its confirmation card.
+                      </Label>
+                      <ActionButton
+                        label="Review draft"
+                        variant="secondary"
+                        loading={busy}
+                        onPress={() =>
+                          void run(async () => {
+                            const result = await api.improve(
+                              agent.id,
+                              pin.skill_id,
+                            );
+                            openView("draft", result.proposal_id);
+                            await client.invalidateQueries({
+                              queryKey: [...ROOT, "proposals", agent.id],
+                            });
+                          })
+                        }
+                      />
+                    </Card>
+                  )}
                   <ActionButton
-                    label="Reload current skills"
+                    label="Skill history"
                     variant="secondary"
                     disabled={busy}
-                    onPress={() =>
-                      void refresh().then(() => setError(undefined))
-                    }
+                    onPress={() => openView("history")}
                   />
-                </>
-              )}
-              {notice && <Notice tone="success" message={notice} />}
-              {view === "detail" && detail && (
-                <>
-                  <View style={styles.detailIdentity}>
-                    <View
-                      style={[
-                        styles.icon,
-                        { backgroundColor: colors.primaryTone.bg },
-                      ]}
-                    >
-                      <BookOpen size={26} color={colors.primaryOnTint} />
-                    </View>
-                    <View style={styles.flex}>
-                      <Label style={styles.cardTitle}>{detail.name}</Label>
-                      <Label muted>
-                        {pin ? `Attached to ${titleOf(agent)}` : "Ornn catalog"}
-                      </Label>
-                    </View>
-                  </View>
-                  {(metadata?.description ?? detail.description) && (
-                    <Label muted>
-                      {metadata?.description ?? detail.description}
-                    </Label>
-                  )}
-                  <Card>
-                    <Label muted style={styles.caption}>
-                      Pinned version
-                    </Label>
-                    <Label mono>{pin?.version ?? "Not attached"}</Label>
-                    {pin && (
-                      <Label muted style={styles.caption}>
-                        {metadata?.size_bytes !== undefined
-                          ? `${metadata.size_bytes.toLocaleString()} bytes · `
-                          : ""}
-                        {pin.dependencies.length} pinned dependencies
-                      </Label>
-                    )}
-                  </Card>
-                  {pin?.disabled && (
-                    <Notice
-                      message={
-                        canDisable
-                          ? "Enable this skill before updating its version. Changing a version will never turn it on automatically."
-                          : "This skill is disabled. Version updates require it to be enabled first; enabling is unavailable for your current rollout."
-                      }
-                    />
-                  )}
-                  <ActionButton
-                    label={
-                      pin ? "Choose exact version" : "Attach exact version"
-                    }
-                    variant="secondary"
-                    disabled={busy || !current.data}
-                    onPress={() => {
-                      setView("versions");
-                      setVersionPage(1);
-                      setSelectedVersion(undefined);
-                    }}
-                  />
-                  {pin && (
-                    <>
-                      <Card>
-                        <Label>Test attached skill</Label>
-                        <Label muted style={styles.caption}>
-                          Read the exact package this agent uses.
-                        </Label>
-                        <ActionButton
-                          label={
-                            tested.isFetching && testing
-                              ? "Testing attached skill…"
-                              : "Read pinned package"
-                          }
-                          variant="secondary"
-                          loading={testing && tested.isFetching}
-                          disabled={busy}
-                          onPress={() => {
-                            if (testing) void tested.refetch();
-                            else setTesting(true);
-                          }}
-                        />
-                        {testing && tested.isError && (
-                          <Notice
-                            tone="error"
-                            message={`Test failed: ${failure(tested.error)}`}
-                          />
-                        )}
-                        {testing &&
-                          tested.data &&
-                          !tested.isFetching &&
-                          !tested.isError && (
-                            <>
-                              <Notice
-                                tone={tested.data.readable ? "success" : "info"}
-                                message={
-                                  tested.data.readable
-                                    ? `Test passed: the agent reads ${tested.data.name} ${tested.data.version} (${tested.data.size_bytes.toLocaleString()} bytes).`
-                                    : `${tested.data.name} ${tested.data.version} is disabled, so the agent does not read it.`
-                                }
-                              />
-                              {tested.data.excerpt ? (
-                                <Label
-                                  selectable
-                                  mono
-                                  style={[
-                                    styles.excerpt,
-                                    { backgroundColor: colors.cardSoft },
-                                  ]}
-                                >
-                                  {tested.data.excerpt}
-                                </Label>
-                              ) : null}
-                            </>
-                          )}
-                      </Card>
-                      {canDisable && (
-                        <Card>
-                          <View style={styles.row}>
-                            <View style={styles.flex}>
-                              <Label>
-                                {pin.disabled ? "Disabled" : "Enabled"}
-                              </Label>
-                              <Label muted style={styles.caption}>
-                                Use this skill in future agent turns
-                              </Label>
-                            </View>
-                            <Switch
-                              accessibilityLabel={`Use ${pin.name}`}
-                              value={!pin.disabled}
-                              disabled={busy || !current.data}
-                              onValueChange={(enabled) =>
-                                void change({
-                                  type: "toggle",
-                                  skillId: pin.skill_id,
-                                  disabled: !enabled,
-                                })
-                              }
-                            />
-                          </View>
-                        </Card>
-                      )}
-                      {canImprove && (
-                        <Card>
-                          <Label>Edit / improve skill</Label>
-                          <Label muted style={styles.caption}>
-                            Edit a copy. The current attached version stays in
-                            use until you publish from its confirmation card.
-                          </Label>
-                          <ActionButton
-                            label="Review draft"
-                            variant="secondary"
-                            loading={busy}
-                            onPress={() =>
-                              void run(async () => {
-                                const result = await api.improve(
-                                  agent.id,
-                                  pin.skill_id,
-                                );
-                                setProposalId(result.proposal_id);
-                                setView("draft");
-                                await client.invalidateQueries({
-                                  queryKey: [...ROOT, "proposals", agent.id],
-                                });
-                              })
-                            }
-                          />
-                        </Card>
-                      )}
+                  {confirmDetach ? (
+                    <Card>
+                      <Notice
+                        message={`Detach ${pin.name} from ${titleOf(agent)}? Other attached skills stay in place.`}
+                      />
                       <ActionButton
-                        label="Skill history"
+                        label="Confirm detach skill"
+                        variant="danger"
+                        loading={busy}
+                        onPress={() =>
+                          void change({
+                            type: "detach",
+                            skillId: pin.skill_id,
+                          })
+                        }
+                      />
+                      <ActionButton
+                        label="Cancel"
                         variant="secondary"
                         disabled={busy}
-                        onPress={() => setView("history")}
+                        onPress={() => setConfirmDetach(false)}
                       />
-                      {confirmDetach ? (
-                        <Card>
-                          <Notice
-                            message={`Detach ${pin.name} from ${titleOf(agent)}? Other attached skills stay in place.`}
-                          />
-                          <ActionButton
-                            label="Confirm detach skill"
-                            variant="danger"
-                            loading={busy}
-                            onPress={() =>
-                              void change({
-                                type: "detach",
-                                skillId: pin.skill_id,
-                              })
-                            }
-                          />
-                          <ActionButton
-                            label="Cancel"
-                            variant="secondary"
-                            disabled={busy}
-                            onPress={() => setConfirmDetach(false)}
-                          />
-                        </Card>
-                      ) : (
-                        <ActionButton
-                          label="Detach skill"
-                          variant="danger"
-                          disabled={busy || !current.data}
-                          onPress={() => setConfirmDetach(true)}
-                        />
-                      )}
-                    </>
-                  )}
-                </>
-              )}
-              {view === "versions" && detail && (
-                <>
-                  <Label muted>
-                    Choose a literal version of {detail.name}. Attaching
-                    external guidance changes how {titleOf(agent)} works.
-                  </Label>
-                  {versions.isFetching && (
-                    <ActivityIndicator
-                      accessibilityLabel="Loading skill versions"
-                      color={colors.primary}
-                    />
-                  )}
-                  {versions.isError && (
-                    <>
-                      <Notice tone="error" message={failure(versions.error)} />
-                      <ActionButton
-                        label="Retry versions"
-                        variant="secondary"
-                        onPress={() => void versions.refetch()}
-                      />
-                    </>
-                  )}
-                  {versions.data?.items.length === 0 && (
-                    <Label muted>
-                      No published versions are visible through your Ornn
-                      access.
-                    </Label>
-                  )}
-                  {versions.data?.items.map((item) => (
-                    <Pressable
-                      key={item.version}
-                      accessibilityRole="radio"
-                      accessibilityState={{
-                        checked: selectedVersion?.version === item.version,
-                      }}
-                      accessibilityLabel={`Select version ${item.version}${item.deprecated ? ", deprecated" : ""}`}
-                      disabled={busy}
-                      onPress={() => setSelectedVersion(item)}
-                      style={[
-                        styles.versionRow,
-                        {
-                          backgroundColor: colors.card,
-                          borderColor:
-                            selectedVersion?.version === item.version
-                              ? colors.primary
-                              : colors.border,
-                        },
-                      ]}
-                    >
-                      <View style={styles.flex}>
-                        <Label mono>{item.version}</Label>
-                        <Label muted style={styles.caption}>
-                          {item.deprecated
-                            ? "Deprecated version"
-                            : pin?.version === item.version
-                              ? "Current pinned version"
-                              : "Published version"}
-                        </Label>
-                      </View>
-                      {selectedVersion?.version === item.version && (
-                        <Check color={colors.primary} size={20} />
-                      )}
-                    </Pressable>
-                  ))}
-                  {versions.data && versions.data.total_pages > 1 && (
-                    <Pagination
-                      page={versionPage}
-                      total={versions.data.total_pages}
-                      disabled={busy || versions.isFetching}
-                      onChange={(value) => {
-                        setVersionPage(value);
-                        setSelectedVersion(undefined);
-                      }}
-                    />
-                  )}
-                  {selectedVersion && preview.isFetching && (
-                    <Label muted>Verifying package…</Label>
-                  )}
-                  {preview.isError && (
-                    <>
-                      <Notice tone="error" message={failure(preview.error)} />
-                      <ActionButton
-                        label="Retry package preview"
-                        variant="secondary"
-                        onPress={() => void preview.refetch()}
-                      />
-                    </>
-                  )}
-                  {preview.data && selectedVersion && !preview.isFetching && (
-                    <Card>
-                      <Label muted>{preview.data.description}</Label>
-                      <Label muted style={styles.caption}>
-                        {preview.data.size_bytes.toLocaleString()} bytes ·{" "}
-                        {preview.data.reference.dependencies.length} pinned
-                        dependencies
-                      </Label>
-                      <Label mono style={styles.caption} selectable>
-                        Skill ID: {preview.data.reference.skill_id}
-                      </Label>
-                      <Label mono style={styles.caption} selectable>
-                        SHA-256: {preview.data.reference.sha256}
-                      </Label>
-                      {selectedVersion.deprecated && (
-                        <Notice message="This version is deprecated. Choose a supported version unless you intentionally need this exact package." />
-                      )}
                     </Card>
-                  )}
-                  <ActionButton
-                    label={pin ? "Update exact version" : "Attach skill"}
-                    loading={busy}
-                    disabled={
-                      !current.data ||
-                      Boolean(pin?.disabled) ||
-                      !selectedVersion ||
-                      !preview.data ||
-                      preview.isFetching ||
-                      (!pin && pins.length >= 16) ||
-                      Boolean(
-                        pin &&
-                          preview.data &&
-                          pin.version === preview.data.reference.version &&
-                          pin.sha256 === preview.data.reference.sha256,
-                      )
-                    }
-                    onPress={() => {
-                      if (detail && selectedVersion && preview.data)
-                        void change({
-                          type: "attach",
-                          skillId: detail.id,
-                          selected: selectedVersion,
-                          preview: preview.data,
-                        });
-                    }}
-                  />
-                  {pin?.disabled && (
-                    <Notice message="Enable this skill from its details before updating its exact version." />
-                  )}
-                  {!pin && pins.length >= 16 && (
-                    <Notice message="This agent already has 16 skills. Detach one before attaching another." />
-                  )}
-                </>
-              )}
-              {view === "history" && (
-                <>
-                  {history.isFetching && (
-                    <ActivityIndicator
-                      accessibilityLabel="Loading skill history"
-                      color={colors.primary}
-                    />
-                  )}
-                  {history.isError && (
-                    <>
-                      <Notice tone="error" message={failure(history.error)} />
-                      <ActionButton
-                        label="Retry skill history"
-                        variant="secondary"
-                        onPress={() => void history.refetch()}
-                      />
-                    </>
-                  )}
-                  {history.data?.items.length === 0 && (
-                    <Label muted>No skill history yet.</Label>
-                  )}
-                  {history.data?.items.map((item) => (
-                    <Card key={item.id}>
-                      <Label>
-                        {SKILL_HISTORY_LABELS[item.event_type] ??
-                          "Skill activity"}
-                      </Label>
-                      <Label muted style={styles.caption}>
-                        {new Date(item.created_at).toLocaleString()}
-                        {item.revision !== null
-                          ? ` · Revision ${item.revision}`
-                          : ""}
-                      </Label>
-                      {item.skills.map((skill) => (
-                        <Label key={skill.skill_id} muted>
-                          {skill.name} · {skill.version}
-                          {skill.disabled ? " · Disabled" : ""}
-                        </Label>
-                      ))}
-                    </Card>
-                  ))}
-                </>
-              )}
-              {view === "draft" && (
-                <>
-                  {proposals.isFetching && (
-                    <ActivityIndicator
-                      accessibilityLabel="Loading skill draft"
-                      color={colors.primary}
-                    />
-                  )}
-                  {proposals.isError && (
-                    <>
-                      <Notice tone="error" message={failure(proposals.error)} />
-                      <ActionButton
-                        label="Retry skill draft"
-                        variant="secondary"
-                        onPress={() => void proposals.refetch()}
-                      />
-                    </>
-                  )}
-                  {proposal?.draft ? (
-                    <SkillDraftEditor
-                      key={`${proposal.id}:${proposal.revision}`}
-                      agentId={agent.id}
-                      proposal={proposal}
-                      disabled={
-                        !focused ||
-                        current.isError ||
-                        proposals.isError ||
-                        proposals.isFetching ||
-                        agent.can_maintain === false ||
-                        agent.status === "destroyed"
-                      }
-                      onBusy={editorBusy}
-                      onSaved={() =>
-                        client.invalidateQueries({
-                          queryKey: [...ROOT, "proposals", agent.id],
-                        })
-                      }
-                    />
                   ) : (
-                    !proposals.isFetching &&
-                    !proposals.isError && (
-                      <Notice message="This draft is no longer available." />
-                    )
-                  )}
-                  {proposal?.card_conversation_id && onOpenChat && (
                     <ActionButton
-                      label="Open the confirmation card"
-                      variant="secondary"
-                      loading={busy}
-                      onPress={() =>
-                        void run(async () => {
-                          const conversationId = proposal.card_conversation_id!;
-                          const cardHistory =
-                            await assistantApi.history(conversationId);
-                          const cardAgentId =
-                            cardHistory.conversation.agent?.id;
-                          if (!cardAgentId)
-                            throw new Error(
-                              "The confirmation's agent could not be resolved. Reload the draft and try again.",
-                            );
-                          if (authEpoch.current !== getAuthEpoch())
-                            throw new Error(
-                              "Your account session changed. Reopen Plugins to continue.",
-                            );
-                          setDetail(undefined);
-                          onOpenChat({
-                            agentId: cardAgentId,
-                            conversationId,
-                            acknowledgementId:
-                              proposal.acknowledgement_id ?? undefined,
-                          });
-                        })
-                      }
+                      label="Detach skill"
+                      variant="danger"
+                      disabled={busy || !current.data}
+                      onPress={() => setConfirmDetach(true)}
                     />
                   )}
                 </>
               )}
-            </ScrollView>
-          </SafeAreaView>
-        </SafeAreaProvider>
-      </Modal>
+            </>
+          )}
+          {view === "versions" && detail && (
+            <>
+              <Label muted>
+                Choose a literal version of {detail.name}. Attaching external
+                guidance changes how {titleOf(agent)} works.
+              </Label>
+              {versions.isFetching && (
+                <ActivityIndicator
+                  accessibilityLabel="Loading skill versions"
+                  color={colors.primary}
+                />
+              )}
+              {versions.isError && (
+                <>
+                  <Notice tone="error" message={failure(versions.error)} />
+                  <ActionButton
+                    label="Retry versions"
+                    variant="secondary"
+                    onPress={() => void versions.refetch()}
+                  />
+                </>
+              )}
+              {versions.data?.items.length === 0 && (
+                <Label muted>
+                  No published versions are visible through your Ornn access.
+                </Label>
+              )}
+              {versions.data?.items.map((item) => (
+                <Pressable
+                  key={item.version}
+                  accessibilityRole="radio"
+                  accessibilityState={{
+                    checked: selectedVersion?.version === item.version,
+                  }}
+                  accessibilityLabel={`Select version ${item.version}${item.deprecated ? ", deprecated" : ""}`}
+                  disabled={busy}
+                  onPress={() => setSelectedVersion(item)}
+                  style={[
+                    styles.versionRow,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor:
+                        selectedVersion?.version === item.version
+                          ? colors.primary
+                          : colors.border,
+                    },
+                  ]}
+                >
+                  <View style={styles.flex}>
+                    <Label mono>{item.version}</Label>
+                    <Label muted style={styles.caption}>
+                      {item.deprecated
+                        ? "Deprecated version"
+                        : pin?.version === item.version
+                          ? "Current pinned version"
+                          : "Published version"}
+                    </Label>
+                  </View>
+                  {selectedVersion?.version === item.version && (
+                    <Check color={colors.primary} size={20} />
+                  )}
+                </Pressable>
+              ))}
+              {versions.data && versions.data.total_pages > 1 && (
+                <Pagination
+                  page={versionPage}
+                  total={versions.data.total_pages}
+                  disabled={busy || versions.isFetching}
+                  onChange={(value) => {
+                    setVersionPage(value);
+                    setSelectedVersion(undefined);
+                  }}
+                />
+              )}
+              {selectedVersion && preview.isFetching && (
+                <Label muted>Verifying package…</Label>
+              )}
+              {preview.isError && (
+                <>
+                  <Notice tone="error" message={failure(preview.error)} />
+                  <ActionButton
+                    label="Retry package preview"
+                    variant="secondary"
+                    onPress={() => void preview.refetch()}
+                  />
+                </>
+              )}
+              {preview.data && selectedVersion && !preview.isFetching && (
+                <Card>
+                  <Label muted>{preview.data.description}</Label>
+                  <Label muted style={styles.caption}>
+                    {preview.data.size_bytes.toLocaleString()} bytes ·{" "}
+                    {preview.data.reference.dependencies.length} pinned
+                    dependencies
+                  </Label>
+                  <Label mono style={styles.caption} selectable>
+                    Skill ID: {preview.data.reference.skill_id}
+                  </Label>
+                  <Label mono style={styles.caption} selectable>
+                    SHA-256: {preview.data.reference.sha256}
+                  </Label>
+                  {selectedVersion.deprecated && (
+                    <Notice message="This version is deprecated. Choose a supported version unless you intentionally need this exact package." />
+                  )}
+                </Card>
+              )}
+              <ActionButton
+                label={pin ? "Update exact version" : "Attach skill"}
+                loading={busy}
+                disabled={
+                  !current.data ||
+                  Boolean(pin?.disabled) ||
+                  !selectedVersion ||
+                  !preview.data ||
+                  preview.isFetching ||
+                  (!pin && pins.length >= 16) ||
+                  Boolean(
+                    pin &&
+                      preview.data &&
+                      pin.version === preview.data.reference.version &&
+                      pin.sha256 === preview.data.reference.sha256,
+                  )
+                }
+                onPress={() => {
+                  if (detail && selectedVersion && preview.data)
+                    void change({
+                      type: "attach",
+                      skillId: detail.id,
+                      selected: selectedVersion,
+                      preview: preview.data,
+                    });
+                }}
+              />
+              {pin?.disabled && (
+                <Notice message="Enable this skill from its details before updating its exact version." />
+              )}
+              {!pin && pins.length >= 16 && (
+                <Notice message="This agent already has 16 skills. Detach one before attaching another." />
+              )}
+            </>
+          )}
+          {view === "history" && (
+            <>
+              {history.isFetching && (
+                <ActivityIndicator
+                  accessibilityLabel="Loading skill history"
+                  color={colors.primary}
+                />
+              )}
+              {history.isError && (
+                <>
+                  <Notice tone="error" message={failure(history.error)} />
+                  <ActionButton
+                    label="Retry skill history"
+                    variant="secondary"
+                    onPress={() => void history.refetch()}
+                  />
+                </>
+              )}
+              {history.data?.items.length === 0 && (
+                <Label muted>No skill history yet.</Label>
+              )}
+              {history.data?.items.map((item) => (
+                <Card key={item.id}>
+                  <Label>
+                    {SKILL_HISTORY_LABELS[item.event_type] ?? "Skill activity"}
+                  </Label>
+                  <Label muted style={styles.caption}>
+                    {new Date(item.created_at).toLocaleString()}
+                    {item.revision !== null
+                      ? ` · Revision ${item.revision}`
+                      : ""}
+                  </Label>
+                  {item.skills.map((skill) => (
+                    <Label key={skill.skill_id} muted>
+                      {skill.name} · {skill.version}
+                      {skill.disabled ? " · Disabled" : ""}
+                    </Label>
+                  ))}
+                </Card>
+              ))}
+            </>
+          )}
+          {view === "draft" && (
+            <>
+              {proposals.isFetching && (
+                <ActivityIndicator
+                  accessibilityLabel="Loading skill draft"
+                  color={colors.primary}
+                />
+              )}
+              {proposals.isError && (
+                <>
+                  <Notice tone="error" message={failure(proposals.error)} />
+                  <ActionButton
+                    label="Retry skill draft"
+                    variant="secondary"
+                    onPress={() => void proposals.refetch()}
+                  />
+                </>
+              )}
+              {proposal?.draft ? (
+                <SkillDraftEditor
+                  key={`${proposal.id}:${proposal.revision}`}
+                  agentId={agent.id}
+                  proposal={proposal}
+                  disabled={
+                    !focused ||
+                    current.isError ||
+                    proposals.isError ||
+                    proposals.isFetching ||
+                    agent.can_maintain === false ||
+                    agent.status === "destroyed"
+                  }
+                  onBusy={editorBusy}
+                  onDirty={setDirty}
+                  onSaved={() =>
+                    client.invalidateQueries({
+                      queryKey: [...ROOT, "proposals", agent.id],
+                    })
+                  }
+                />
+              ) : (
+                !proposals.isFetching &&
+                !proposals.isError && (
+                  <Notice message="This draft is no longer available." />
+                )
+              )}
+              {proposal?.card_conversation_id && onOpenChat && (
+                <ActionButton
+                  label="Open the confirmation card"
+                  variant="secondary"
+                  loading={busy}
+                  onPress={() =>
+                    void run(async () => {
+                      const conversationId = proposal.card_conversation_id!;
+                      const cardHistory =
+                        await assistantApi.history(conversationId);
+                      const cardAgentId = cardHistory.conversation.agent?.id;
+                      if (!cardAgentId)
+                        throw new Error(
+                          "The confirmation's agent could not be resolved. Reload the draft and try again.",
+                        );
+                      if (authEpoch.current !== getAuthEpoch())
+                        throw new Error(
+                          "Your account session changed. Reopen Plugins to continue.",
+                        );
+                      onOpenChat({
+                        agentId: cardAgentId,
+                        conversationId,
+                        acknowledgementId:
+                          proposal.acknowledgement_id ?? undefined,
+                      });
+                    })
+                  }
+                />
+              )}
+            </>
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -998,12 +1019,14 @@ export function SkillDraftEditor({
   proposal,
   disabled = false,
   onBusy,
+  onDirty,
   onSaved,
 }: {
   agentId: string;
   proposal: SkillProposal;
   disabled?: boolean;
   onBusy: (busy: boolean) => void;
+  onDirty?: (dirty: boolean) => void;
   onSaved: () => Promise<unknown>;
 }) {
   const [draft, setDraft] = useState<SkillDraft>(() => ({
@@ -1049,6 +1072,9 @@ export function SkillDraftEditor({
       unsubscribe();
     };
   }, []);
+  useEffect(() => {
+    onDirty?.(JSON.stringify(draft) !== JSON.stringify(proposal.draft));
+  }, [draft, proposal.draft, onDirty]);
   function update(next: SkillDraft) {
     setDraft(next);
     setValidBytes(undefined);
@@ -1089,6 +1115,7 @@ export function SkillDraftEditor({
       setValidBytes(result.bytes);
       if (save) {
         setSaved(true);
+        onDirty?.(false);
         await onSaved();
       }
     } catch (cause) {
@@ -1235,29 +1262,6 @@ export function SkillDraftEditor({
   );
 }
 
-function SectionHeading({
-  children,
-  right,
-}: {
-  children: ReactNode;
-  right?: string;
-}) {
-  const { colors } = useTheme();
-  return (
-    <View style={styles.row}>
-      <Text
-        style={[styles.section, styles.flex, { color: colors.textSecondary }]}
-      >
-        {children}
-      </Text>
-      {right && (
-        <Label muted mono style={styles.caption}>
-          {right}
-        </Label>
-      )}
-    </View>
-  );
-}
 function Pagination({
   page,
   total,
@@ -1317,29 +1321,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  modal: { flex: 1 },
-  modalHeader: {
-    minHeight: 56,
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 8,
-  },
-  iconButton: {
-    minWidth: 44,
-    minHeight: 44,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  modalTitle: {
-    fontFamily: fonts.bodySemi,
-    fontSize: 17,
-    lineHeight: 24,
-    flex: 1,
-    textAlign: "center",
-  },
-  modalContent: { padding: 20, gap: 16, paddingBottom: 40 },
   detailIdentity: { flexDirection: "row", alignItems: "center", gap: 14 },
   excerpt: { padding: 12, borderRadius: 8, fontSize: 11, lineHeight: 18 },
   versionRow: {

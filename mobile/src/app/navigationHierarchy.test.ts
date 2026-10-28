@@ -55,6 +55,31 @@ const mainEntries = [
   ["GroupEditor", { groupId: "crew" }],
   ["ServiceSetup", { catalogSlug: "docs" }],
   ["AgentSkills", { agentId: "agent" }],
+  ...(
+    ["SkillDetail", "SkillVersions", "SkillHistory", "SkillDraft"] as const
+  ).map(
+    (name) =>
+      [
+        name,
+        {
+          agentId: "agent",
+          skillId: "skill",
+          name: "Exact skill",
+          proposalId: "proposal",
+        },
+      ] as const,
+  ),
+  ...(["AuthoredSkillReview", "AuthoredSkillDraft"] as const).map(
+    (name) =>
+      [
+        name,
+        {
+          agentId: "agent",
+          conversationId: "thread",
+          acknowledgementId: "ack",
+        },
+      ] as const,
+  ),
   ["AgentMachines", { agentId: "agent" }],
   ["AgentMachineEditor", { agentId: "agent", machineId: "machine" }],
   ["MachineDetail", { machineId: "machine" }],

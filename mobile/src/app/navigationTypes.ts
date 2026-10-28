@@ -34,6 +34,20 @@ export type WorkspaceParamList = {
     | undefined;
 };
 
+export type SkillPageParams = {
+  agentId: string;
+  skillId: string;
+  name: string;
+  description?: string | null;
+  proposalId?: string;
+};
+
+export type AuthoredSkillPageParams = {
+  agentId: string;
+  conversationId: string;
+  acknowledgementId: string;
+};
+
 type SharedEntryParamList = {
   TermsOfService: undefined;
   PrivacyPolicy: undefined;
@@ -57,6 +71,12 @@ export type WorkspaceContentParamList = Omit<
   GroupEditor: { groupId?: string } | undefined;
   ServiceSetup: { connectionId?: string; catalogSlug?: string };
   AgentSkills: { agentId: string };
+  SkillDetail: SkillPageParams;
+  SkillVersions: SkillPageParams;
+  SkillHistory: SkillPageParams;
+  SkillDraft: SkillPageParams;
+  AuthoredSkillReview: AuthoredSkillPageParams;
+  AuthoredSkillDraft: AuthoredSkillPageParams;
   AgentMachines: { agentId: string };
   AgentMachineEditor: { agentId: string; machineId: string };
   MachineDetail: { machineId: string };
@@ -127,6 +147,12 @@ export const workspaceContentRouteNames: (keyof WorkspaceContentParamList)[] = [
   "GroupEditor",
   "ServiceSetup",
   "AgentSkills",
+  "SkillDetail",
+  "SkillVersions",
+  "SkillHistory",
+  "SkillDraft",
+  "AuthoredSkillReview",
+  "AuthoredSkillDraft",
   "AgentMachines",
   "AgentMachineEditor",
   "MachineDetail",

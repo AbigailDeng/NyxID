@@ -4,7 +4,6 @@ import test from "node:test";
 import { deferred, hookHarness } from "../assistant/assistantHookTestHarness";
 
 type Element = { type: unknown; props: Record<string, any> };
-
 function find(
   root: Element,
   predicate: (element: Element) => boolean,
@@ -15,19 +14,31 @@ function find(
       try {
         return find(child, predicate);
       } catch {
-        // Keep looking through siblings.
+        /* Search siblings. */
       }
     }
   }
   throw new Error("Element not found");
 }
-
-function setup() {
+const params = {
+  agentId: "agent",
+  conversationId: "thread",
+  acknowledgementId: "acknowledgement",
+};
+const acknowledgement = {
+  id: params.acknowledgementId,
+  authored_skill: { agent_id: "agent", proposal_id: "proposal" },
+};
+function setup(kind: "review" | "draft" | "launcher" | "page" = "review") {
   const decision = deferred<unknown>();
-  const query = {
-    isFetching: false,
-    isError: false,
-    refetch: async () => {},
+  const pushed: { name: string; params: unknown }[] = [];
+  let guard: any;
+  const query = { isFetching: false, isError: false, refetch: async () => {} };
+  const history = { acknowledgements: [acknowledgement] };
+  const navigation = {
+    push: (name: string, params: unknown) =>
+      pushed.push(JSON.parse(JSON.stringify({ name, params }))),
+    goBack: () => {},
   };
   const harness = hookHarness<Element>({
     "react/jsx-runtime": {
@@ -39,19 +50,15 @@ function setup() {
         currentState: "active",
         addEventListener: () => ({ remove: () => {} }),
       },
-      Modal: "Modal",
       View: "View",
-      Text: "Text",
-      Pressable: "Pressable",
       ScrollView: "ScrollView",
       ActivityIndicator: "ActivityIndicator",
       StyleSheet: { create: (styles: unknown) => styles },
     },
-    "react-native-safe-area-context": {
-      SafeAreaProvider: "SafeAreaProvider",
-      SafeAreaView: "SafeAreaView",
+    "@react-navigation/native": {
+      useIsFocused: () => true,
+      useNavigation: () => navigation,
     },
-    "@react-navigation/native": { useIsFocused: () => true },
     "@tanstack/react-query": {
       useQueryClient: () => ({ invalidateQueries: async () => {} }),
       useQuery: ({ queryKey }: { queryKey: string[] }) => ({
@@ -71,14 +78,40 @@ function setup() {
             },
       }),
     },
-    "lucide-react-native": { ChevronLeft: "ChevronLeft", X: "X" },
     "../../components/workspace/WorkspaceUI": Object.fromEntries(
-      ["ActionButton", "Card", "Label", "Notice"].map((name) => [name, name]),
+      ["ActionButton", "Card", "Label", "Notice", "WorkspacePage"].map(
+        (name) => [name, name],
+      ),
     ),
+    "../../app/WorkspaceHeader": {
+      useWorkspaceBack: (options: unknown) => {
+        guard = options;
+      },
+    },
+    "../assistant/useAssistant": {
+      useAssistant: (...args: unknown[]) => {
+        assert.deepEqual(args, [
+          "thread",
+          "agent",
+          undefined,
+          "acknowledgement",
+        ]);
+        return {
+          history,
+          online: true,
+          decide: (id: string, choice: string) => {
+            assert.equal(id, "acknowledgement");
+            assert.equal(choice, "allow");
+            return decision.promise;
+          },
+          openConversation: async () => {},
+        };
+      },
+    },
     "../../lib/api/pluginSkillsApi": { pluginSkillsApi: {} },
     "../../lib/auth/authEpoch": { getAuthEpoch: () => 1 },
-    "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
     "../../theme/designTokens": { fonts: {} },
+    "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
     "./PluginSkills": { SkillDraftEditor: "SkillDraftEditor" },
     "./authoredSkillReviewState": {
       AUTHORED_SKILL_ACTIONS: [{ action: "allow", label: "Allow publication" }],
@@ -87,83 +120,94 @@ function setup() {
       authoredSkillActionRequest: () => ({ kind: "decision", choice: "allow" }),
     },
   });
-  const { NativeAuthoredSkillReview } = harness.load(
+  const exports = harness.load(
     fileURLToPath(new URL("./NativeAuthoredSkillReview.tsx", import.meta.url)),
-  ) as { NativeAuthoredSkillReview: (props: unknown) => Element };
-  harness.mount(() =>
-    NativeAuthoredSkillReview({
-      initiallyOpen: true,
-      acknowledgement: {
-        id: "acknowledgement",
-        authored_skill: { agent_id: "agent", proposal_id: "proposal" },
-      },
+  ) as Record<string, (props: any) => Element>;
+  harness.mount(() => {
+    if (kind === "launcher")
+      return exports.NativeAuthoredSkillReview!({
+        acknowledgement,
+        conversationId: "thread",
+      });
+    if (kind === "page")
+      return exports.AuthoredSkillPage!({
+        route: { name: "AuthoredSkillReview", params },
+        navigation,
+      });
+    return exports.AuthoredSkillReviewContent!({
+      acknowledgement,
+      editing: kind === "draft",
+      onEdit: () => navigation.push("AuthoredSkillDraft", params),
       onDecision: () => decision.promise,
-    }),
-  );
-  const modal = () => find(harness.flush(), (item) => item.type === "Modal");
+    });
+  });
   return {
     harness,
     decision,
-    modal,
+    pushed,
+    history,
+    guard: () => {
+      harness.flush();
+      return guard;
+    },
     button: (label: string) =>
-      find(harness.flush(), (item) => item.props.label === label),
-    header: (label: string) =>
-      find(harness.flush(), (item) => item.props.accessibilityLabel === label),
+      find(harness.flush(), (row) => row.props.label === label),
     editor: () =>
-      find(harness.flush(), (item) => item.type === "SkillDraftEditor"),
+      find(harness.flush(), (row) => row.type === "SkillDraftEditor"),
+    content: () =>
+      find(
+        harness.flush(),
+        (row) => row.type === exports.AuthoredSkillReviewContent,
+      ),
   };
 }
 
-test("Android modal Back in authored Edit returns to the confirmation first", () => {
-  const env = setup();
-  env.header("Close skill confirmation");
-  assert.throws(() => env.header("Back to chat"), /Element not found/);
-  env.button("Edit before publishing").props.onPress();
-  env.header("Back to skill confirmation");
-  env.modal().props.onRequestClose();
-  assert.equal(env.modal().props.visible, true);
-  env.header("Close skill confirmation");
-  assert.throws(
-    () => env.header("Back to skill confirmation"),
-    /Element not found/,
-  );
-  env.modal().props.onRequestClose();
-  assert.equal(env.modal().props.visible, false);
+test("the in-chat skill launcher pushes the exact serializable review route", () => {
+  const env = setup("launcher");
+  env.button("Review skill draft").props.onPress();
+  assert.deepEqual(env.pushed, [{ name: "AuthoredSkillReview", params }]);
   env.harness.unmount();
 });
-
-test("editor submission blocks modal Back synchronously, before the busy render", () => {
+test("Edit pushes a child draft page and leaves the review content in place", () => {
   const env = setup();
   env.button("Edit before publishing").props.onPress();
-  const modal = env.modal();
-  const editor = env.editor();
-  editor.props.onBusy(true);
-  modal.props.onRequestClose();
-  assert.equal(env.modal().props.visible, true);
-  assert.equal(env.header("Back to skill confirmation").props.disabled, true);
-  editor.props.onBusy(false);
-  env.modal().props.onRequestClose();
-  env.header("Close skill confirmation");
-  assert.throws(
-    () => env.header("Back to skill confirmation"),
-    /Element not found/,
-  );
-  assert.equal(env.modal().props.visible, true);
+  assert.deepEqual(env.pushed, [{ name: "AuthoredSkillDraft", params }]);
+  assert.equal(env.guard().defaultRole, "back");
+  assert.equal(env.guard().active, false);
   env.harness.unmount();
 });
-
-test("an in-flight publication blocks Back and Close until its response refresh settles", async () => {
+test("dirty drafts use the shared discard guard and submissions block leaving", () => {
+  const env = setup("draft");
+  env.editor().props.onDirty(true);
+  assert.equal(
+    env.guard().discardOnClose.title,
+    "Discard skill draft changes?",
+  );
+  env.editor().props.onBusy(true);
+  assert.equal(env.guard().disabled, true);
+  env.editor().props.onBusy(false);
+  assert.equal(env.guard().disabled, false);
+  env.editor().props.onDirty(false);
+  assert.equal(env.guard().discardOnClose, undefined);
+  env.harness.unmount();
+});
+test("publication guards Back and navigation until decision and refresh settle", async () => {
   const env = setup();
-  const modal = env.modal();
-  const close = env.header("Close skill confirmation");
   env.button("Allow publication").props.onPress();
-  modal.props.onRequestClose();
-  close.props.onPress();
-  assert.equal(env.modal().props.visible, true);
-  assert.equal(env.header("Close skill confirmation").props.disabled, true);
+  assert.equal(env.guard().disabled, true);
   env.decision.resolve(undefined);
   await env.harness.settle();
-  env.modal().props.onRequestClose();
-  assert.equal(env.modal().props.visible, false);
+  assert.equal(env.guard().disabled, false);
+  env.harness.unmount();
+});
+test("review page resolves its acknowledgement from authoritative history and keeps the existing decision path", async () => {
+  const env = setup("page");
+  assert.equal(env.content().props.acknowledgement, acknowledgement);
+  const operation = env.content().props.onDecision("allow");
+  env.decision.resolve(undefined);
+  await operation;
+  env.history.acknowledgements = [];
+  env.harness.render();
+  assert.throws(() => env.content(), /Element not found/);
   env.harness.unmount();
 });

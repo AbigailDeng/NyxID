@@ -98,7 +98,7 @@ function setup() {
   });
   const screen = h.load(
     fileURLToPath(new URL("./ActivityDetailScreen.tsx", import.meta.url)),
-  ).ActivityDetailScreen;
+  ).ActivityDetailScreen as (props: unknown) => Element;
   h.mount(() =>
     screen({
       route: { params: { challengeId: data.id }, key: "detail" },

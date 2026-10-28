@@ -2,29 +2,31 @@ import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
-  Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
-import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import { useIsFocused } from "@react-navigation/native";
+import { useIsFocused, useNavigation } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, X } from "lucide-react-native";
 import {
   ActionButton,
   Card,
   Label,
   Notice,
+  WorkspacePage,
 } from "../../components/workspace/WorkspaceUI";
 import { pluginSkillsApi as api } from "../../lib/api/pluginSkillsApi";
 import { getAuthEpoch } from "../../lib/auth/authEpoch";
-import { useTheme } from "../../theme/ThemeContext";
 import { fonts } from "../../theme/designTokens";
+import { useTheme } from "../../theme/ThemeContext";
 import { SkillDraftEditor } from "./PluginSkills";
-import { skillModalBackAction } from "./skillModalNavigation";
+import type {
+  AuthoredSkillPageParams,
+  ContentScreenProps,
+  WorkspaceNavigationProp,
+} from "../../app/navigationTypes";
+import { useWorkspaceBack } from "../../app/WorkspaceHeader";
+import { useAssistant } from "../assistant/useAssistant";
 import {
   AUTHORED_SKILL_ACTIONS,
   authoredReviewMatches,
@@ -37,12 +39,97 @@ import {
   type AuthoredSkillReference,
 } from "./authoredSkillReviewState";
 
-/** A real owner confirmation: server actions, complete files and exact card binding. */
+/** The transcript holds only a route launcher; owner review is content in the slab. */
 export function NativeAuthoredSkillReview({
+  acknowledgement,
+  conversationId,
+  initiallyOpen = false,
+}: {
+  acknowledgement: {
+    id: string;
+    authored_skill?: AuthoredSkillReference | null;
+  };
+  conversationId: string;
+  initiallyOpen?: boolean;
+}) {
+  const navigation = useNavigation<WorkspaceNavigationProp>();
+  const focused = useIsFocused();
+  const opened = useRef<string | undefined>(undefined);
+  const reference = acknowledgement.authored_skill;
+  function open() {
+    if (reference)
+      navigation.push("AuthoredSkillReview", {
+        conversationId,
+        acknowledgementId: acknowledgement.id,
+        agentId: reference.agent_id,
+      });
+  }
+  useEffect(() => {
+    if (!initiallyOpen || !focused || opened.current === acknowledgement.id)
+      return;
+    opened.current = acknowledgement.id;
+    open();
+  }, [initiallyOpen, focused, acknowledgement.id]);
+  return reference ? (
+    <ActionButton
+      label="Review skill draft"
+      variant="secondary"
+      onPress={open}
+    />
+  ) : null;
+}
+
+export function AuthoredSkillPage({
+  route,
+  navigation,
+}: ContentScreenProps<"AuthoredSkillReview" | "AuthoredSkillDraft">) {
+  const params: AuthoredSkillPageParams = route.params;
+  const assistant = useAssistant(
+    params.conversationId,
+    params.agentId,
+    undefined,
+    params.acknowledgementId,
+  );
+  const acknowledgement = assistant.history?.acknowledgements.find(
+    (row) => row.id === params.acknowledgementId,
+  );
+  return (
+    <WorkspacePage
+      title="Review skill draft"
+      showHeading={false}
+      scroll={false}
+      contentStyle={styles.page}
+    >
+      {assistant.error && <Notice tone="error" message={assistant.error} />}
+      {assistant.loading && !acknowledgement && (
+        <ActivityIndicator accessibilityLabel="Loading skill confirmation" />
+      )}
+      {acknowledgement?.authored_skill ? (
+        <AuthoredSkillReviewContent
+          acknowledgement={acknowledgement}
+          editing={route.name === "AuthoredSkillDraft"}
+          onEdit={() => navigation.push("AuthoredSkillDraft", params)}
+          disabled={Boolean(assistant.deciding) || assistant.loadingOlder}
+          online={assistant.online}
+          onDecision={(choice) => assistant.decide(acknowledgement.id, choice)}
+          onRefresh={() => assistant.openConversation(params.conversationId)}
+        />
+      ) : (
+        !assistant.loading && (
+          <Notice message="This skill confirmation is no longer available. Return to the conversation and reload its latest history." />
+        )
+      )}
+    </WorkspacePage>
+  );
+}
+
+/** A real owner confirmation: server actions, complete files and exact card binding. */
+export function AuthoredSkillReviewContent({
   acknowledgement,
   disabled = false,
   online = true,
-  initiallyOpen = false,
+  editing = false,
+  onEdit,
   onDecision,
   onRefresh,
 }: {
@@ -52,7 +139,8 @@ export function NativeAuthoredSkillReview({
   };
   disabled?: boolean;
   online?: boolean;
-  initiallyOpen?: boolean;
+  editing?: boolean;
+  onEdit: () => void;
   onDecision: (choice: "allow" | "deny") => Promise<unknown>;
   onRefresh?: () => Promise<unknown> | void;
 }) {
@@ -60,8 +148,8 @@ export function NativeAuthoredSkillReview({
   const focused = useIsFocused();
   const client = useQueryClient();
   const reference = acknowledgement.authored_skill;
-  const [open, setOpen] = useState(initiallyOpen);
-  const [editing, setEditing] = useState(false);
+  const navigation = useNavigation<WorkspaceNavigationProp>();
+  const [dirty, setDirty] = useState(false);
   const [editorBusy, setEditorBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -72,9 +160,6 @@ export function NativeAuthoredSkillReview({
   const lock = useRef(false);
   const editorLock = useRef(false);
   const authEpoch = useRef(getAuthEpoch());
-  useEffect(() => {
-    if (initiallyOpen) setOpen(true);
-  }, [initiallyOpen, acknowledgement.id]);
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) =>
       setForeground(state === "active"),
@@ -97,7 +182,7 @@ export function NativeAuthoredSkillReview({
         acknowledgement.id,
         signal,
       ),
-    enabled: Boolean(reference) && focused && foreground && open && online,
+    enabled: Boolean(reference) && focused && foreground && online,
     retry: false,
     refetchInterval: (query) =>
       query.state.data?.status === "publishing" && query.state.data.lease_live
@@ -113,8 +198,7 @@ export function NativeAuthoredSkillReview({
       reference?.agent_id,
     ],
     queryFn: ({ signal }) => api.proposals(reference!.agent_id, signal),
-    enabled:
-      Boolean(reference) && focused && foreground && open && editing && online,
+    enabled: Boolean(reference) && focused && foreground && editing && online,
     retry: false,
   });
   const data = preview.data;
@@ -207,297 +291,212 @@ export function NativeAuthoredSkillReview({
       setBusy(false);
     }
   }
-  function close() {
-    if (!lock.current && !busy && !editorLock.current && !editorBusy) {
-      setOpen(false);
-      setEditing(false);
-    }
-  }
-  function back() {
-    const action = skillModalBackAction(
-      editing,
-      lock.current || busy || editorLock.current || editorBusy,
-    );
-    if (action === "parent") setEditing(false);
-    if (action === "close") close();
-  }
+  useWorkspaceBack({
+    active: false,
+    onBack: navigation.goBack,
+    defaultRole: "back",
+    disabled: busy || editorBusy,
+    discardOnClose: dirty
+      ? {
+          title: "Discard skill draft changes?",
+          message: "Your unsaved skill draft changes will be lost.",
+        }
+      : undefined,
+  });
   function onEditorBusy(value: boolean) {
     editorLock.current = value;
     setEditorBusy(value);
   }
   if (!reference) return null;
   return (
-    <View style={styles.stack}>
+    <View style={styles.fill}>
       {data && data.state !== "active" && (
         <Notice
           tone={data.state === "pinned" ? "success" : "info"}
           message={authoredSkillStateLabel(data.state)}
         />
       )}
-      <ActionButton
-        label={
-          data?.state === "pinned"
-            ? "View published skill"
-            : "Review skill draft"
-        }
-        variant="secondary"
-        onPress={() => setOpen(true)}
-      />
-      <Modal
-        visible={open}
-        presentationStyle="pageSheet"
-        animationType="slide"
-        onRequestClose={back}
+      <ScrollView
+        automaticallyAdjustKeyboardInsets
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.content}
       >
-        <SafeAreaProvider>
-          <SafeAreaView style={[styles.modal, { backgroundColor: colors.bg }]}>
-            <View style={[styles.header, { borderColor: colors.border }]}>
-              {editing ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Back to skill confirmation"
-                  disabled={busy || editorBusy}
-                  style={styles.iconButton}
-                  onPress={back}
-                >
-                  <ChevronLeft color={colors.textPrimary} size={22} />
-                </Pressable>
-              ) : (
-                <View style={styles.iconButton} accessible={false} />
-              )}
-              <Text
-                accessibilityRole="header"
-                numberOfLines={1}
-                style={[styles.heading, { color: colors.textPrimary }]}
-              >
-                {editing ? "Edit skill draft" : "Review skill draft"}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Close skill confirmation"
-                disabled={busy || editorBusy}
-                style={styles.iconButton}
-                onPress={close}
-              >
-                <X color={colors.textSecondary} size={21} />
-              </Pressable>
-            </View>
-            <ScrollView
-              automaticallyAdjustKeyboardInsets
-              keyboardShouldPersistTaps="handled"
-              contentContainerStyle={styles.content}
-            >
-              {!online && (
-                <Notice message="Connect to the internet to load and confirm the current draft." />
-              )}
-              {preview.isFetching && (
-                <ActivityIndicator
-                  accessibilityLabel="Loading complete skill draft"
-                  color={colors.primary}
-                />
-              )}
-              {preview.isError && (
+        {!online && (
+          <Notice message="Connect to the internet to load and confirm the current draft." />
+        )}
+        {preview.isFetching && (
+          <ActivityIndicator
+            accessibilityLabel="Loading complete skill draft"
+            color={colors.primary}
+          />
+        )}
+        {preview.isError && (
+          <Notice
+            tone="error"
+            message="Draft unavailable or changed. Reload and review it again."
+          />
+        )}
+        {error && <Notice tone="error" message={error} />}
+        {notice && <Notice tone="success" message={notice} />}
+        {busy && (
+          <ActivityIndicator
+            accessibilityLabel="Updating skill publication state"
+            color={colors.primary}
+          />
+        )}
+        {data && (
+          <>
+            <Card>
+              <Label style={styles.title}>
+                {data.name} · {data.version}
+              </Label>
+              <Label muted>Attach to {data.agent_name}</Label>
+              <Label muted style={styles.caption}>
+                Draft revision {data.revision} · Skills revision{" "}
+                {data.skills_revision}
+              </Label>
+              {data.state !== "active" && (
                 <Notice
-                  tone="error"
-                  message="Draft unavailable or changed. Reload and review it again."
+                  tone={data.state === "pinned" ? "success" : "info"}
+                  message={authoredSkillStateLabel(data.state)}
                 />
               )}
-              {error && <Notice tone="error" message={error} />}
-              {notice && <Notice tone="success" message={notice} />}
-              {busy && (
-                <ActivityIndicator
-                  accessibilityLabel="Updating skill publication state"
-                  color={colors.primary}
-                />
-              )}
-              {data && (
-                <>
-                  <Card>
-                    <Label style={styles.title}>
-                      {data.name} · {data.version}
-                    </Label>
-                    <Label muted>Attach to {data.agent_name}</Label>
-                    <Label muted style={styles.caption}>
-                      Draft revision {data.revision} · Skills revision{" "}
-                      {data.skills_revision}
-                    </Label>
-                    {data.state !== "active" && (
-                      <Notice
-                        tone={data.state === "pinned" ? "success" : "info"}
-                        message={authoredSkillStateLabel(data.state)}
+            </Card>
+            {!matched && (
+              <Notice message="This confirmation does not match the current reviewed draft, or it predates supported review metadata. Reload the confirmation from the conversation." />
+            )}
+            {active && (
+              <>
+                <Label muted>
+                  Allow publishes these files privately to Ornn under your
+                  identity and attaches this exact version to the agent. Skill
+                  instructions never grant permissions.
+                </Label>
+                {data.base_scripts_not_copied && (
+                  <Notice message="Scripts and executable files from the source skill are not copied into this draft." />
+                )}
+                {!editing &&
+                  data.files.map((file, index) => (
+                    <Card key={`${file.path}:${index}`}>
+                      <Label>{file.path}</Label>
+                      <ScrollView style={styles.fileScroll} nestedScrollEnabled>
+                        <Label selectable mono style={styles.fileContent}>
+                          {file.content}
+                        </Label>
+                      </ScrollView>
+                    </Card>
+                  ))}
+                {editable && matched && !editing && (
+                  <ActionButton
+                    label={"Edit before publishing"}
+                    variant="secondary"
+                    disabled={blocked || preview.isFetching}
+                    onPress={onEdit}
+                  />
+                )}
+                {editing && (
+                  <>
+                    {proposals.isFetching && (
+                      <ActivityIndicator
+                        accessibilityLabel="Loading editable skill draft"
+                        color={colors.primary}
                       />
                     )}
-                  </Card>
-                  {!matched && (
-                    <Notice message="This confirmation does not match the current reviewed draft, or it predates supported review metadata. Reload the confirmation from the conversation." />
-                  )}
-                  {active && (
-                    <>
-                      <Label muted>
-                        Allow publishes these files privately to Ornn under your
-                        identity and attaches this exact version to the agent.
-                        Skill instructions never grant permissions.
-                      </Label>
-                      {data.base_scripts_not_copied && (
-                        <Notice message="Scripts and executable files from the source skill are not copied into this draft." />
-                      )}
-                      {!editing &&
-                        data.files.map((file, index) => (
-                          <Card key={`${file.path}:${index}`}>
-                            <Label>{file.path}</Label>
-                            <ScrollView
-                              style={styles.fileScroll}
-                              nestedScrollEnabled
-                            >
-                              <Label selectable mono style={styles.fileContent}>
-                                {file.content}
-                              </Label>
-                            </ScrollView>
-                          </Card>
-                        ))}
-                      {editable && matched && (
-                        <ActionButton
-                          label={
-                            editing
-                              ? "Close the editor"
-                              : "Edit before publishing"
-                          }
-                          variant="secondary"
-                          disabled={blocked || preview.isFetching}
-                          onPress={() => setEditing((value) => !value)}
-                        />
-                      )}
-                      {editing && (
-                        <>
-                          {proposals.isFetching && (
-                            <ActivityIndicator
-                              accessibilityLabel="Loading editable skill draft"
-                              color={colors.primary}
-                            />
-                          )}
-                          {proposals.isError && (
-                            <Notice
-                              tone="error"
-                              message="The editable draft could not be loaded. Reload and try again."
-                            />
-                          )}
-                          {proposal?.draft ? (
-                            <SkillDraftEditor
-                              key={`${proposal.id}:${proposal.revision}`}
-                              agentId={reference.agent_id}
-                              proposal={proposal}
-                              disabled={
-                                !focused ||
-                                !foreground ||
-                                !online ||
-                                preview.isError ||
-                                proposals.isError ||
-                                preview.isFetching ||
-                                proposals.isFetching ||
-                                !matched ||
-                                !editable
-                              }
-                              onBusy={onEditorBusy}
-                              onSaved={async () => {
-                                setEditing(false);
-                                setNotice(
-                                  "Draft saved. A new review card for this version was posted in the conversation. Confirm it there.",
-                                );
-                                await refresh();
-                              }}
-                            />
-                          ) : (
-                            !proposals.isFetching &&
-                            !proposals.isError && (
-                              <Notice message="This editable draft is no longer available." />
-                            )
-                          )}
-                        </>
-                      )}
-                    </>
-                  )}
-                  {data.status === "publishing" && (
-                    <Notice
-                      message={
-                        data.lease_live
-                          ? "Publication is in progress."
-                          : interruptedPublicationText(actions)
-                      }
-                    />
-                  )}
-                  {data.failure_code && (
-                    <Notice
-                      tone="error"
-                      message={publicationFailureText(
-                        data.failure_code,
-                        data.status,
-                      )}
-                    />
-                  )}
-                  {!editing &&
-                    AUTHORED_SKILL_ACTIONS.filter(({ action }) =>
-                      actions.includes(action),
-                    ).map(({ action, label }) => (
-                      <ActionButton
-                        key={action}
-                        label={label}
-                        variant={
-                          action === "deny" ||
-                          action === "dismiss_card" ||
-                          action === "discard"
-                            ? "secondary"
-                            : "primary"
-                        }
-                        disabled={blocked || !matched || preview.isFetching}
-                        onPress={() => void act(action)}
+                    {proposals.isError && (
+                      <Notice
+                        tone="error"
+                        message="The editable draft could not be loaded. Reload and try again."
                       />
-                    ))}
-                </>
-              )}
-              <ActionButton
-                label="Reload confirmation"
-                variant="secondary"
-                disabled={busy || editorBusy || !online}
-                onPress={() => {
-                  void refresh().catch(() =>
-                    setError(
-                      "The confirmation could not be refreshed. Try again.",
-                    ),
-                  );
-                  if (editing) void proposals.refetch();
-                }}
+                    )}
+                    {proposal?.draft ? (
+                      <SkillDraftEditor
+                        key={`${proposal.id}:${proposal.revision}`}
+                        agentId={reference.agent_id}
+                        proposal={proposal}
+                        disabled={
+                          !focused ||
+                          !foreground ||
+                          !online ||
+                          preview.isError ||
+                          proposals.isError ||
+                          preview.isFetching ||
+                          proposals.isFetching ||
+                          !matched ||
+                          !editable
+                        }
+                        onBusy={onEditorBusy}
+                        onDirty={setDirty}
+                        onSaved={async () => {
+                          setDirty(false);
+                          setNotice(
+                            "Draft saved. A new review card for this version was posted in the conversation. Confirm it there.",
+                          );
+                          await refresh();
+                        }}
+                      />
+                    ) : (
+                      !proposals.isFetching &&
+                      !proposals.isError && (
+                        <Notice message="This editable draft is no longer available." />
+                      )
+                    )}
+                  </>
+                )}
+              </>
+            )}
+            {data.status === "publishing" && (
+              <Notice
+                message={
+                  data.lease_live
+                    ? "Publication is in progress."
+                    : interruptedPublicationText(actions)
+                }
               />
-            </ScrollView>
-          </SafeAreaView>
-        </SafeAreaProvider>
-      </Modal>
+            )}
+            {data.failure_code && (
+              <Notice
+                tone="error"
+                message={publicationFailureText(data.failure_code, data.status)}
+              />
+            )}
+            {!editing &&
+              AUTHORED_SKILL_ACTIONS.filter(({ action }) =>
+                actions.includes(action),
+              ).map(({ action, label }) => (
+                <ActionButton
+                  key={action}
+                  label={label}
+                  variant={
+                    action === "deny" ||
+                    action === "dismiss_card" ||
+                    action === "discard"
+                      ? "secondary"
+                      : "primary"
+                  }
+                  disabled={blocked || !matched || preview.isFetching}
+                  onPress={() => void act(action)}
+                />
+              ))}
+          </>
+        )}
+        <ActionButton
+          label="Reload confirmation"
+          variant="secondary"
+          disabled={busy || editorBusy || !online}
+          onPress={() => {
+            void refresh().catch(() =>
+              setError("The confirmation could not be refreshed. Try again."),
+            );
+            if (editing) void proposals.refetch();
+          }}
+        />
+      </ScrollView>
     </View>
   );
 }
 const styles = StyleSheet.create({
-  stack: { gap: 12 },
-  modal: { flex: 1 },
-  header: {
-    minHeight: 56,
-    paddingHorizontal: 8,
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  iconButton: {
-    minHeight: 44,
-    minWidth: 44,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  heading: {
-    flex: 1,
-    fontFamily: fonts.bodySemi,
-    fontSize: 17,
-    lineHeight: 24,
-    textAlign: "center",
-  },
+  page: { flex: 1, padding: 0 },
+  fill: { flex: 1 },
   content: { padding: 20, paddingBottom: 40, gap: 16 },
   title: { fontFamily: fonts.bodySemi, fontSize: 16, lineHeight: 23 },
   caption: { fontSize: 11, lineHeight: 17 },

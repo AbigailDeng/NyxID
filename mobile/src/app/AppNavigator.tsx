@@ -36,6 +36,8 @@ import { MachinesScreen } from "../features/machines/MachinesScreen";
 import { WorkspacePageHeader } from "../components/workspace/WorkspacePageHeader";
 import { WorkspaceDrawerHeader } from "../components/workspace/WorkspaceDrawerHeader";
 import { ActivityScreen } from "../features/activity/ActivityScreen";
+import { PluginSkillPage } from "../features/plugins/PluginSkills";
+import { AuthoredSkillPage } from "../features/plugins/NativeAuthoredSkillReview";
 import { ActivityDetailScreen } from "../features/activity/ActivityDetailScreen";
 import { AssistantScreen } from "../features/assistant/AssistantScreen";
 import { AssistantLinkHost } from "../features/assistant/AssistantLinkHost";
@@ -438,6 +440,36 @@ function WorkspaceNavigator() {
         name="AgentSkills"
         component={AgentSkillsRoute}
         options={{ title: "Agent skills" }}
+      />
+      <ContentStack.Screen
+        name="SkillDetail"
+        component={PluginSkillPage}
+        options={({ route }) => ({ title: route.params.name })}
+      />
+      <ContentStack.Screen
+        name="SkillVersions"
+        component={PluginSkillPage}
+        options={{ title: "Skill versions" }}
+      />
+      <ContentStack.Screen
+        name="SkillHistory"
+        component={PluginSkillPage}
+        options={{ title: "Skill history" }}
+      />
+      <ContentStack.Screen
+        name="SkillDraft"
+        component={PluginSkillPage}
+        options={{ title: "Edit skill draft" }}
+      />
+      <ContentStack.Screen
+        name="AuthoredSkillReview"
+        component={AuthoredSkillPage}
+        options={{ title: "Review skill draft" }}
+      />
+      <ContentStack.Screen
+        name="AuthoredSkillDraft"
+        component={AuthoredSkillPage}
+        options={{ title: "Edit skill draft" }}
       />
       <ContentStack.Screen
         name="AutomationDetail"

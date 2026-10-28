@@ -116,7 +116,7 @@ function setup({
 } = {}) {
   const calls: { method: string; args: unknown[] }[] = [];
   const queries = new Map<string, QueryOptions>();
-  let back: { active: boolean; onBack: () => void };
+  let back: { active: boolean; onBack: () => void; defaultRole?: string };
   let focused = true;
   let foreground: (state: string) => void = () => {};
   const record =
