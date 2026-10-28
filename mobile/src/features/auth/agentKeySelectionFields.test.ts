@@ -261,7 +261,7 @@ test("expiry selectors retain validation and disable all permission pickers duri
   }
 });
 
-function setupLogin({ inSheet = false } = {}) {
+function setupLogin({ inSheet = false, mint = true } = {}) {
   const apiCalls: string[] = [];
   const key: AgentKeySummary = {
     ...model.newKeySummary(model.defaultNewAgentKey(), options),
@@ -316,7 +316,7 @@ function setupLogin({ inSheet = false } = {}) {
   harness.mount(() =>
     AgentKeyLoginScreen({
       navigation: { canGoBack: () => true },
-      route: { params: { mint: true } },
+      route: { params: { mint } },
     }),
   );
   return { harness, apiCalls, key };
@@ -444,4 +444,27 @@ test("signed-in sheet content leaves Back and title to native sheet chrome", () 
     ),
     false,
   );
+});
+
+test("terminal code entry and its scanner add no Back control inside a sheet", () => {
+  for (const mint of [false, true]) {
+    const { harness } = setupLogin({ inSheet: true, mint });
+    assert.equal(
+      elements(harness.value()).some(
+        (item) => item.props.accessibilityLabel === "Back" || item.props.label === "Back",
+      ),
+      false,
+    );
+    if (!mint) {
+      const scan = elements(harness.value()).find(
+        (item) => item.props.label === "Scan QR code",
+      );
+      assert.ok(scan);
+      scan.props.onPress();
+      harness.flush();
+      assert.equal(harness.value().type, "DeviceCodeScanner");
+      assert.equal(harness.value().props.showHeader, false);
+    }
+    harness.unmount();
+  }
 });

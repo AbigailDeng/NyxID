@@ -28,6 +28,7 @@ import { PrimaryButton } from "../../components/PrimaryButton";
 import { ScreenContainer } from "../../components/ScreenContainer";
 import { MagicKeyIllustration } from "../../components/icons/empty-state/MagicKeyIllustration";
 import { RoadBarrierIllustration } from "../../components/icons/empty-state/RoadBarrierIllustration";
+import { useReducedMotion } from "../../lib/accessibility/useReducedMotion";
 import { resolveAuthDeviceErrorMessage } from "../../lib/api/errorMessages";
 import { mobileApi } from "../../lib/api/mobileApi";
 import type { AuthDevicePreview } from "../../lib/api/authDeviceApi";
@@ -219,6 +220,7 @@ function ManualCodeModal({
 }) {
   const inputRef = useRef<TextInput>(null);
   const insets = useSafeAreaInsets();
+  const reducedMotion = useReducedMotion();
   const normalizedCode = normalizeAuthDeviceUserCode(value);
 
   useEffect(() => {
@@ -231,7 +233,7 @@ function ManualCodeModal({
     <Modal
       visible={visible}
       transparent
-      animationType="slide"
+      animationType={reducedMotion ? "none" : "slide"}
       statusBarTranslucent
       onRequestClose={onDismiss}
     >
