@@ -85,6 +85,8 @@ import {
   ComposerDictationButton,
   ComposerDictationReview,
 } from "./ComposerDictation";
+import { AssistantCmaOperation } from "./AssistantCmaOperation";
+import { AssistantAcknowledgementCard } from "./AssistantAcknowledgementCard";
 import { AssistantTurnStatus } from "./AssistantTurnStatus";
 import {
   AssistantMessageNotices,
@@ -107,7 +109,7 @@ import {
   assistantMarkdownOptions,
   safeAssistantLinkUrl,
 } from "./assistantMarkdown";
-import { acknowledgementTitle, retryInput } from "./assistantState";
+import { retryInput } from "./assistantState";
 import type {
   AssistantAcknowledgement,
   AssistantMessage,
@@ -726,6 +728,12 @@ export function AssistantScreen({
                 : "Completed"
           }
           metadata={item.turn_metadata}
+          decisions={(assistant.history?.acknowledgements ?? []).filter(
+            (row) =>
+              row.status !== "pending" &&
+              !row.authored_skill &&
+              row.creation_turn_id === item.turn_id,
+          )}
           onToggle={() => {
             // Opening details is an explicit reading action. Keep the header
             // in view instead of following the newly expanded list to its end.
@@ -744,6 +752,12 @@ export function AssistantScreen({
                   navigation.navigate("MachineDesktop", params)
                 }
               />
+            ))}
+        {!isUser &&
+          assistant.history?.cma_operations
+            ?.filter((operation) => operation.turn_id === item.turn_id)
+            .map((operation) => (
+              <AssistantCmaOperation key={operation.id} operation={operation} />
             ))}
         {isUser && item.steering ? (
           <Label muted>
@@ -831,109 +845,22 @@ export function AssistantScreen({
 
   function renderAcknowledgement(row: AssistantAcknowledgement) {
     if (row.status !== "pending") return null;
-    const pending = row.status === "pending";
-    const expired = Date.parse(row.expires_at) <= Date.now();
     return (
-      <Card
+      <AssistantAcknowledgementCard
         key={row.id}
-        style={
-          row.id === route?.params?.acknowledgementId
-            ? { borderColor: colors.primary }
-            : undefined
+        row={row}
+        selected={row.id === route?.params?.acknowledgementId}
+        disabled={
+          !!assistant.deciding || !assistant.online || assistant.loadingOlder
         }
-      >
-        {row.id === route?.params?.acknowledgementId && (
-          <Label style={{ color: colors.primaryOnTint }}>
-            Selected confirmation
-          </Label>
-        )}
-        <Label style={styles.cardTitle}>{acknowledgementTitle(row)}</Label>
-        <Label>{row.summary}</Label>
-        {row.service_name || row.service_slug ? (
-          <Label muted>
-            Service: {row.service_name ?? row.service_slug}
-            {row.service_name && row.service_slug
-              ? ` (${row.service_slug})`
-              : ""}
-          </Label>
-        ) : null}
-        {row.tool_name ? (
-          <Label muted mono>
-            Tool: {row.tool_name}
-          </Label>
-        ) : null}
-        <Label muted>
-          {row.confirmation ? `${row.confirmation.risk} · ` : ""}
-          {pending
-            ? row.decider === "orchestrator"
-              ? "Requested from NyxBot"
-              : "Your confirmation is required"
-            : row.status}
-          {row.decided_by
-            ? ` · ${row.decided_by === "user" ? "you" : "NyxBot"}`
-            : ""}
-        </Label>
-        {row.reason ? <Label muted>{row.reason}</Label> : null}
-        {row.confirmation ? (
-          <Label muted>
-            {row.confirmation.reason === "webhook"
-              ? "A webhook requested this action."
-              : row.confirmation.reason === "policy"
-                ? "The resource's confirmation policy requires your approval."
-                : `${row.confirmation.access_mode === "ask_every_time" ? "Ask Every Time" : row.confirmation.access_mode === "nyxmode" ? "NyxMode" : row.confirmation.access_mode === "autopilot" ? "Autopilot" : "Your access mode"} requires this confirmation.`}
-          </Label>
-        ) : null}
-        {row.authored_skill ? (
-          renderAuthoredReview(row)
-        ) : pending ? (
-          <>
-            <Label muted>
-              {row.kind === "action"
-                ? "This applies once, to this action only."
-                : row.kind === "operations"
-                  ? "This updates the specialist's operations across its threads."
-                  : row.kind === "skills"
-                    ? "NyxBot will resolve the exact version and ask separately before attaching it."
-                    : "This grants the requested permission."}
-            </Label>
-            <Label muted mono>
-              Expires {formatDate(row.expires_at)}
-            </Label>
-            <View style={styles.row}>
-              <View style={styles.fill}>
-                <ActionButton
-                  label="Deny"
-                  variant="secondary"
-                  disabled={
-                    !!assistant.deciding ||
-                    expired ||
-                    !assistant.online ||
-                    assistant.loadingOlder
-                  }
-                  onPress={() =>
-                    void perform(() => assistant.decide(row.id, "deny"))
-                  }
-                />
-              </View>
-              <View style={styles.fill}>
-                <ActionButton
-                  label="Allow"
-                  loading={assistant.deciding === row.id}
-                  disabled={
-                    !!assistant.deciding ||
-                    expired ||
-                    !assistant.online ||
-                    assistant.loadingOlder
-                  }
-                  onPress={() =>
-                    void perform(() => assistant.decide(row.id, "allow"))
-                  }
-                />
-              </View>
-            </View>
-          </>
-        ) : null}
-      </Card>
+        deciding={assistant.deciding === row.id}
+        onDecision={(choice) =>
+          void perform(() => assistant.decide(row.id, choice))
+        }
+        authoredReview={
+          row.authored_skill ? renderAuthoredReview(row) : undefined
+        }
+      />
     );
   }
 
@@ -1202,6 +1129,19 @@ export function AssistantScreen({
                       }
                       interrupted={assistant.interrupted}
                     />
+                    {assistant.history?.cma_operations
+                      ?.filter(
+                        (operation) =>
+                          operation.turn_id ===
+                          (conversation?.active_turn?.turn_id ??
+                            assistant.live?.turnId),
+                      )
+                      .map((operation) => (
+                        <AssistantCmaOperation
+                          key={operation.id}
+                          operation={operation}
+                        />
+                      ))}
                     <AssistantCopyButton text={liveText} partial />
                   </View>
                 ) : null}
@@ -1213,8 +1153,21 @@ export function AssistantScreen({
                 ))}
                 <AssistantAcknowledgements
                   key={conversation?.id ?? "draft"}
-                  acknowledgements={assistant.history?.acknowledgements ?? []}
+                  acknowledgements={(
+                    assistant.history?.acknowledgements ?? []
+                  ).filter(
+                    (row) =>
+                      row.status === "pending" ||
+                      row.authored_skill ||
+                      row.id === route?.params?.acknowledgementId ||
+                      !messages.some(
+                        (message) =>
+                          message.role === "assistant" &&
+                          message.turn_id === row.creation_turn_id,
+                      ),
+                  )}
                   selectedId={route?.params?.acknowledgementId}
+                  onOpenLink={openSafeLink}
                   renderPending={renderAcknowledgement}
                   renderAuthoredReview={renderAuthoredReview}
                   onToggle={() => transcriptScroll.pause()}
@@ -1225,6 +1178,15 @@ export function AssistantScreen({
                       {approval.service_name} · Approval needed
                     </Label>
                     <Label>{approval.summary}</Label>
+                    <Label muted>
+                      Scope · {approval.service_slug ?? approval.service_name}
+                      {approval.agent_key_prefix
+                        ? ` · ${approval.agent_key_prefix}`
+                        : ""}
+                      {approval.approval_mode
+                        ? ` · ${approval.approval_mode === "per_request" ? "per-request approval" : "grant"}`
+                        : ""}
+                    </Label>
                     <Label muted mono>
                       Expires {formatDate(approval.expires_at)}
                     </Label>

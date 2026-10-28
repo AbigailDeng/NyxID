@@ -45,6 +45,8 @@ export function acknowledgementTitle(row: AssistantAcknowledgement): string {
     case "skills":
       return "Confirm this skill proposal";
     case "action":
+    case "machine":
+    case "saved_login":
       return "Confirm this action";
   }
 }
@@ -53,6 +55,8 @@ export function acknowledgementTitle(row: AssistantAcknowledgement): string {
 export function acknowledgementDecisionLabel(
   row: AssistantAcknowledgement,
 ): string {
+  if (row.decided_by === "access_mode")
+    return "Allowed automatically · Full access";
   const status = {
     pending: "Pending",
     allowed: "Allowed",
@@ -113,6 +117,8 @@ export function continuationText(row: AssistantAcknowledgement): string {
     case "account":
       return "Approved: account management for this chat. Continue.";
     case "action":
+    case "machine":
+    case "saved_login":
       return `Confirmed: ${row.summary} (acknowledgement_id ${row.id}). Retry it now.`;
   }
 }

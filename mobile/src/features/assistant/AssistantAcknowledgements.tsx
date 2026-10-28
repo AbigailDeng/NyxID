@@ -14,12 +14,14 @@ export function AssistantAcknowledgements({
   renderPending,
   renderAuthoredReview,
   onToggle,
+  onOpenLink,
 }: {
   acknowledgements: AssistantAcknowledgement[];
   selectedId?: string;
   renderPending: (row: AssistantAcknowledgement) => ReactNode;
   renderAuthoredReview: (row: AssistantAcknowledgement) => ReactNode;
   onToggle: () => void;
+  onOpenLink?: (url: string) => void;
 }) {
   const { colors } = useTheme();
   const selected = acknowledgements.find((row) => row.id === selectedId);
@@ -155,7 +157,13 @@ export function AssistantAcknowledgements({
                         {row.decided_by ? (
                           <Label muted style={styles.recordText}>
                             Decided by{" "}
-                            {row.decided_by === "user" ? "you" : "NyxBot"}
+                            {row.decided_by === "user"
+                              ? "you"
+                              : row.decided_by === "orchestrator"
+                                ? "NyxBot"
+                                : row.decided_by === "access_mode"
+                                  ? "Full access"
+                                  : row.decided_by}
                           </Label>
                         ) : null}
                         {row.reason ? (
@@ -173,6 +181,16 @@ export function AssistantAcknowledgements({
                           Confirmation: {row.id}
                         </Label>
                         {row.authored_skill ? renderAuthoredReview(row) : null}
+                        {row.link && onOpenLink ? (
+                          <Pressable
+                            accessibilityRole="link"
+                            accessibilityLabel="Inspect or discard proposal"
+                            onPress={() => onOpenLink(row.link!)}
+                            style={styles.record}
+                          >
+                            <Label muted>Inspect or discard proposal</Label>
+                          </Pressable>
+                        ) : null}
                       </View>
                     ) : null}
                   </View>

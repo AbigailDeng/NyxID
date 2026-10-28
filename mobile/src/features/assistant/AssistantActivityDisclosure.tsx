@@ -4,7 +4,16 @@ import { Check, ChevronDown, ChevronRight, X } from "lucide-react-native";
 import { Label } from "../../components/workspace/WorkspaceUI";
 import { useTheme } from "../../theme/ThemeContext";
 import { radius, TOUCH_TARGET } from "../../theme/designTokens";
-import type { AssistantMessage } from "./assistantTypes";
+import type {
+  AssistantAcknowledgement,
+  AssistantMessage,
+} from "./assistantTypes";
+import {
+  countDecisions,
+  decisionSummary,
+  decisionTitle,
+  groupDecisions,
+} from "./assistantDecisions";
 import { describeToolActivity } from "./assistantActivityText";
 import {
   deliveryText,
@@ -21,12 +30,14 @@ export function AssistantActivityDisclosure({
   activityTotal,
   turnLabel,
   metadata,
+  decisions = [],
 }: {
   activities: Activity[];
   onToggle: () => void;
   activityTotal?: number | null;
   turnLabel?: string;
   metadata?: AssistantMessage["turn_metadata"];
+  decisions?: AssistantAcknowledgement[];
 }) {
   const { colors } = useTheme();
   const [open, setOpen] = useState(false);
@@ -40,7 +51,8 @@ export function AssistantActivityDisclosure({
   const delivery = metadata?.channel_delivery;
   const waited =
     (metadata?.capacity_wait_ms ?? 0) > 0 || (metadata?.attempts ?? 0) > 1;
-  if (!activities.length && !waited && !delivery) return null;
+  if (!activities.length && !waited && !delivery && !decisions.length)
+    return null;
   const failed = activities.filter(
     (activity) => activity.status === "error",
   ).length;
@@ -55,6 +67,7 @@ export function AssistantActivityDisclosure({
   const summary = [
     label,
     total ? count : "",
+    ...decisionSummary(countDecisions(decisions)),
     waited && metadata?.capacity_wait_ms
       ? `waited ${formatCapacityWait(metadata.capacity_wait_ms)}`
       : "",
@@ -137,6 +150,18 @@ export function AssistantActivityDisclosure({
                   <Label muted mono style={styles.name}>
                     {activity.label}
                   </Label>
+                  {decisions
+                    .filter((row) => row.activity_id === activity.id)
+                    .map((row) => (
+                      <Label
+                        key={row.id}
+                        muted
+                        accessibilityLabel={decisionTitle(row)}
+                        style={styles.description}
+                      >
+                        {decisionTitle(row)}
+                      </Label>
+                    ))}
                   {activity.status === "error" ? (
                     <Label
                       style={[styles.description, { color: colors.danger }]}
@@ -149,6 +174,22 @@ export function AssistantActivityDisclosure({
               </View>
             );
           })}
+          {groupDecisions(
+            decisions.filter(
+              (row) =>
+                !activities.some((activity) => activity.id === row.activity_id),
+            ),
+          ).map(({ row, count }) => (
+            <Label
+              key={row.id}
+              muted
+              accessibilityLabel={decisionTitle(row)}
+              style={styles.description}
+            >
+              {decisionTitle(row)}
+              {count > 1 ? ` ×${count}` : ""}
+            </Label>
+          ))}
           {waited ? (
             <Label muted style={styles.description}>
               {metadata?.attempts != null

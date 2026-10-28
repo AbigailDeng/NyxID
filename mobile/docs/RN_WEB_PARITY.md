@@ -181,3 +181,12 @@ private, specialist and contextual screen. Actor-projection action/input/task
 cards belong to a different web protocol and are not present in NyxAgent's
 text-only history/SSE payloads; the local CHAT_PARITY.md tracks that limitation
 and remaining rendering work without claiming complete parity.
+
+NyxAgent history also retains CMA delegation records and the full acknowledgement
+identity, including machine/saved-login requests and automatic Full access
+receipts. CMA cards show submitted/working/result stages and distinguish stopped
+tracking from a stopped remote operation. Settled decisions join their explicit
+creation turn and tool activity; legacy or unloaded anchors stay in confirmation
+history. Pending cards reuse the guarded native decision callback with web risk,
+routing and scope copy. Proxy approvals retain scope metadata and open the
+existing approval detail flow for its decision and verification requirements.

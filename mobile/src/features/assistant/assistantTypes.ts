@@ -167,12 +167,25 @@ export const messageSchema = z.object({
     .nullish(),
 });
 export const acknowledgementSchema = z.object({
+  creation_turn_id: z.string().nullish(),
+  activity_id: z.string().nullish(),
+  link: z.string().nullish(),
+  decided_at: z.string().nullish(),
+  continuation_receipt_id: z.string().uuid().nullish(),
   id: z.string().uuid(),
-  kind: z.enum(["service", "account", "action", "operations", "skills"]),
+  kind: z.enum([
+    "service",
+    "account",
+    "action",
+    "operations",
+    "skills",
+    "machine",
+    "saved_login",
+  ]),
   status: z.enum(["pending", "allowed", "denied", "expired", "used"]),
   summary: z.string(),
   decider: z.enum(["user", "orchestrator"]).default("user"),
-  decided_by: z.enum(["user", "orchestrator"]).nullish(),
+  decided_by: z.string().nullish(),
   reason: z.string().nullish(),
   service_slug: z.string().nullable(),
   service_name: z.string().nullable(),
@@ -197,7 +210,24 @@ export const acknowledgementSchema = z.object({
     })
     .nullish(),
 });
+export const cmaOperationSchema = z.object({
+  id: z.string(),
+  turn_id: z.string(),
+  kind: z.enum(["cma_provisioning", "cma_response", "cma_agent"]),
+  operation_id: z.string().nullable(),
+  agent_id: z.string().nullable(),
+  idempotency_key: z.string().nullable(),
+  status: z.string().nullable(),
+  phase: z.string().nullable(),
+  state: z.string(),
+  reason: z.string().nullable(),
+  monitor_name: z.string(),
+  created_at: z.string(),
+  checked_at: z.string().nullable(),
+});
+export type CmaOperation = z.infer<typeof cmaOperationSchema>;
 export const historySchema = z.object({
+  cma_operations: z.array(cmaOperationSchema).optional(),
   conversation: conversationSchema,
   messages: z.array(messageSchema),
   acknowledgements: z.array(acknowledgementSchema).default([]),
@@ -208,11 +238,23 @@ export const historySchema = z.object({
         service_name: z.string(),
         summary: z.string(),
         expires_at: z.string(),
+        service_slug: z.string().optional(),
+        approval_mode: z.enum(["per_request", "grant"]).optional(),
+        agent_key_prefix: z.string().optional(),
+        created_at: z.string().optional(),
       }),
     )
     .default([]),
   waiting: z
-    .array(z.object({ title: z.string(), detail: z.string().nullish() }))
+    .array(
+      z.object({
+        title: z.string(),
+        detail: z.string().nullish(),
+        kind: z.string().optional(),
+        since: z.string().optional(),
+        expires_at: z.string().nullish(),
+      }),
+    )
     .default([]),
   before_seq: z.number().int().positive().nullable(),
 });

@@ -297,6 +297,12 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
         pause: () => {},
       }),
     },
+    "./AssistantAcknowledgementCard": {
+      AssistantAcknowledgementCard: "AssistantAcknowledgementCard",
+    },
+    "./AssistantCmaOperation": {
+      AssistantCmaOperation: "AssistantCmaOperation",
+    },
     "./AssistantTurnStatus": { AssistantTurnStatus: "AssistantTurnStatus" },
     "./AssistantMessageNotices": {
       AssistantMessageNotices: "AssistantMessageNotices",
@@ -446,8 +452,16 @@ test("the chat screen routes authoritative confirmations through compact history
   assert.equal(confirmations.key, A);
   assert.equal(confirmations.props.acknowledgements[0], row);
   const pending = elements(expand(confirmations.props.renderPending(row)));
-  assert.ok(pending.find((node) => node.props.label === "Allow"));
-  assert.ok(pending.find((node) => node.props.label === "Deny"));
+  assert.equal(
+    pending.find((node) => node.type === "AssistantAcknowledgementCard")?.props
+      .row,
+    row,
+  );
+  assert.equal(
+    typeof pending.find((node) => node.type === "AssistantAcknowledgementCard")
+      ?.props.onDecision,
+    "function",
+  );
   row.status = "used";
   x.harness.render();
   confirmations = footer().find(
@@ -1133,6 +1147,70 @@ test("the real transcript inserts a context-reset note at its boundary and rende
   assert.equal(
     continuation.props.children.join(""),
     "Continuing after your decision",
+  );
+  x.harness.unmount();
+});
+
+test("settled decisions fold into their exact recorded turn and CMA operations follow that turn", () => {
+  const x = setup(A, false);
+  const message = {
+    id: "reply",
+    seq: 2,
+    turn_id: "turn-2",
+    role: "assistant",
+    text: "Result",
+    status: "completed",
+    error_code: null,
+    created_at: "2026-10-28T00:00:00Z",
+    activities: [
+      {
+        id: "tool-2",
+        label: "read",
+        status: "completed",
+        started_at: "2026-10-28T00:00:00Z",
+      },
+    ],
+    attachments: [],
+  };
+  const receipt = acknowledgementSchema.parse({
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    kind: "machine",
+    status: "used",
+    summary: "Read the file",
+    creation_turn_id: "turn-2",
+    activity_id: "tool-2",
+    decided_by: "access_mode",
+    service_slug: null,
+    service_name: null,
+    tool_name: "read",
+    created_at: message.created_at,
+    expires_at: "2099-01-01T00:00:00Z",
+  });
+  Object.assign(x.assistant.history!, {
+    messages: [message],
+    acknowledgements: [receipt],
+    cma_operations: [{ id: "cma", turn_id: "turn-2" }],
+  });
+  x.harness.render();
+  const list = x.all().find((node) => node.type === "FlatList")!;
+  const row = elements(
+    expand(list.props.renderItem({ item: message, index: 0 })),
+  );
+  assert.equal(
+    row.find((node) => node.type === "AssistantActivityDisclosure")?.props
+      .decisions[0],
+    receipt,
+  );
+  assert.equal(
+    row.find((node) => node.type === "AssistantCmaOperation")?.props.operation
+      .id,
+    "cma",
+  );
+  const footer = elements(expand(list.props.ListFooterComponent));
+  assert.equal(
+    footer.find((node) => node.type === "AssistantAcknowledgements")?.props
+      .acknowledgements.length,
+    0,
   );
   x.harness.unmount();
 });
