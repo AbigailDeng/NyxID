@@ -10,7 +10,7 @@ import { groupKeys } from "../../features/groups/groupLiveRefresh";
 import { livePollInterval } from "../../lib/api/assistantLiveTransport";
 import { workspaceRecents } from "./workspaceSidebarModel";
 
-export function useWorkspaceRecents(visible: boolean) {
+export function useWorkspaceRecents(visible: boolean, agentId?: string) {
   const epoch = getAuthEpoch();
   const { isConnected } = useNetworkStatus();
   const [foreground, setForeground] = useState(
@@ -30,10 +30,16 @@ export function useWorkspaceRecents(visible: boolean) {
   );
   // Share the existing live invalidation prefix, not the agent-scoped query.
   const chats = useInfiniteQuery({
-    queryKey: ["workspace", "drawer-chats", epoch, "recents"],
+    queryKey: [
+      "workspace",
+      "drawer-chats",
+      epoch,
+      "recents",
+      ...(agentId ? [agentId] : []),
+    ],
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam, signal }) =>
-      assistantApi.list(pageParam, undefined, signal),
+      assistantApi.list(pageParam, agentId, signal),
     getNextPageParam: (page) => page.next_cursor ?? undefined,
     enabled: active,
     refetchInterval: livePollInterval(5000, live),
@@ -46,16 +52,18 @@ export function useWorkspaceRecents(visible: boolean) {
     refetchInterval: livePollInterval(5000, live),
     retry: false,
   });
+  const conversations = useMemo(
+    () => chats.data?.pages.flatMap((page) => page.conversations) ?? [],
+    [chats.data],
+  );
   const rows = useMemo(
-    () =>
-      workspaceRecents(
-        chats.data?.pages.flatMap((page) => page.conversations) ?? [],
-        crews.data ?? [],
-      ),
-    [chats.data, crews.data],
+    () => workspaceRecents(conversations, agentId ? [] : (crews.data ?? [])),
+    [conversations, crews.data, agentId],
   );
   return {
     rows,
+    conversations,
+    crews: crews.data ?? [],
     loading: active && (chats.isPending || crews.isPending),
     refreshing: chats.isRefetching || crews.isRefetching,
     online: isConnected,

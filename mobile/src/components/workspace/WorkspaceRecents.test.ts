@@ -116,6 +116,7 @@ test("Recents shares real history/live APIs with visibility, foreground, network
   let epoch = 5,
     online = true,
     visible = true;
+  let agentId: string | undefined;
   let appChange: (value: string) => void = () => {};
   let removed = false,
     refreshed = 0,
@@ -187,7 +188,7 @@ test("Recents shares real history/live APIs with visibility, foreground, network
   const { useWorkspaceRecents } = h.load(
     fileURLToPath(new URL("./useWorkspaceRecents.ts", import.meta.url)),
   ) as any;
-  h.mount(() => useWorkspaceRecents(visible));
+  h.mount(() => useWorkspaceRecents(visible, agentId));
   assert.deepEqual(Array.from(chatQuery.queryKey), [
     "workspace",
     "drawer-chats",
@@ -210,6 +211,11 @@ test("Recents shares real history/live APIs with visibility, foreground, network
   h.value().loadMore();
   assert.equal(refreshed, 2);
   assert.equal(more, 1);
+  agentId = "specialist";
+  h.render();
+  assert.equal(chatQuery.queryKey.at(-1), "specialist");
+  chatQuery.queryFn({ pageParam: "agent-older", signal });
+  assert.deepEqual(calls.at(-1), ["agent-older", "specialist", signal]);
   const stale = h.value();
   epoch = 6;
   await stale.refresh();

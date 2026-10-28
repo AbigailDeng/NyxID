@@ -289,3 +289,14 @@ below headings. First/last blocks add no outer margin. Both transcripts share th
 layout. Tables retain cell padding and a trailing 12pt scroll inset so their last
 border is visible at the end. The web text-block renderer uses mt-2/first:mt-0;
 the larger native rhythm follows the user's 2026-10-28 review decision.
+
+
+Native sidebar Search is a main-content page. It searches the same conversation
+index (50 per page), agent index and crew list used by web assistant-search,
+without a new endpoint. Empty input shows eight recent chats and workspace pages;
+typed words match title/name/handle and group into Chats, Agents, Crews, Go to,
+Settings and Appearance. Activity replaces the approval label. Home remains
+exclusive to the logo and Chat pill; removed coming-soon items are not indexed.
+Settings results open the existing account sheet. See all adds title search,
+per-agent filtering and cursor pagination, preserving exact chat/crew identity.
+Keyboard dismissal, saved offline data and account/focus fences apply to both.

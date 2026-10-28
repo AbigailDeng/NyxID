@@ -65,7 +65,7 @@ export type WorkspaceContentParamList = Omit<
   AssistantContext: AssistantParams | undefined;
   GroupChat: { groupId: string };
   WorkspaceSearch: undefined;
-  WorkspaceRecents: undefined;
+  WorkspaceRecents: { agentId?: string } | undefined;
   AgentCreate: undefined;
   AgentDetail: { agentId: string };
   GroupEditor: { groupId?: string } | undefined;
