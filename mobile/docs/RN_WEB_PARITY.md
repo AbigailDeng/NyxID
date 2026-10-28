@@ -301,3 +301,10 @@ exclusive to the logo and Chat pill; removed coming-soon items are not indexed.
 Settings results open the existing account sheet. See all adds title search,
 per-agent filtering and cursor pagination, preserving exact chat/crew identity.
 Keyboard dismissal, saved offline data and account/focus fences apply to both.
+
+
+The separate Voice settings shortcut is deliberately omitted by user decision
+2026-10-28. The later permissions-only menu and “voice: default only, just make
+it work” directions supersede that web entry. Existing pre-call microphone,
+voice and notification setup stays before explicit Start; opening setup never
+starts a call. Native adds no standalone settings page or Chat Details shortcut.
