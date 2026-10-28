@@ -1,3 +1,4 @@
+import { createAssistantDraftStore } from "./assistantDraftStore";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { URL, fileURLToPath } from "node:url";
@@ -18,7 +19,13 @@ function harness(platform = "android") {
   let installed = true;
   const disposed: string[] = [];
   const requests: string[] = [];
-  const props = { model: "model", generation: 0, enabled: true, online: true };
+  const props: {
+    model: string;
+    generation: number;
+    enabled: boolean;
+    online: boolean;
+    retainKey?: string;
+  } = { model: "model", generation: 0, enabled: true, online: true };
   class File {
     constructor(readonly uri: string) {}
     get exists() {
@@ -33,6 +40,9 @@ function harness(platform = "android") {
     }
   }
   const h = hookHarness<ReturnType<typeof useAssistantUploads>>({
+    "./assistantDraftStore": {
+      assistantDraftStore: createAssistantDraftStore(() => epoch),
+    },
     expo: { requireOptionalNativeModule: () => (installed ? {} : null) },
     "react-native": {
       Platform: { OS: platform },
@@ -385,4 +395,33 @@ test("pending picker copies never cross owner/chat/focus/permission/connectivity
     );
     if (invalidation !== "unmount") x.h.unmount();
   }
+});
+
+test("home navigation retains thread attachments and restores their exact upload session", async () => {
+  const x = harness();
+  x.props.retainKey = "original-thread";
+  x.h.render();
+  const picking = x.h.value().pick();
+  x.finish();
+  await picking;
+  await x.h.settle();
+  const original = x.h.value().session;
+  assert.equal(original.entries.size, 1);
+  x.props.retainKey = "nyxbot-home";
+  x.h.render();
+  await x.h.settle();
+  assert.equal(x.h.value().files.length, 0);
+  assert.equal(original.disposed, false);
+  x.props.retainKey = "original-thread";
+  x.h.render();
+  await x.h.settle();
+  assert.equal(x.h.value().session, original);
+  assert.equal(x.h.value().files.length, 1);
+  assert.equal(x.disposed.length, 0);
+  x.changeOwner();
+  x.h.render();
+  await x.h.settle();
+  assert.equal(original.disposed, true);
+  assert.equal(x.h.value().files.length, 0);
+  x.h.unmount();
 });

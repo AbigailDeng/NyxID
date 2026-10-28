@@ -8,7 +8,7 @@ in `navigationHierarchy.ts` and `workspaceChatNavigation.ts`.
 
 | Navigator / registered screen | Entry and nested behavior |
 | --- | --- |
-| ChatTabs / Assistant | Main personal or specialist chat; compact identity/history/details/new-chat header. |
+| ChatTabs / Assistant | Explicit Home or personal/specialist chat state; avatar/name/thread-info header. New chat with any agent, including NyxBot, is a normal empty chat with its intro and composer. |
 | Root / AssistantContext | Contextual chat; full interaction surface, native Back. |
 | Root / GroupChat | Crew conversation; actual name/ownership context/settings in one header, member details in the chip strip. |
 | Tabs / Automations | Drawer module; AutomationDetail, Editor, Runs, Preferences. Agent-scoped entry preserves its filter. |
@@ -83,8 +83,12 @@ retains the selected agent. Crews remain a distinct section. All-items browsers
 finish their native dismissal before selecting a chat. These disclosures add no
 routes or deep-link variants.
 
-NyxBot Home occupies the existing primary Assistant route only when no
-conversation is open. It adds no route or deep link. Roster Chat reuses the
+NyxBot Home occupies the existing primary Assistant route with explicit
+`home: true` state. The side-menu logo/Chats entry waits for actual menu
+dismissal, then selects Home through the same dirty/pending guards. Bare
+`/assistant` and app start without a restored thread select Home. New chat
+uses `home: false` and a fresh local compose identity, including for NyxBot;
+its normal empty chat never renders the dashboard. Roster Chat reuses the
 existing latest-thread selection; away Review includes its exact conversation
 and acknowledgement IDs, and finished-work Open uses the agent's home thread.
 Crew Open pushes the existing GroupChat route, preserving the primary draft;
@@ -95,5 +99,9 @@ expansion adds no route. Thread selection updates the existing Assistant or
 contextual chat route with its exact agent/conversation ID. New chat sets draft
 mode, without opening the latest saved chat. This thread links to the existing
 local Details and History sheet states; Manage agents opens the existing drawer.
-Current-thread reselect preserves unsent text, while a different thread follows
-the existing draft-clearing rule.
+Current-thread reselect preserves unsent text. Switching threads or visiting
+Home retains each thread's text, uploaded attachments and crew recipients in
+account-scoped memory; it never moves them into another composer. Every New
+chat starts empty and keeps the selected agent. The home composer sends to a
+new NyxBot conversation. Crew headers have no private New chat control: they
+continue the existing crew conversation with its current recipient semantics.

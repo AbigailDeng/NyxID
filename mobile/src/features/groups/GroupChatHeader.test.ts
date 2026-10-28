@@ -1,3 +1,4 @@
+import { createAssistantDraftStore } from "../assistant/assistantDraftStore";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { URL, fileURLToPath } from "node:url";
@@ -36,6 +37,9 @@ test("crew header shows member identity and narrows recipients through its picke
     },
   };
   const h = hookHarness<E>({
+    "../assistant/assistantDraftStore": {
+      assistantDraftStore: createAssistantDraftStore(() => 1),
+    },
     "react/jsx-runtime": {
       jsx: (type: unknown, props: unknown) => ({ type, props }),
       jsxs: (type: unknown, props: unknown) => ({ type, props }),

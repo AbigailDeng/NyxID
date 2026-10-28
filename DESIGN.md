@@ -545,6 +545,12 @@ full-screen. See
   add Back.
   Forms retain async dirty/pending guards across every dismissal path. Reduced
   motion removes stack travel and springs. No fake home indicator or native rail.
+- Home is an explicit primary-chat state, reached from the navigation logo/Chats,
+  bare `/assistant`, or app start without a restored chat. New chat with NyxBot
+  shows the same normal empty chat as a specialist: identity header, intro and
+  composer. Compose actions preserve the viewed agent and start empty. Each
+  thread keeps its own in-memory text/attachment draft when visiting Home or
+  another thread; Home has a separate NyxBot composer.
 - Native private-user messages have neutral card fill, a 1pt border, 38pt leading
   inset and corners 12/12/3/12. Private chat omits redundant “You”; group speakers,
   real specialist attribution, orchestration, updates, via and guidance remain.

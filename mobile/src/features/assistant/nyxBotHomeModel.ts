@@ -9,6 +9,7 @@ export function greetingFor(date: Date) {
 }
 
 export function showNyxBotHome(scope: {
+  home: boolean;
   contextual: boolean;
   nyxbot: boolean;
   conversationId?: string;
@@ -20,6 +21,7 @@ export function showNyxBotHome(scope: {
   inputAttachments: readonly unknown[];
 }) {
   return (
+    scope.home &&
     !scope.contextual &&
     scope.nyxbot &&
     !scope.conversationId &&

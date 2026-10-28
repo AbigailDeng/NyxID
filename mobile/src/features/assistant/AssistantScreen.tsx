@@ -1,3 +1,5 @@
+import { newAssistantChatParams } from "../../app/assistantChatParams";
+import { assistantDraftKey, assistantDraftStore } from "./assistantDraftStore";
 import { WorkspaceChatList } from "../../components/workspace/WorkspaceChatList";
 import {
   ChatHeaderFrame,
@@ -146,16 +148,29 @@ export function AssistantScreen({
       navigation.setParams({
         conversationId: id,
         acknowledgementId: undefined,
+        home: false,
+        draft: false,
+        draftId: undefined,
         openLatest: false,
       });
     },
     route?.params?.acknowledgementId,
   );
-  const [draft, setDraft] = useState("");
+  const draftKey = assistantDraftKey(
+    route?.params?.agentId,
+    route?.params?.conversationId,
+    route?.params?.draftId,
+    (route?.params?.home === true && !route.params.draft) || !route?.params,
+  );
+  const draftOwner = useRef(draftKey);
+  const [draft, setDraft] = useState(
+    () => assistantDraftStore.get<string>(`text:${draftKey}`) ?? "",
+  );
   const [composerGeneration, setComposerGeneration] = useState(0);
   const draftRevision = useRef(0);
   function updateDraft(value: string) {
     draftRevision.current += 1;
+    assistantDraftStore.set(`text:${draftOwner.current}`, value);
     setDraft(value);
   }
   const [sheet, setSheet] = useState<
@@ -185,6 +200,8 @@ export function AssistantScreen({
     ? currentAgent.kind === "nyxbot"
     : !assistant.agentId;
   const homeVisible = showNyxBotHome({
+    home:
+      (route?.params?.home === true && !route.params.draft) || !route?.params,
     contextual,
     nyxbot: isNyxBotChat,
     conversationId: assistant.conversationId,
@@ -262,6 +279,7 @@ export function AssistantScreen({
       (assistant.agent?.can_use === true &&
         assistant.agent.status !== "destroyed"));
   const uploads = useAssistantUploads({
+    retainKey: draftKey,
     conversationId: assistant.conversationId,
     agentId: assistant.agentId,
     model: assistant.model,
@@ -376,6 +394,9 @@ export function AssistantScreen({
         navigation.setParams({
           conversationId: id,
           acknowledgementId: undefined,
+          home: false,
+          draft: false,
+          draftId: undefined,
           openLatest: false,
         });
       }
@@ -452,18 +473,24 @@ export function AssistantScreen({
   useLayoutEffect(() => {
     setLocalError(undefined);
   }, [assistant.conversationId]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     // Persisting the first turn's identity is not a user switching chats.
     if (
       adoptedId.current &&
       route?.params?.conversationId === adoptedId.current
     ) {
       adoptedId.current = undefined;
+      const value =
+        assistantDraftStore.get<string>(`text:${draftOwner.current}`) ?? "";
+      assistantDraftStore.delete(`text:${draftOwner.current}`);
+      assistantDraftStore.set(`text:${draftKey}`, value);
+      draftOwner.current = draftKey;
       return;
     }
     draftRevision.current += 1;
-    setDraft("");
-  }, [route?.params?.agentId, route?.params?.conversationId]);
+    draftOwner.current = draftKey;
+    setDraft(assistantDraftStore.get<string>(`text:${draftKey}`) ?? "");
+  }, [draftKey]);
   useEffect(() => {
     if (!stopProtected) return;
     const timeout = setTimeout(
@@ -491,14 +518,7 @@ export function AssistantScreen({
     const agentId = assistant.agentId;
     assistant.openConversation();
     assistant.setModel(assistant.agent?.model ?? "nyxagent/chat");
-    navigation.setParams({
-      conversationId: undefined,
-      acknowledgementId: undefined,
-      agentId,
-      draft: true,
-      openLatest: false,
-    });
-    updateDraft("");
+    navigation.setParams(newAssistantChatParams(agentId));
     setSheet(undefined);
   }
 
@@ -867,13 +887,15 @@ export function AssistantScreen({
               assistant.openConversation(conversationId, acknowledgementId);
               assistant.setModel(agent.model ?? "nyxagent/chat");
               navigation.setParams({
+                ...(conversationId
+                  ? { home: false, draftId: undefined }
+                  : newAssistantChatParams(agentId)),
                 agentId,
                 conversationId,
                 acknowledgementId,
                 draft: false,
                 openLatest: !conversationId,
               });
-              updateDraft("");
             }}
             onOpenCrew={(groupId) =>
               navigation.navigate("GroupChat", { groupId })
@@ -1202,7 +1224,7 @@ export function AssistantScreen({
         <AssistantMentionInput
           value={draft}
           onChangeText={updateDraft}
-          generation={`${assistant.agentId}:${assistant.conversationId ?? "new"}:${composerGeneration}`}
+          generation={`${draftKey}:${composerGeneration}`}
           editable={
             !destroyed &&
             !assistant.recoveryRequired &&
@@ -1379,13 +1401,15 @@ export function AssistantScreen({
                 if (!target.conversationId)
                   assistant.setModel(agent.model ?? "nyxagent/chat");
                 navigation.setParams({
+                  ...(target.conversationId
+                    ? { home: false, draftId: undefined }
+                    : newAssistantChatParams(agent.id)),
                   agentId: agent.id,
                   conversationId: target.conversationId,
                   acknowledgementId: undefined,
                   draft: !target.conversationId,
                   openLatest: false,
                 });
-                updateDraft("");
               }
               setSheet(undefined);
             }}
@@ -1410,16 +1434,18 @@ export function AssistantScreen({
                   selected: item.id === assistant.conversationId,
                 }}
                 onPress={() => {
-                  assistant.openConversation(item.id);
                   if (item.id !== assistant.conversationId) {
                     navigation.setParams({
                       conversationId: item.id,
                       acknowledgementId: undefined,
                       agentId: item.agent?.id ?? assistant.agentId,
+                      home: false,
+                      draft: false,
+                      draftId: undefined,
                       openLatest: false,
                     });
-                    updateDraft("");
                   }
+                  assistant.openConversation(item.id);
                   setSheet(undefined);
                 }}
               >
@@ -1626,10 +1652,9 @@ export function AssistantScreen({
                             setSheet(undefined);
                             void assistant.remove().then((removed) => {
                               if (removed)
-                                navigation.setParams({
-                                  conversationId: undefined,
-                                  acknowledgementId: undefined,
-                                });
+                                navigation.setParams(
+                                  newAssistantChatParams(assistant.agentId),
+                                );
                               if (removed) updateDraft("");
                             });
                           },

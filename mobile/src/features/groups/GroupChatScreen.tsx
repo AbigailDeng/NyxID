@@ -1,3 +1,4 @@
+import { assistantDraftStore } from "../assistant/assistantDraftStore";
 import { ChatHeaderFrame, ChatIdentity } from "../assistant/ChatIdentityHeader";
 import { AgentAvatar, AgentAvatarStack } from "../../components/AgentAvatar";
 import type { NativeStackNavigationOptions } from "@react-navigation/native-stack";
@@ -123,12 +124,18 @@ function GroupChat({
   const chatColumn = useChatColumn();
   const transcriptEdges = useScrollEdges();
   const chat = useGroupChat(groupId);
-  const [draft, setDraft] = useState("");
+  const draftKey = `crew:${groupId}`;
+  const [draft, setDraft] = useState(
+    () => assistantDraftStore.get<string>(`text:${draftKey}`) ?? "",
+  );
   const [composerGeneration, setComposerGeneration] = useState(0);
   const currentComposer = useRef(0);
   const revision = useRef(0);
-  const [selection, setSelection] =
-    useState<RecipientSelection>(NO_RECIPIENT_EDITS);
+  const [selection, setSelection] = useState<RecipientSelection>(
+    () =>
+      assistantDraftStore.get<RecipientSelection>(`recipients:${draftKey}`) ??
+      NO_RECIPIENT_EDITS,
+  );
   const [pickingRecipients, setPickingRecipients] = useState<
     false | "add" | "header"
   >(false);
@@ -166,6 +173,7 @@ function GroupChat({
     (group.owner?.type !== "org" ||
       ["creator", "admin", "participant"].includes(group.your_role ?? ""));
   const uploads = useAssistantUploads({
+    retainKey: draftKey,
     groupId,
     model: "",
     generation: 0,
@@ -315,20 +323,27 @@ function GroupChat({
 
   function edit(value: string) {
     revision.current += 1;
+    assistantDraftStore.set(`text:${draftKey}`, value);
     setDraft(value);
-    setSelection((old) =>
-      withDraft(
+    setSelection((old) => {
+      const next = withDraft(
         old,
         resolveAttachmentMentions(value, attachmentMentions),
         group?.members ?? [],
-      ),
-    );
+      );
+      assistantDraftStore.set(`recipients:${draftKey}`, next);
+      return next;
+    });
   }
   function editRecipients(
     update: (old: RecipientSelection) => RecipientSelection,
   ) {
     revision.current += 1;
-    setSelection(update);
+    setSelection((old) => {
+      const next = update(old);
+      assistantDraftStore.set(`recipients:${draftKey}`, next);
+      return next;
+    });
   }
   function removeAttachment(key: string) {
     if (chat.sending || uploads.session.sending) return;
@@ -353,6 +368,8 @@ function GroupChat({
           // Discard native marked text and late IME events from the sent draft.
           currentComposer.current += 1;
           setComposerGeneration(currentComposer.current);
+          assistantDraftStore.set(`text:${draftKey}`, text);
+          assistantDraftStore.set(`recipients:${draftKey}`, nextSelection);
           setDraft(text);
           setSelection(nextSelection);
         },

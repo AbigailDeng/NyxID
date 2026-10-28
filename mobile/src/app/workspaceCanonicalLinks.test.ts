@@ -1,3 +1,4 @@
+import { assistantHomeParams } from "./assistantChatParams";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { getStateFromPath } from "@react-navigation/core";
@@ -92,4 +93,17 @@ test("internal billing links validate period, preserve owner, and unrelated link
       .state!.routes[0]!.name,
     "Machines",
   );
+});
+
+test("canonical /assistant without a thread explicitly selects NyxBot home", () => {
+  const state = parse("/assistant")!;
+  assert.equal(state.routes.length, 1);
+  const home = state.routes[0]!.state!.routes[0]!;
+  assert.equal(home.name, "Assistant");
+  assert.deepEqual(home.params, assistantHomeParams());
+  const draft = parse("/assistant?draft=true")!.routes[0]!.state!.routes[0]!
+    .params as any;
+  assert.equal(draft.home, false);
+  assert.equal(draft.draft, true);
+  assert.ok(draft.draftId);
 });

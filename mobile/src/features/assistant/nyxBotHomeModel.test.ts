@@ -42,6 +42,7 @@ test("greeting follows the web's local-time boundaries", () => {
 
 test("home appears only in the idle primary NyxBot state, including the route adoption boundary", () => {
   const idle = {
+    home: true,
     contextual: false,
     nyxbot: true,
     sending: false,
@@ -50,6 +51,7 @@ test("home appears only in the idle primary NyxBot state, including the route ad
   };
   assert.equal(showNyxBotHome(idle), true);
   for (const patch of [
+    { home: false },
     { contextual: true },
     { nyxbot: false },
     { conversationId },

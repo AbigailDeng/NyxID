@@ -1,6 +1,10 @@
 import type { NavigationState, PartialState } from "@react-navigation/routers";
 import { withWorkspaceFallback } from "./navigationHierarchy";
 import type { AssistantParams } from "./navigationTypes";
+import {
+  assistantHomeParams,
+  newAssistantChatParams,
+} from "./assistantChatParams";
 
 type LinkState = PartialState<NavigationState> | undefined;
 
@@ -18,6 +22,38 @@ export function workspaceStateFromPath(
     search = url.searchParams;
   } catch {
     return withWorkspaceFallback(parse(path));
+  }
+  if (
+    !search.has("panel") &&
+    !search.has("c") &&
+    !search.has("g") &&
+    !search.has("agent")
+  ) {
+    const state = withWorkspaceFallback(
+      parse("chat?draft=true&openLatest=false"),
+    );
+    if (!state) return state;
+    return {
+      ...state,
+      routes: state.routes.map((route) =>
+        route.name === "Workspace"
+          ? {
+              ...route,
+              state: {
+                routes: [
+                  {
+                    name: "Assistant",
+                    params:
+                      search.get("draft") === "true"
+                        ? newAssistantChatParams()
+                        : assistantHomeParams(),
+                  },
+                ],
+              },
+            }
+          : route,
+      ),
+    };
   }
   if (search.getAll("panel").length !== 1 || search.get("panel") !== "billing")
     return withWorkspaceFallback(parse(path));

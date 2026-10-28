@@ -722,3 +722,36 @@ test("forced sign-out releases dirty and pending removal guards without a discar
   assert.equal(env.dispatched.length, 1);
   env.unmount();
 });
+
+test("home RESET waits for dirty drawer confirmation and preserves the exact home target", () => {
+  const env = setup({
+    discardOnClose: { title: "Discard changes?", message: "Unsaved edits" },
+  });
+  const action: NavigationAction = {
+    ...env.rootAction,
+    payload: {
+      index: 0,
+      routes: [
+        {
+          name: "Workspace",
+          state: {
+            routes: [
+              {
+                name: "Assistant",
+                params: { home: true, draft: false, openLatest: false },
+              },
+            ],
+          },
+        },
+      ],
+    },
+  };
+  assert.equal(env.attempt(action), true);
+  assert.equal(env.alerts.at(-1)!.title, "Discard changes?");
+  env.choose("Keep editing");
+  assert.equal(env.dispatched.length, 0);
+  assert.equal(env.attempt(action), true);
+  env.choose("Discard");
+  assert.equal(env.dispatched[0], action);
+  env.unmount();
+});

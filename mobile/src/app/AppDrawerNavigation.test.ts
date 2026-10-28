@@ -319,6 +319,16 @@ test("management, chat, scanner and login selections wait for actual menu dismis
   };
   for (const selection of [
     {
+      choose: (drawer: Element) => drawer.props.onHome(),
+      expected: (state: NavigationState) =>
+        workspaceChatNavigationAction(state, { kind: "home" }),
+    },
+    {
+      choose: (drawer: Element) => drawer.props.onNavigate("Assistant"),
+      expected: (state: NavigationState) =>
+        workspaceChatNavigationAction(state, { kind: "home" }),
+    },
+    {
       choose: (drawer: Element) => drawer.props.onNavigate("Agents"),
       expected: () => workspaceNavigateAction("Agents"),
     },
@@ -517,7 +527,7 @@ test("management Chats resolves the latest root state when dismissal completes",
   assert.equal(action.target, latest.key);
   assert.deepEqual(
     action,
-    workspaceNavigateAction("Assistant", undefined, latest),
+    workspaceChatNavigationAction(latest, { kind: "home" }),
   );
   assert.equal(env.rootReads(), 1);
 });

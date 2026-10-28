@@ -5,8 +5,13 @@ import {
 } from "@react-navigation/routers";
 import type { AssistantParams } from "./navigationTypes";
 import { isWorkspaceChatRoute } from "./navigationHierarchy";
+import {
+  assistantHomeParams,
+  newAssistantChatParams,
+} from "./assistantChatParams";
 
 export type WorkspaceChatTarget =
+  | { kind: "home" }
   | { kind: "agent"; agentId?: string; conversationId?: string }
   | { kind: "group"; groupId: string };
 
@@ -51,14 +56,20 @@ export function workspaceChatNavigationAction(
   const workspace = state?.routes.find((route) => route.name === "Workspace");
   if (!state || !workspace) return null;
 
-  if (target.kind === "agent") {
-    const params: AssistantParams = {
-      agentId: target.agentId,
-      conversationId: target.conversationId,
-      acknowledgementId: undefined,
-      draft: !target.conversationId,
-      openLatest: false,
-    };
+  if (target.kind === "agent" || target.kind === "home") {
+    const params: AssistantParams =
+      target.kind === "home"
+        ? assistantHomeParams()
+        : target.conversationId
+          ? {
+              home: false,
+              agentId: target.agentId,
+              conversationId: target.conversationId,
+              acknowledgementId: undefined,
+              draft: !target.conversationId,
+              openLatest: false,
+            }
+          : newAssistantChatParams(target.agentId);
     return {
       ...CommonActions.reset({
         ...state,
@@ -144,6 +155,16 @@ export function activeWorkspaceChatTarget(
     return typeof value === "string" && value.length ? value : undefined;
   };
   if (route.name === "Assistant" || route.name === "AssistantContext") {
+    if (
+      route.name === "Assistant" &&
+      (!params ||
+        (params.home === true &&
+          !params.conversationId &&
+          !params.agentId &&
+          !params.draft &&
+          !params.openLatest))
+    )
+      return { kind: "home" };
     return {
       kind: "agent",
       agentId: stringParam("agentId"),

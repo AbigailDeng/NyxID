@@ -526,6 +526,7 @@ function ThemedAppShell({
     navigate?.();
   }, []);
   const navigateFromDrawer = (route: WorkspaceRoute) => {
+    if (route === "Assistant") return openChatFromDrawer({ kind: "home" });
     closeDrawerThen(() => {
       if (!navigationRef.isReady()) return;
       const action = workspaceNavigateAction(
@@ -617,6 +618,7 @@ function ThemedAppShell({
           onClose={() => setDrawerOpen(false)}
           onDismiss={onDrawerDismiss}
           onNavigate={navigateFromDrawer}
+          onHome={() => navigateFromDrawer("Assistant")}
           onScan={() => {
             closeDrawerThen(() => {
               if (!navigationRef.isReady()) return;

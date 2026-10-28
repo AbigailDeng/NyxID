@@ -288,6 +288,7 @@ function WorkspaceNavigator() {
         <ChatTabs.Screen
           name="Assistant"
           component={AssistantScreen}
+          initialParams={{ home: true }}
           options={{ title: "NyxID" }}
         />
       </ChatTabs.Navigator>

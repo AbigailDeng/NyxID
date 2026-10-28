@@ -15,6 +15,9 @@ import type { UsageCreditsRouteParams } from "../features/billing/UsageCreditsSc
 import type { MachineDesktopRouteParams } from "../features/machines/desktopEntry";
 
 export type AssistantParams = {
+  home?: boolean;
+  /** Local identity of an unsent compose session; never sent to the server. */
+  draftId?: string;
   conversationId?: string;
   acknowledgementId?: string;
   agentId?: string;

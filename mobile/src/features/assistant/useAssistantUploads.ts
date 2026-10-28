@@ -1,3 +1,4 @@
+import { assistantDraftStore } from "./assistantDraftStore";
 import { useEffect, useRef, useState } from "react";
 import { ActionSheetIOS, Alert, AppState, Platform } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
@@ -51,7 +52,9 @@ export function useAssistantUploads({
   enabled,
   online,
   reservedMentionHandles,
+  retainKey,
 }: {
+  retainKey?: string;
   conversationId?: string;
   groupId?: string;
   agentId?: string;
@@ -94,95 +97,112 @@ export function useAssistantUploads({
     agentId ?? null,
     conversationId ?? null,
     groupId ?? null,
+    retainKey ?? null,
   ]);
   const context = useRef<
-    { key: string; session: AssistantUploadSession } | undefined
+    | { key: string; retainKey?: string; session: AssistantUploadSession }
+    | undefined
   >(undefined);
   function createSession() {
     let confirmedModel: string | undefined;
-    const ctx: AssistantUploadSession = new AssistantUploadSession(
-      {
-        current: () => current.current === ctx && epoch === getAuthEpoch(),
-        reservedMentionHandles: () => live.current.reservedMentionHandles ?? [],
-        available: () =>
-          live.current.enabled &&
-          live.current.focused &&
-          live.current.foreground &&
-          AppState.currentState === "active" &&
-          live.current.online,
-        changed: () => setVersion((value) => value + 1),
-        disposeFile,
-        fileSize: (file) => nativeFile(file).size,
-        readBytes: async (file, signal) => {
+    let ctx: AssistantUploadSession;
+    const dependencies = {
+      current: () => current.current === ctx && epoch === getAuthEpoch(),
+      reservedMentionHandles: () => live.current.reservedMentionHandles ?? [],
+      available: () =>
+        live.current.enabled &&
+        live.current.focused &&
+        live.current.foreground &&
+        AppState.currentState === "active" &&
+        live.current.online,
+      changed: () => setVersion((value) => value + 1),
+      disposeFile,
+      fileSize: (file) => nativeFile(file).size,
+      readBytes: async (file, signal) => {
+        if (signal.aborted) throw cancelled();
+        const source = nativeFile(file);
+        const size = source.size;
+        const sizeError = attachmentFileError(file, size);
+        if (sizeError) throw new Error(sizeError);
+        const handle = source.open();
+        try {
+          // Bound the read even if the native provider's size is stale. One
+          // extra byte detects a changed copy instead of sending a prefix.
+          const bytes = handle.readBytes(
+            Math.min(size, MAX_ASSISTANT_ATTACHMENT_BYTES) + 1,
+          );
           if (signal.aborted) throw cancelled();
-          const source = nativeFile(file);
-          const size = source.size;
-          const sizeError = attachmentFileError(file, size);
-          if (sizeError) throw new Error(sizeError);
-          const handle = source.open();
-          try {
-            // Bound the read even if the native provider's size is stale. One
-            // extra byte detects a changed copy instead of sending a prefix.
-            const bytes = handle.readBytes(
-              Math.min(size, MAX_ASSISTANT_ATTACHMENT_BYTES) + 1,
-            );
-            if (signal.aborted) throw cancelled();
-            if (bytes.byteLength !== size)
-              throw new Error("The file changed. Choose it again.");
-            return bytes;
-          } finally {
-            handle.close();
-          }
-        },
-        createDraft: (signal) => {
-          if (groupId) throw new Error("Open a saved crew to attach files.");
-          return assistantUploadsApi.createDraft(agentId, signal);
-        },
-        prepareDraft: async (id, signal) => {
-          // A PATCH failure retains the durable id and already accepted files.
-          while (confirmedModel !== modelRef.current) {
-            if (
-              current.current !== ctx ||
-              epoch !== getAuthEpoch() ||
-              signal.aborted
-            )
-              throw cancelled();
-            if (
-              !live.current.enabled ||
-              !live.current.focused ||
-              !live.current.foreground ||
-              AppState.currentState !== "active" ||
-              !live.current.online
-            )
-              throw new Error("Reconnect and keep this chat open to send.");
-            const requested = modelRef.current;
-            if (!requested) return;
-            await assistantApi.changeModel(id, requested, signal);
-            confirmedModel = requested;
-          }
-        },
-        upload: (id, file, bytes, signal, onProgress) =>
-          assistantUploadsApi.upload(
-            { kind: groupId ? "groups" : "conversations", id },
-            file,
-            bytes,
-            signal,
-            onProgress,
-          ),
-        remove: (id, attachmentId) =>
-          epoch === getAuthEpoch()
-            ? assistantUploadsApi.remove(
-                { kind: groupId ? "groups" : "conversations", id },
-                attachmentId,
-              )
-            : Promise.resolve(),
+          if (bytes.byteLength !== size)
+            throw new Error("The file changed. Choose it again.");
+          return bytes;
+        } finally {
+          handle.close();
+        }
       },
-      groupId ?? conversationId,
-    );
+      createDraft: (signal) => {
+        if (groupId) throw new Error("Open a saved crew to attach files.");
+        return assistantUploadsApi.createDraft(agentId, signal);
+      },
+      prepareDraft: async (id, signal) => {
+        // A PATCH failure retains the durable id and already accepted files.
+        while (confirmedModel !== modelRef.current) {
+          if (
+            current.current !== ctx ||
+            epoch !== getAuthEpoch() ||
+            signal.aborted
+          )
+            throw cancelled();
+          if (
+            !live.current.enabled ||
+            !live.current.focused ||
+            !live.current.foreground ||
+            AppState.currentState !== "active" ||
+            !live.current.online
+          )
+            throw new Error("Reconnect and keep this chat open to send.");
+          const requested = modelRef.current;
+          if (!requested) return;
+          await assistantApi.changeModel(id, requested, signal);
+          confirmedModel = requested;
+        }
+      },
+      upload: (id, file, bytes, signal, onProgress) =>
+        assistantUploadsApi.upload(
+          { kind: groupId ? "groups" : "conversations", id },
+          file,
+          bytes,
+          signal,
+          onProgress,
+        ),
+      remove: (id, attachmentId) =>
+        epoch === getAuthEpoch()
+          ? assistantUploadsApi.remove(
+              { kind: groupId ? "groups" : "conversations", id },
+              attachmentId,
+            )
+          : Promise.resolve(),
+    } satisfies ConstructorParameters<typeof AssistantUploadSession>[0];
+    const retained =
+      retainKey &&
+      context.current?.key !== key &&
+      context.current?.retainKey === retainKey
+        ? undefined
+        : retainKey
+          ? assistantDraftStore.get<AssistantUploadSession>(
+              `uploads:${retainKey}`,
+            )
+          : undefined;
+    ctx =
+      retained && !retained.disposed
+        ? retained
+        : new AssistantUploadSession(dependencies, groupId ?? conversationId);
+    ctx.rebind(dependencies);
+    if (retainKey)
+      assistantDraftStore.set(`uploads:${retainKey}`, ctx, () => ctx.dispose());
     return ctx;
   }
   if (!context.current || context.current.key !== key)
-    context.current = { key, session: createSession() };
+    context.current = { key, retainKey, session: createSession() };
   const session = context.current.session;
   current.current = session;
   const pendingPicker = useRef<
@@ -204,7 +224,25 @@ export function useAssistantUploads({
       // ownership immediately, and dispose after the replay microtask.
       queueMicrotask(() => {
         if (lifecycle.current === operation || current.current !== session) {
-          session.dispose();
+          const retain =
+            retainKey &&
+            epoch === getAuthEpoch() &&
+            session.entries.size > 0 &&
+            !session.sending &&
+            assistantDraftStore.get<AssistantUploadSession>(
+              `uploads:${retainKey}`,
+            ) === session;
+          if (retain) session.interrupt();
+          else {
+            session.dispose();
+            if (
+              retainKey &&
+              assistantDraftStore.get<AssistantUploadSession>(
+                `uploads:${retainKey}`,
+              ) === session
+            )
+              assistantDraftStore.delete(`uploads:${retainKey}`);
+          }
           if (pendingPicker.current?.session === session) {
             pendingPicker.current.files.forEach(disposeFile);
             pendingPicker.current = undefined;
@@ -329,8 +367,9 @@ export function useAssistantUploads({
             throw new Error(
               "This photo format needs the updated NyxID app. Choose a JPEG or PNG using Files.",
             );
-          const { ImageManipulator, SaveFormat } =
-            await import("expo-image-manipulator");
+          const { ImageManipulator, SaveFormat } = await import(
+            "expo-image-manipulator"
+          );
           const context = ImageManipulator.manipulate(file.uri);
           try {
             const image = await context.renderAsync();

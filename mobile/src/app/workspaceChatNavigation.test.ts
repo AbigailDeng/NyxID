@@ -25,7 +25,9 @@ const workspaceOptions = {
   routeParamList: {},
   routeGetIdList: {},
 };
-const rootRouter = hydratedTestRouter(StackRouter({ initialRouteName: "Workspace" }));
+const rootRouter = hydratedTestRouter(
+  StackRouter({ initialRouteName: "Workspace" }),
+);
 const rootOptions = {
   routeNames: [
     "Auth",
@@ -132,6 +134,7 @@ test("a drawer chat replaces contextual detail history and clears stale assistan
   );
   assert.equal(route(tabs).name, "Assistant");
   assert.deepEqual(route(tabs).params, {
+    home: false,
     agentId: "chosen-agent",
     conversationId: "chosen-chat",
     acknowledgementId: undefined,
@@ -152,13 +155,16 @@ test("agent targets without a conversation start a draft, including default NyxB
   for (const agentId of ["selected-specialist", undefined]) {
     const next = select(fixture(), { kind: "agent", agentId });
     const tabs = child(next);
-    assert.deepEqual(route(tabs).params, {
-      agentId,
-      conversationId: undefined,
-      acknowledgementId: undefined,
-      draft: true,
-      openLatest: false,
-    });
+    const params = route(tabs).params as any;
+    assert.equal(params.agentId, agentId);
+    assert.equal(params.conversationId, undefined);
+    assert.equal(params.home, false);
+    assert.equal(params.draft, true);
+    assert.match(params.draftId, /^draft-/);
+    assert.equal(params.openLatest, false);
+    const again = route(child(select(next, { kind: "agent", agentId })))
+      .params as any;
+    assert.notEqual(again.draftId, params.draftId);
   }
 });
 
@@ -354,6 +360,20 @@ test("contextual navigation waits for an authenticated chat navigator", () => {
 });
 
 test("active chat targets preserve exact identities and ignore non-chat routes", () => {
+  assert.deepEqual(
+    activeWorkspaceChatTarget({ name: "Assistant", params: { home: true } }),
+    { kind: "home" },
+  );
+  for (const params of [
+    { home: true, agentId: "agent" },
+    { home: true, conversationId: "chat" },
+    { home: true, draft: true },
+  ]) {
+    assert.equal(
+      activeWorkspaceChatTarget({ name: "Assistant", params })?.kind,
+      "agent",
+    );
+  }
   for (const name of ["Assistant", "AssistantContext"]) {
     assert.deepEqual(
       activeWorkspaceChatTarget({
@@ -366,11 +386,16 @@ test("active chat targets preserve exact identities and ignore non-chat routes",
       }),
       { kind: "agent", agentId: "agent", conversationId: "chat" },
     );
-    assert.deepEqual(activeWorkspaceChatTarget({ name }), {
-      kind: "agent",
-      agentId: undefined,
-      conversationId: undefined,
-    });
+    assert.deepEqual(
+      activeWorkspaceChatTarget({ name }),
+      name === "Assistant"
+        ? { kind: "home" }
+        : {
+            kind: "agent",
+            agentId: undefined,
+            conversationId: undefined,
+          },
+    );
     assert.deepEqual(
       activeWorkspaceChatTarget({
         name,

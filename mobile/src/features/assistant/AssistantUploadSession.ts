@@ -84,6 +84,10 @@ export class AssistantUploadSession {
   get blocked() {
     return [...this.entries.values()].some((row) => !row.item || row.error);
   }
+  /** A retained composer reattaches its current lifecycle and account guards. */
+  rebind(deps: Dependencies) {
+    this.deps = deps;
+  }
   private alive() {
     return !this.disposed && this.deps.current();
   }

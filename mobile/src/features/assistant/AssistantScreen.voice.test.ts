@@ -1,3 +1,7 @@
+import {
+  createAssistantDraftStore,
+  assistantDraftKey,
+} from "./assistantDraftStore";
 import assert from "node:assert/strict";
 import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
@@ -68,6 +72,7 @@ function composerButton(props: {
 
 // Exercise enabled and unavailable server/runtime admission separately.
 function setup(conversationId?: string, enableVoiceForTest = true) {
+  let onAdopt: ((id: string) => void) | undefined;
   let headerOptions: Record<string, any> = {};
   const headerModule = {};
   const draft = deferred<string>();
@@ -160,10 +165,18 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
   const props = {
     contextual: false,
     route: {
-      params: { agentId: agent.id, conversationId } as AssistantParams,
+      params: {
+        home: !conversationId,
+        agentId: agent.id,
+        conversationId,
+      } as AssistantParams,
     },
   };
   const harness = hookHarness<Element>({
+    "./assistantDraftStore": {
+      assistantDraftKey,
+      assistantDraftStore: createAssistantDraftStore(() => epoch),
+    },
     "./ChatIdentityHeader": headerModule,
     "react-native-safe-area-context": { SafeAreaView: "SafeAreaView" },
     "../display/ChatLayoutContext": {
@@ -220,6 +233,7 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
       useNavigation: () => ({
         setParams: (params: Record<string, unknown>) => {
           events.push(["params", { ...params }]);
+          Object.assign(props.route.params, params);
         },
         dispatch: () => {},
         navigate: (name: string, params: unknown) =>
@@ -275,7 +289,12 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
       }),
     },
     "./NyxBotHome": { NyxBotHome: "NyxBotHome" },
-    "./useAssistant": { useAssistant: () => assistant },
+    "./useAssistant": {
+      useAssistant: (_id: unknown, _agent: unknown, adopt: typeof onAdopt) => {
+        onAdopt = adopt;
+        return assistant;
+      },
+    },
     "./useAssistantUploads": { useAssistantUploads: () => uploads },
     "./useComposerDictation": {
       useComposerDictation: () => ({ active: false, phase: "idle" }),
@@ -409,9 +428,21 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     drafts,
     featureQueries,
     draft,
+    adopt: (id: string) => {
+      assistant.conversationId = id;
+      onAdopt?.(id);
+      harness.render();
+    },
     all,
     button,
     header: () => expand(headerOptions.headerTitle()),
+    compose: () => {
+      const actions = expand(headerOptions.headerRight());
+      elements(actions)
+        .find((n) => n.props.accessibilityLabel === "New chat")!
+        .props.onPress();
+      harness.flush();
+    },
     chooseAgent: () => {
       const header = expand(headerOptions.headerTitle());
       elements(header)
@@ -523,7 +554,14 @@ test("empty chat creates exactly one real draft and adopts it before opening voi
     x.events.find(([name]) => name === "params"),
     [
       "params",
-      { conversationId: A, acknowledgementId: undefined, openLatest: false },
+      {
+        conversationId: A,
+        acknowledgementId: undefined,
+        home: false,
+        draft: false,
+        draftId: undefined,
+        openLatest: false,
+      },
     ],
   );
   assert.equal(
@@ -981,6 +1019,8 @@ test("home opens the exact request conversation and leaves Message NyxBot below 
     [
       "params",
       {
+        home: false,
+        draftId: undefined,
         agentId: "agent-a",
         conversationId: A,
         acknowledgementId: "request-id",
@@ -1009,6 +1049,8 @@ test("home roster Chat reuses latest-thread navigation and crew navigation retai
   assert.deepEqual(x.events.at(-1), [
     "params",
     {
+      home: false,
+      draftId: x.props.route.params.draftId,
       agentId: "agent-a",
       conversationId: undefined,
       acknowledgementId: undefined,
@@ -1069,7 +1111,7 @@ test("Choose agent uses the shared hierarchy and links the existing thread sheet
   x.harness.unmount();
 });
 
-test("picker keeps the current thread draft and follows existing clearing rules for another thread", () => {
+test("picker retains each saved thread draft and starts an independent empty compose session", () => {
   const x = setup(A);
   x.input().props.onChangeText("Unsent review");
   x.harness.flush();
@@ -1093,6 +1135,8 @@ test("picker keeps the current thread draft and follows existing clearing rules 
   assert.deepEqual(x.events.at(-1), [
     "params",
     {
+      home: false,
+      draftId: undefined,
       agentId: "agent-a",
       conversationId: B,
       acknowledgementId: undefined,
@@ -1108,6 +1152,8 @@ test("picker keeps the current thread draft and follows existing clearing rules 
   assert.deepEqual(x.events.at(-1), [
     "params",
     {
+      home: false,
+      draftId: x.props.route.params.draftId,
       agentId: "agent-a",
       conversationId: undefined,
       acknowledgementId: undefined,
@@ -1342,5 +1388,213 @@ test("settled transcript keeps the compact footer without voting for completed/f
   item.status = "completed";
   item.error_code = "cancelled";
   assert.equal(render().props.onFeedback, undefined);
+  x.harness.unmount();
+});
+
+test("home navigation keeps thread text in that thread and uses a separate NyxBot draft", () => {
+  const x = setup(A, false);
+  x.input().props.onChangeText("Original thread draft");
+  x.harness.flush();
+  x.props.route.params = { home: true, openLatest: false };
+  x.assistant.openConversation();
+  x.harness.render();
+  assert.equal(x.input().props.value, "");
+  x.input().props.onChangeText("Message NyxBot draft");
+  x.harness.flush();
+  x.props.route.params = { conversationId: A, agentId: x.assistant.agent.id };
+  x.assistant.openConversation(A);
+  x.harness.render();
+  assert.equal(x.input().props.value, "Original thread draft");
+  x.props.route.params = { home: true, openLatest: false };
+  x.assistant.openConversation();
+  x.harness.render();
+  assert.equal(x.input().props.value, "Message NyxBot draft");
+  x.harness.unmount();
+});
+
+test("header compose preserves the viewed agent and starts a normal empty chat from home or either agent's thread", () => {
+  for (const origin of [
+    "home",
+    "nyxbot-thread",
+    "specialist-thread",
+    "nyxbot-new",
+    "specialist-new",
+  ]) {
+    const saved = origin.endsWith("thread");
+    const x = setup(saved ? A : undefined, false);
+    const specialist = origin.startsWith("specialist");
+    Object.assign(
+      x.assistant.agent,
+      specialist
+        ? {
+            id: "specialist",
+            kind: "specialist",
+            name: "researcher",
+            display_name: "Researcher",
+          }
+        : {
+            id: "agent-a",
+            kind: "nyxbot",
+            name: "nyxbot",
+            display_name: "NyxBot",
+          },
+    );
+    x.assistant.agentId = x.assistant.agent.id;
+    x.props.route.params = {
+      agentId: x.assistant.agent.id,
+      conversationId: saved ? A : undefined,
+      home: origin === "home",
+      draft: !saved && origin !== "home",
+    };
+    x.harness.render();
+    x.input().props.onChangeText("Keep the original draft");
+    x.harness.flush();
+    x.compose();
+    assert.equal(x.props.route.params.agentId, x.assistant.agent.id, origin);
+    assert.equal(x.props.route.params.home, false, origin);
+    assert.equal(x.props.route.params.draft, true, origin);
+    assert.ok(x.props.route.params.draftId, origin);
+    assert.equal(x.input().props.value, "", origin);
+    assert.equal(
+      x.all().some((n) => n.type === "NyxBotHome"),
+      false,
+      origin,
+    );
+    assert.ok(
+      x.all().some((n) => n.type === "FlatList"),
+      origin,
+    );
+    assert.match(
+      elements(x.header()).find((n) => n.type === "Pressable")!.props
+        .accessibilityLabel,
+      new RegExp(`Chatting with ${x.assistant.agent.display_name}, New chat`),
+      origin,
+    );
+    const firstDraftId = x.props.route.params.draftId;
+    const firstGeneration = x.input().props.generation;
+    x.input().props.onChangeText("Keep second draft too");
+    x.harness.flush();
+    x.compose();
+    assert.notEqual(x.props.route.params.draftId, firstDraftId);
+    assert.notEqual(x.input().props.generation, firstGeneration);
+    assert.equal(x.input().props.value, "");
+    if (saved) {
+      x.assistant.openConversation(A);
+      x.props.route.params = {
+        agentId: x.assistant.agent.id,
+        conversationId: A,
+      };
+      x.harness.render();
+      assert.equal(x.input().props.value, "Keep the original draft");
+    }
+    x.harness.unmount();
+  }
+});
+
+test("agent picker New chat starts NyxBot and specialists in the normal empty-chat view", () => {
+  for (const specialist of [false, true]) {
+    const x = setup(A, false);
+    if (specialist)
+      Object.assign(x.assistant.agent, {
+        id: "specialist",
+        kind: "specialist",
+        display_name: "Researcher",
+      });
+    x.assistant.agentId = x.assistant.agent.id;
+    x.harness.render();
+    x.input().props.onChangeText("Thread draft");
+    x.harness.flush();
+    x.chooseAgent();
+    x.all()
+      .find((n) => n.type === "WorkspaceChatList")!
+      .props.onSelect({ kind: "agent", agentId: x.assistant.agent.id });
+    x.harness.flush();
+    assert.equal(x.props.route.params.agentId, x.assistant.agent.id);
+    assert.equal(x.props.route.params.home, false);
+    assert.equal(x.input().props.value, "");
+    assert.equal(
+      x.all().some((n) => n.type === "NyxBotHome"),
+      false,
+    );
+    x.harness.unmount();
+  }
+});
+
+test("home composer sends to NyxBot and adoption leaves a normal chat with its own draft", async () => {
+  const x = setup(undefined, false);
+  assert.ok(x.all().some((n) => n.type === "NyxBotHome"));
+  x.input().props.onChangeText("Message NyxBot");
+  x.harness.flush();
+  x.button("Send message")!.props.onPress();
+  await x.harness.settle();
+  assert.deepEqual(
+    x.events.find((e) => e[0] === "send"),
+    ["send", "Message NyxBot", undefined],
+  );
+  x.adopt(A);
+  assert.equal(x.props.route.params.home, false);
+  assert.equal(x.props.route.params.conversationId, A);
+  assert.equal(
+    x.all().some((n) => n.type === "NyxBotHome"),
+    false,
+  );
+  assert.equal(x.input().props.value, "");
+  x.input().props.onChangeText("Draft for the adopted thread");
+  x.harness.flush();
+  x.props.route.params = { home: true };
+  x.assistant.openConversation();
+  x.harness.render();
+  assert.equal(x.input().props.value, "");
+  x.props.route.params = { home: false, conversationId: A };
+  x.assistant.openConversation(A);
+  x.harness.render();
+  assert.equal(x.input().props.value, "Draft for the adopted thread");
+  x.harness.unmount();
+});
+
+test("explicit NyxBot draft mode overrides the navigator's initial home parameter", () => {
+  const x = setup(undefined, false);
+  x.props.route.params = { home: true, draft: true };
+  x.harness.render();
+  assert.equal(
+    x.all().some((n) => n.type === "NyxBotHome"),
+    false,
+  );
+  assert.ok(x.all().some((n) => n.type === "FlatList"));
+  x.harness.unmount();
+});
+
+test("History selection retains the source thread draft and restores the selected thread draft", () => {
+  const x = setup(A, false);
+  (x.assistant.conversations as any[]).push({
+    id: B,
+    title: "Other chat",
+    agent: x.assistant.agent,
+  });
+  x.input().props.onChangeText("Original draft");
+  x.harness.flush();
+  x.chooseAgent();
+  x.all()
+    .find((n) => n.type === "ActionButton" && n.props.label === "History")!
+    .props.onPress();
+  x.harness.flush();
+  x.all()
+    .find((n) =>
+      n.props.accessibilityLabel?.startsWith("Open chat Other chat"),
+    )!
+    .props.onPress();
+  x.harness.flush();
+  assert.equal(x.input().props.value, "");
+  assert.equal(x.props.route.params.home, false);
+  x.input().props.onChangeText("Other draft");
+  x.harness.flush();
+  x.props.route.params = { conversationId: A };
+  x.assistant.openConversation(A);
+  x.harness.render();
+  assert.equal(x.input().props.value, "Original draft");
+  x.props.route.params = { conversationId: B };
+  x.assistant.openConversation(B);
+  x.harness.render();
+  assert.equal(x.input().props.value, "Other draft");
   x.harness.unmount();
 });

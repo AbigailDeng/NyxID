@@ -58,6 +58,7 @@ export function WorkspaceDrawer({
   onClose,
   onDismiss,
   onNavigate,
+  onHome,
   onScan,
   onLoginCode,
   onUsageCredits,
@@ -71,6 +72,7 @@ export function WorkspaceDrawer({
   onClose: () => void;
   onDismiss?: () => void;
   onNavigate: (route: WorkspaceRoute) => void;
+  onHome: () => void;
   onScan: () => void;
   onLoginCode: () => void;
   onUsageCredits: () => void;
@@ -105,7 +107,14 @@ export function WorkspaceDrawer({
         ]}
       >
         <View style={styles.brandRow}>
-          <NyxidLogo />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="NyxID home"
+            onPress={onHome}
+            style={{ minHeight: 44, justifyContent: "center", flex: 1 }}
+          >
+            <NyxidLogo />
+          </Pressable>
           <Pressable
             ref={closeButton}
             accessibilityRole="button"
@@ -166,6 +175,7 @@ export function WorkspaceDrawer({
                   <Pressable
                     key={route}
                     accessibilityRole="button"
+                    accessibilityLabel={label}
                     accessibilityState={{ selected: currentRoute === route }}
                     onPress={() => onNavigate(route)}
                     style={[
