@@ -175,6 +175,16 @@ this banner is mostly a defense against stale capability state rather than the n
 Backed by `GET /api/v1/billing/wallet` → `BillingWalletResponse` (`handlers/billing.rs:94-114`;
 model at `models/billing_wallet.rs`).
 
+Native read-only views use `GET /api/v1/billing/wallet/view`, which returns the
+same dedicated response for an existing personal wallet, or JSON `null` when
+none exists. It only reads the wallet; it never provisions a local wallet or
+contacts Lago. It shares the legacy wallet route's authentication and billing
+rollout gates, including rejection of API keys and delegated `account:read`
+tokens. The legacy `GET /billing/wallet` still auto-provisions when absent.
+Older servers return 404 for `/wallet/view`; clients must show an unavailable
+state and never fall back to the provisioning GET. A supported `null` response
+means "No billing account yet."
+
 For mixed billing lanes, the allowance unit selector follows [the metering and allowance rules](USAGE_BILLING_LAGO_SPEC.md#40-metadata-only-route-context-r1).
 
 ### Administrator credit allocations

@@ -2421,6 +2421,7 @@ mod tests {
             "/api/v1/webhooks/telegram",
             "/api/v1/integrations/openclaw/mappings",
             "/api/v1/billing/wallet",
+            "/api/v1/billing/wallet/view",
             "/api/v1/oracle/pools",
             "/api/v1/ownership/service/id/authorization",
             "/api/v1/ownership/service/id/destinations",

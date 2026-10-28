@@ -147,6 +147,7 @@
         // Billing
         crate::handlers::billing::get_usage,
         crate::handlers::billing::get_wallet,
+        crate::handlers::billing::view_wallet,
         crate::handlers::billing::provision_wallet,
         crate::handlers::billing::create_topup,
         crate::handlers::billing::list_topups,

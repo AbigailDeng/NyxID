@@ -557,6 +557,37 @@ pub async fn get_wallet(
     )?))
 }
 
+/// Native billing views must not provision a wallet as a read side effect.
+#[utoipa::path(
+    get,
+    path = "/api/v1/billing/wallet/view",
+    tag = "Billing",
+    responses(
+        (status = 200, description = "Existing personal wallet, or null if absent; never provisions", body = Option<BillingWalletResponse>),
+        (status = 401, description = "Authentication required"),
+        (status = 403, description = "Credential or billing rollout does not permit wallet access")
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn view_wallet(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+) -> AppResult<Json<Option<BillingWalletResponse>>> {
+    let actor_id = auth_user.user_id.to_string();
+    let owner = state
+        .billing
+        .owner_resolver()
+        .resolve_for_wallet_management(&actor_id, None)
+        .await?;
+    ensure_billing_rollout(&state, &owner.owner_id, &actor_id).await?;
+    let wallet = state.billing.get_wallet(&owner.owner_id).await?;
+    Ok(Json(
+        wallet
+            .map(|wallet| BillingWalletResponse::from_wallet(wallet, false))
+            .transpose()?,
+    ))
+}
+
 #[utoipa::path(
     post,
     path = "/api/v1/billing/wallet",
