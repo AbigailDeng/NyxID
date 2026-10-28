@@ -10,7 +10,12 @@ function renderer() {
   const canvas = { width: 800, height: 600, style: {} as Record<string, string>, getContext: () => ({}),
     getBoundingClientRect: () => ({left:100,top:0,right:900,bottom:600,width:800,height:600}) };
   const window: any = { innerWidth: 1000, innerHeight: 600, addEventListener: () => {}, ReactNativeWebView: {postMessage: (s: string) => messages.push(JSON.parse(s))} };
-  const source = canvasDocument().match(/<script>([\s\S]*)<\/script>/)![1]!;
+  const html = canvasDocument();
+  const opening = html.indexOf('<script>');
+  const closing = html.lastIndexOf('</script>');
+  assert.notEqual(opening, -1, 'generated canvas has an opening script tag');
+  assert.ok(closing > opening, 'generated canvas has a closing script tag');
+  const source = html.slice(opening + '<script>'.length, closing);
   runInNewContext(source, {window, document: {getElementById:()=>canvas,addEventListener:(name:string,handler:(event:any)=>void)=>{handlers[name]=handler;}}, Date: {now:()=>now}});
   const touch = (x: number, y: number) => ({clientX:x,clientY:y});
   const fire = (name: string, touches: ReturnType<typeof touch>[], changedTouches = touches) => handlers[name]!({touches,changedTouches,preventDefault(){}});
