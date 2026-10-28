@@ -52,6 +52,7 @@ export const conversationSchema = z.object({
   last_message_at: z.string(),
   message_count: z.number(),
   pending_acknowledgements: z.number().default(0),
+  pending_events: z.number().int().nonnegative().optional(),
   active_turn: z
     .object({
       turn_id: z.string(),
@@ -139,6 +140,14 @@ export const messageSchema = z.object({
   seq: z.number().int().positive(),
   turn_id: z.string(),
   role: z.enum(["user", "assistant", "orchestrator", "event"]),
+  origin: z.string().nullish(),
+  automation: z
+    .object({
+      trigger_id: z.string(),
+      run_id: z.string(),
+      label: z.string().nullish(),
+    })
+    .nullish(),
   text: z.string(),
   status: z.enum(["completed", "failed"]),
   error_code: z.string().nullable(),

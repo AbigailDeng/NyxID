@@ -1,4 +1,8 @@
-import { requestAuthenticatedResponse, requestJson } from "./http";
+import {
+  requestAuthenticatedResponse,
+  requestJson,
+  submitChallengeDecisionRequest,
+} from "./http";
 import {
   recoverySchema,
   assistantContextSchema,
@@ -22,6 +26,17 @@ const path = (id: string) =>
   `${ROOT}/conversations/${conversationIdSchema.parse(id)}`;
 
 export const assistantApi = {
+  async decideApproval(id: string, approved: boolean, idempotencyKey: string) {
+    const result = await submitChallengeDecisionRequest(
+      id,
+      approved ? "APPROVE" : "DENY",
+      undefined,
+      idempotencyKey,
+    );
+    if (result.challenge_id !== id)
+      throw new Error("Approval request mismatch.");
+    return result;
+  },
   async list(cursor?: string, agentId?: string, signal?: AbortSignal) {
     const query = new URLSearchParams({ limit: "50" });
     if (cursor) query.set("cursor", cursor);

@@ -1,3 +1,8 @@
+import {
+  AssistantApprovalCard,
+  AssistantWaitingNote,
+} from "./AssistantPendingState";
+import { AssistantSystemMessage } from "./AssistantSystemMessage";
 import { transcriptColumnStyle } from "../display/chatLayout";
 import { newAssistantChatParams } from "../../app/assistantChatParams";
 import { assistantDraftKey, assistantDraftStore } from "./assistantDraftStore";
@@ -635,7 +640,14 @@ export function AssistantScreen({
         </Label>
       );
     if (item.role === "event" || item.role === "orchestrator")
-      return <AssistantBanner>{item.text}</AssistantBanner>;
+      return (
+        <AssistantSystemMessage
+          message={item}
+          onOpenAutomations={() =>
+            navigation.dispatch(workspaceNavigateAction("Automations"))
+          }
+        />
+      );
     const input = retryInput(assistant.history, item);
     const attribution = [
       isUser
@@ -1132,11 +1144,11 @@ export function AssistantScreen({
                       ))}
                   </View>
                 ) : null}
-                {assistant.history?.waiting.map((waiting, index) => (
-                  <AssistantBanner
-                    key={`${waiting.title}:${index}`}
-                  >{`${waiting.title}${waiting.detail ? ` · ${waiting.detail}` : ""}`}</AssistantBanner>
-                ))}
+                <AssistantWaitingNote
+                  items={assistant.history?.waiting ?? []}
+                  agentName={agentName}
+                  pendingEvents={conversation?.pending_events}
+                />
                 <AssistantAcknowledgements
                   key={conversation?.id ?? "draft"}
                   acknowledgements={(
@@ -1159,35 +1171,16 @@ export function AssistantScreen({
                   onToggle={() => transcriptScroll.pause()}
                 />
                 {assistant.history?.approvals.map((approval) => (
-                  <Card key={approval.id}>
-                    <Label style={styles.cardTitle}>
-                      {approval.service_name} · Approval needed
-                    </Label>
-                    <Label>{approval.summary}</Label>
-                    <Label muted>
-                      Scope · {approval.service_slug ?? approval.service_name}
-                      {approval.agent_key_prefix
-                        ? ` · ${approval.agent_key_prefix}`
-                        : ""}
-                      {approval.approval_mode
-                        ? ` · ${approval.approval_mode === "per_request" ? "per-request approval" : "grant"}`
-                        : ""}
-                    </Label>
-                    <Label muted mono>
-                      Expires {formatDate(approval.expires_at)}
-                    </Label>
-                    <ActionButton
-                      label="Review request"
-                      variant="secondary"
-                      onPress={() =>
-                        navigation.dispatch(
-                          openWorkspaceSheetAction("ActivityDetail", {
-                            challengeId: approval.id,
-                          }),
-                        )
-                      }
-                    />
-                  </Card>
+                  <AssistantApprovalCard
+                    key={approval.id}
+                    approval={approval}
+                    disabled={
+                      !assistant.active || !!assistant.deciding || !!destroyed
+                    }
+                    onDecide={(approved) =>
+                      assistant.decideApproval(approval.id, approved)
+                    }
+                  />
                 ))}
               </View>
             }

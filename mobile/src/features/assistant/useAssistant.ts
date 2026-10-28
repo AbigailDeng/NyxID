@@ -6,6 +6,8 @@ import { useQuery } from "@tanstack/react-query";
 import { assistantApi, streamAssistantTurn } from "../../lib/api/assistantApi";
 import { agentsApi } from "../../lib/api/agentsApi";
 import { ApiError } from "../../lib/api/ApiError";
+import { createIdempotencyKey } from "../../lib/api/idempotency";
+import { getAuthEpoch } from "../../lib/auth/authEpoch";
 import { resolveChatAgentId } from "./assistantAgentContext";
 import { useAssistantLiveRefresh } from "./useAssistantLiveRefresh";
 import { recoveryReason } from "./assistantTurnPresentation";
@@ -90,6 +92,8 @@ export function useAssistant(
   const sendLock = useRef(false);
   const sendOperation = useRef<object | undefined>(undefined);
   const decisionLock = useRef(false);
+  const approvalKeys = useRef(new Map<string, string>());
+  const accountEpoch = useRef(getAuthEpoch());
   const lastDecision = useRef(0);
   const consumedRetries = useRef(new Set<string>());
   const previousAgent = useRef(routeAgentId);
@@ -240,6 +244,7 @@ export function useAssistant(
       setInputText(undefined);
       setInputAttachments([]);
       setError(undefined);
+      setDeciding(undefined);
       setRecoveryRequired(false);
       setLoading(!!id);
       setLoadingOlder(false);
@@ -576,6 +581,64 @@ export function useAssistant(
     }
   }
 
+  async function decideApproval(approvalId: string, approved: boolean) {
+    const id = selected.current;
+    const generation = epoch.current;
+    const row = latestHistory.current?.approvals.find(
+      (item) => item.id === approvalId,
+    );
+    if (decisionLock.current) return;
+    if (
+      !id ||
+      !mounted.current ||
+      !activeRef.current ||
+      accountEpoch.current !== getAuthEpoch()
+    )
+      throw new Error("Reconnect to decide this request.");
+    if (
+      !row ||
+      !Number.isFinite(Date.parse(row.expires_at)) ||
+      Date.parse(row.expires_at) <= Date.now() ||
+      latestHistory.current?.conversation.agent?.destroyed
+    )
+      throw new Error(
+        "This request is no longer available. Refresh its latest state.",
+      );
+    if (Date.now() - lastDecision.current < 750)
+      throw new Error("Please wait a moment before deciding again.");
+    lastDecision.current = Date.now();
+    decisionLock.current = true;
+    setDeciding(approvalId);
+    setError(undefined);
+    const key = `${approvalId}:${approved}`;
+    if (!approvalKeys.current.has(key))
+      approvalKeys.current.set(
+        key,
+        createIdempotencyKey("decision", approvalId),
+      );
+    const current = () =>
+      mounted.current &&
+      selected.current === id &&
+      epoch.current === generation &&
+      accountEpoch.current === getAuthEpoch();
+    try {
+      await assistantApi.decideApproval(
+        approvalId,
+        approved,
+        approvalKeys.current.get(key)!,
+      );
+      if (!current()) return;
+      await refreshHistory(id);
+      if (current()) await refreshIndex();
+    } catch (cause) {
+      if (current()) setError(errorMessage(cause));
+      throw cause;
+    } finally {
+      decisionLock.current = false;
+      if (current()) setDeciding(undefined);
+    }
+  }
+
   async function checkRecovery(messageId: string) {
     const id = selected.current;
     const generation = epoch.current;
@@ -760,6 +823,7 @@ export function useAssistant(
     checkRecovery,
     retry,
     decide,
+    decideApproval,
     stop,
     rename,
     remove,

@@ -248,6 +248,11 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
       },
     },
     "expo-web-browser": { openBrowserAsync: async () => {} },
+    "./AssistantPendingState": {
+      AssistantApprovalCard: "ApprovalCard",
+      AssistantWaitingNote: "WaitingNote",
+    },
+    "./AssistantSystemMessage": { AssistantSystemMessage: "SystemMessage" },
     "./AssistantMarkdownBody": { AssistantMarkdownBody: "Markdown" },
     "react-native-markdown-display": {
       default: "Markdown",
