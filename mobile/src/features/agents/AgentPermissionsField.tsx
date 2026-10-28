@@ -1,3 +1,4 @@
+import { useNativeSheetDismiss } from "../../components/workspace/useNativeSheetDismiss";
 import { useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -138,6 +139,7 @@ export function AgentPermissionsSheet({
   onClose,
 }: Props & { onClose: () => void }) {
   const { colors } = useTheme();
+  const sheet = useNativeSheetDismiss(onClose);
   const [draft, setDraft] = useState<AgentPermissions>(() => ({
     services: [...value.services],
     account_read: value.account_read,
@@ -170,7 +172,7 @@ export function AgentPermissionsSheet({
   );
   const changed = grantSignature(draft) !== grantSignature(value);
   const close = () => {
-    if (!savingRef.current) onClose();
+    if (!savingRef.current) sheet.close();
   };
   const save = async () => {
     if (disabled || readOnly || savingRef.current || !changed) return;
@@ -189,7 +191,7 @@ export function AgentPermissionsSheet({
           ? { ...draft.guest_access }
           : { ...value.guest_access },
       });
-      if (saved) onClose();
+      if (saved) sheet.close();
       else setFailedSave(true);
     } catch (cause) {
       setUnexpectedError(
@@ -259,8 +261,7 @@ export function AgentPermissionsSheet({
 
   return (
     <Modal
-      visible
-      animationType="slide"
+      {...sheet.modalProps}
       presentationStyle="pageSheet"
       onRequestClose={() => {
         if (guestService && !savingRef.current) setGuestService(undefined);

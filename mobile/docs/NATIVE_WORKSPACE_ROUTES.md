@@ -115,3 +115,16 @@ slab. Native draft/editor routes are removed by user decision (2026-10-28). Skil
 files are read-only; exact version choice, newest supported exact pin and removal
 from this agent retain the shared critical-write guard. Owner publication
 approve/decline cards remain supported without an inline editor.
+
+Signed-in headers share a 60pt row below the window safe area. Main-page and
+Settings titles use equal control columns and remain centered across the full
+header at 18pt, capped at 1.25×. Chat identity retains its avatar/name layout.
+A sheet shows Back only after an internal push, based on its local stack index.
+Direct QR, Terminal and account entries are local sheet roots with Close only.
+
+Sidebar selection fades out the old content (120ms), swaps with native-stack
+animation `none`, then waits for the new page to paint. The new content fades
+in (180ms) while the slab closes (300ms). Reduced motion skips both. Settings
+and quick actions preserve the expanded sidebar behind their animated sheet.
+Sheet owners wait for native dismissal before unmounting; the shell exposes
+sidebar accessibility only at its settled open endpoint.

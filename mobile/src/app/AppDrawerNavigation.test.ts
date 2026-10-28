@@ -76,7 +76,9 @@ function shellSource() {
   );
 }
 
-function setup() {
+function setup(deferFade = false) {
+  const fades: (() => void)[] = [];
+  const sequence: string[] = [];
   let rootState = fixture();
   let authenticated = true;
   let authEpoch = 0;
@@ -96,7 +98,7 @@ function setup() {
   const focus = createWorkspaceFocusState(
     (target) => focused.push(target),
     (callback) => {
-      scheduledWhileHidden.push(background().props.accessibilityElementsHidden);
+      scheduledWhileHidden.push(find("WorkspacePushShell").props.presented);
       scheduled.push(callback);
     },
     () => authEpoch,
@@ -215,7 +217,10 @@ function setup() {
       return rootState;
     },
     getCurrentRoute: () => ({ name: "Assistant" }),
-    dispatch: (action: NavigationAction) => dispatched.push(action),
+    dispatch: (action: NavigationAction) => {
+      sequence.push("swap");
+      dispatched.push(action);
+    },
   };
   function flush() {
     let iterations = 0;
@@ -247,14 +252,19 @@ function setup() {
     assert.ok(element, `Missing rendered ${name}`);
     return element;
   };
-  const background = () =>
-    elements(rendered).find(
-      (item) =>
-        item.type === "View" && "accessibilityElementsHidden" in item.props,
-    )!;
   dirty = true;
   flush();
+  find("WorkspacePushShell").props.contentTransition.current = {
+    fadeOut: (onHidden: () => void) => {
+      sequence.push("fade out");
+      if (deferFade) fades.push(onHidden);
+      else onHidden();
+    },
+    reveal: () => sequence.push("fade in"),
+  };
   return {
+    sequence,
+    finishFade: () => fades.shift()?.(),
     dispatched,
     focus,
     focused,
@@ -277,7 +287,6 @@ function setup() {
         },
       };
     },
-    background,
     shell: () => find("WorkspacePushShell"),
     navigator: () => find("AppNavigator"),
     commitLast: (paint = true) => {
@@ -549,21 +558,21 @@ test("a content destination inside Settings closes the sidebar only after the sh
   assert.equal(env.shell().props.visible, false);
 });
 
-test("navigation accessibility remains excluded until slab settlement, including sign-out cleanup", () => {
+test("the shell owns sidebar AX settlement without a duplicate background exclusion, including sign-out cleanup", () => {
   const env = setup();
-  assert.equal(env.background().props.accessibilityElementsHidden, false);
+  assert.equal(env.shell().props.presented, false);
   env.open();
-  assert.equal(env.background().props.accessibilityElementsHidden, true);
+  assert.equal(env.shell().props.presented, true);
   env.shell().props.onOpenChange(false);
   env.flush();
-  assert.equal(env.background().props.accessibilityElementsHidden, true);
+  assert.equal(env.shell().props.presented, true);
   env.drawer().props.onDismiss();
   env.flush();
-  assert.equal(env.background().props.accessibilityElementsHidden, false);
+  assert.equal(env.shell().props.presented, false);
   env.open();
   env.authenticate(false);
   assert.equal(env.hasDrawer(), false);
-  assert.equal(env.background().props.accessibilityElementsHidden, false);
+  assert.equal(env.shell().props.presented, false);
 });
 
 test("plain menu Close restores the live invoking owner only after the visible background commits", () => {
@@ -580,7 +589,7 @@ test("plain menu Close restores the live invoking owner only after the visible b
   env.flushFocus();
   assert.deepEqual(env.focused, []);
   env.drawer().props.onDismiss();
-  assert.equal(env.background().props.accessibilityElementsHidden, true);
+  assert.equal(env.shell().props.presented, true);
   env.flush();
   assert.ok(env.scheduledWhileHidden.length > 0);
   assert.ok(env.scheduledWhileHidden.every((hidden) => !hidden));
@@ -707,4 +716,31 @@ test("sidebar Quick actions present above the unchanged expanded base", () => {
     env.changedNavigation();
     assert.equal(env.shell().props.visible, true);
   }
+});
+
+test("destination fades old root before the animation:none swap and reveals only its matching paint", () => {
+  const env = setup(true);
+  env.open();
+  env.drawer().props.onNavigate("Machines");
+  env.drawer().props.onNavigate("Agents");
+  assert.deepEqual(env.sequence, ["fade out"]);
+  assert.equal(env.dispatched.length, 0);
+  assert.equal(env.shell().props.visible, true);
+  env.finishFade();
+  assert.deepEqual(env.sequence, ["fade out", "swap"]);
+  assert.equal(
+    workspaceContentAnimation(
+      false,
+      env.navigator().props.suppressWorkspaceAnimation,
+    ),
+    "none",
+  );
+  env.commitLast(false);
+  env.paint("stale");
+  assert.deepEqual(env.sequence, ["fade out", "swap"]);
+  env.paint();
+  assert.deepEqual(env.sequence, ["fade out", "swap", "fade in"]);
+  assert.equal(env.shell().props.visible, false);
+  env.paint();
+  assert.equal(env.sequence.filter((step) => step === "fade in").length, 1);
 });

@@ -12,6 +12,7 @@ import {
 } from "react";
 import {
   Animated,
+  InteractionManager,
   BackHandler,
   PanResponder,
   Pressable,
@@ -23,7 +24,7 @@ import {
   SafeAreaProvider,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
-import { useReducedMotion } from "../../lib/accessibility/useReducedMotion";
+import { useReducedMotionPreference } from "../../lib/accessibility/useReducedMotion";
 import { SheetThemeProvider, useTheme } from "../../theme/ThemeContext";
 import { darkSheetColors, lightSheetColors } from "../../theme/mobileTheme";
 
@@ -36,8 +37,11 @@ export function WorkspaceSheetSurface({
   canClose,
   controller,
   canHandleHardwareBack,
+  nativePresentation = false,
 }: PropsWithChildren<{
   onClose: () => void;
+  /** A native Modal already owns travel; do not animate the inner surface twice. */
+  nativePresentation?: boolean;
   canClose?: () => Promise<boolean>;
   canHandleHardwareBack?: () => boolean;
   controller?: RefObject<WorkspaceSheetHandle | null>;
@@ -46,9 +50,16 @@ export function WorkspaceSheetSurface({
   const sheet = mode === "light" ? lightSheetColors : darkSheetColors;
   const { height, width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const reduced = useReducedMotion();
-  const offset = useRef(new Animated.Value(reduced ? 0 : height)).current;
-  const scrimOpacity = useRef(new Animated.Value(reduced ? 1 : 0)).current;
+  const reducedMotion = useReducedMotionPreference();
+  const reduced = reducedMotion !== false || nativePresentation;
+  const offset = useRef(
+    new Animated.Value(
+      reducedMotion === true || nativePresentation ? 0 : height,
+    ),
+  ).current;
+  const scrimOpacity = useRef(
+    new Animated.Value(reducedMotion === true || nativePresentation ? 1 : 0),
+  ).current;
   const closing = useRef(false);
   const [interacting, setInteracting] = useState(true);
   const mounted = useRef(true);
@@ -56,31 +67,47 @@ export function WorkspaceSheetSurface({
   const [focusReturn] = useState(() => workspaceFocus.capture(primaryKey));
   const dismissed = useRef(false);
   const entranceStarted = useRef(false);
+  const hostLaidOut = useRef(false);
   const entranceAnimations = useRef<Animated.CompositeAnimation[]>([]);
-  useEffect(() => {
-    if (closing.current) return;
-    if (reduced) {
-      offset.setValue(0);
-      scrimOpacity.setValue(1);
-      entranceStarted.current = true;
+  const entranceTask = useRef<
+    ReturnType<typeof InteractionManager.runAfterInteractions> | undefined
+  >(undefined);
+  // An effect can finish before a transparent native-stack host attaches. Start
+  // after its first layout/interactions so every presentation visibly travels.
+  const present = useCallback(() => {
+    if (
+      !hostLaidOut.current ||
+      reducedMotion === undefined ||
+      entranceStarted.current ||
+      closing.current
+    )
       return;
-    }
-    if (entranceStarted.current) return;
     entranceStarted.current = true;
-    const panelEntrance = Animated.timing(offset, {
-      toValue: 0,
-      duration: 250,
-      useNativeDriver: true,
+    entranceTask.current = InteractionManager.runAfterInteractions(() => {
+      if (!mounted.current || closing.current) return;
+      if (reduced) {
+        offset.setValue(0);
+        scrimOpacity.setValue(1);
+        return;
+      }
+      const panelEntrance = Animated.timing(offset, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: true,
+      });
+      const scrimEntrance = Animated.timing(scrimOpacity, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      });
+      entranceAnimations.current = [panelEntrance, scrimEntrance];
+      panelEntrance.start();
+      scrimEntrance.start();
     });
-    const scrimEntrance = Animated.timing(scrimOpacity, {
-      toValue: 1,
-      duration: 180,
-      useNativeDriver: true,
-    });
-    entranceAnimations.current = [panelEntrance, scrimEntrance];
-    panelEntrance.start();
-    scrimEntrance.start();
-  }, [offset, reduced, scrimOpacity]);
+  }, [offset, reduced, reducedMotion, scrimOpacity]);
+  useEffect(() => {
+    if (hostLaidOut.current) present();
+  }, [present]);
   const reset = useCallback(() => {
     if (reduced) offset.setValue(0);
     else
@@ -107,6 +134,8 @@ export function WorkspaceSheetSurface({
       reset();
       return;
     }
+    entranceTask.current?.cancel();
+    entranceAnimations.current.forEach((animation) => animation.stop());
     if (reduced) {
       dismissed.current = true;
       onClose();
@@ -138,6 +167,7 @@ export function WorkspaceSheetSurface({
     mounted.current = true;
     return () => {
       mounted.current = false;
+      entranceTask.current?.cancel();
       entranceAnimations.current.forEach((animation) => animation.stop());
       if (dismissed.current) workspaceFocus.restore(focusReturn);
     };
@@ -177,6 +207,10 @@ export function WorkspaceSheetSurface({
   return (
     <View
       style={styles.overlay}
+      onLayout={() => {
+        hostLaidOut.current = true;
+        present();
+      }}
       accessibilityViewIsModal
       onAccessibilityEscape={() => void dismiss()}
     >

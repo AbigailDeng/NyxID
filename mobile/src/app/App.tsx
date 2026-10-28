@@ -4,7 +4,10 @@ import {
   workspaceAccessibilityState,
   type WorkspaceAccessibility,
 } from "../lib/accessibility/workspaceAccessibility";
-import { WorkspacePushShell } from "../components/workspace/WorkspacePushShell";
+import {
+  type WorkspaceContentTransitionHandle,
+  WorkspacePushShell,
+} from "../components/workspace/WorkspacePushShell";
 import { workspaceFocus } from "../lib/accessibility/workspaceFocus";
 import { StatusBar } from "expo-status-bar";
 import * as Notifications from "expo-notifications";
@@ -517,6 +520,9 @@ function ThemedAppShell({
   const pendingMenuFocus =
     useRef<ReturnType<typeof workspaceFocus.capture>>(undefined);
   const pendingDrawerNavigation = useRef<NavigationAction | null>(null);
+  const contentTransition = useRef<WorkspaceContentTransitionHandle | null>(
+    null,
+  );
   const didNavigate = useRef(false);
   const awaitingPaint = useRef<string | null>(null);
   const paintedPage = useRef<string | null>(null);
@@ -541,7 +547,11 @@ function ThemedAppShell({
     ) {
       didNavigate.current = true;
       awaitingPaint.current = content;
-      if (paintedPage.current === content) setDrawerOpen(false);
+      if (paintedPage.current === content) {
+        contentTransition.current?.reveal();
+        awaitingPaint.current = null;
+        setDrawerOpen(false);
+      }
     }
     priorSheet.current = { open: next.sheetOpen, content };
     workspaceFocus.context(next.primaryKey, next.sheetOpen);
@@ -551,6 +561,7 @@ function ThemedAppShell({
   };
   useEffect(() => {
     if (!isAuthenticated) {
+      contentTransition.current?.reveal();
       pendingDrawerNavigation.current = null;
       awaitingPaint.current = null;
       paintedPage.current = null;
@@ -569,7 +580,8 @@ function ThemedAppShell({
     if (isAuthenticated) workspaceFocus.restore(origin);
   }, [drawerPresented, isAuthenticated]);
   // Options already disable inner native-stack animation while the sidebar is
-  // presented. Commit the guarded root swap first, then close the slab once.
+  // presented. Hide the old root, commit its guarded swap, then reveal the
+  // painted destination while closing the slab once.
   const selectDestination = (action: NavigationAction | null) => {
     if (
       !authenticatedNow.current ||
@@ -583,7 +595,18 @@ function ThemedAppShell({
     if (workspaceDestinationMatches(navigationRef.getRootState(), action)) {
       didNavigate.current = true;
       setDrawerOpen(false);
-    } else navigationRef.dispatch(action);
+    } else {
+      const dispatch = () => {
+        if (
+          authenticatedNow.current &&
+          pendingDrawerNavigation.current === action
+        )
+          navigationRef.dispatch(action);
+      };
+      if (contentTransition.current)
+        contentTransition.current.fadeOut(dispatch);
+      else dispatch();
+    }
   };
   const onDrawerDismiss = useCallback(() => {
     pendingDrawerNavigation.current = null;
@@ -634,6 +657,7 @@ function ThemedAppShell({
 
   const renderWorkspace = (children: ReactNode) => (
     <WorkspacePushShell
+      contentTransition={contentTransition}
       enabled={isAuthenticated}
       visible={drawerOpen}
       presented={drawerPresented}
@@ -707,15 +731,7 @@ function ThemedAppShell({
         ) : null
       }
     >
-      <View
-        collapsable={false}
-        accessible={false}
-        style={appRootStyles.fill}
-        accessibilityElementsHidden={drawerPresented}
-        importantForAccessibility={
-          drawerPresented ? "no-hide-descendants" : "auto"
-        }
-      >
+      <View collapsable={false} accessible={false} style={appRootStyles.fill}>
         {children}
       </View>
     </WorkspacePushShell>
@@ -741,6 +757,7 @@ function ThemedAppShell({
             onNavigationGuardChange={onNavigationGuardChange}
             onEdgeBackChange={onEdgeBackChange}
             onNavigationCancelled={() => {
+              contentTransition.current?.reveal();
               pendingDrawerNavigation.current = null;
               awaitingPaint.current = null;
             }}
@@ -753,6 +770,7 @@ function ThemedAppShell({
                   identity
               ) {
                 awaitingPaint.current = null;
+                contentTransition.current?.reveal();
                 setDrawerOpen(false);
               }
             }}

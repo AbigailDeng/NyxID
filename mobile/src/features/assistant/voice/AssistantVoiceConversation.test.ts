@@ -178,6 +178,15 @@ function setup(
     },
   };
   const harness = hookHarness<Element>({
+    "../../../components/workspace/useNativeSheetDismiss": {
+      useNativeSheetDismiss: (onClose: () => void) => ({
+        modalProps: { visible: true, animationType: "slide" },
+        close: () => onClose(),
+      }),
+    },
+    "../../../lib/accessibility/useReducedMotion": {
+      useReducedMotion: () => false,
+    },
     "react/jsx-runtime": {
       Fragment: "Fragment",
       jsx: (type: unknown, props: unknown, key?: unknown) => ({

@@ -1,3 +1,4 @@
+import { WORKSPACE_HEADER_ROW } from "./workspaceHeaderMetrics";
 import { useEffect, useState, type Ref } from "react";
 import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
 import {
@@ -109,7 +110,7 @@ export function WorkspaceDrawer({
       edges={["top", "left", "right"]}
       style={[styles.panel, { backgroundColor: colors.sidebarBase }]}
     >
-      <View style={styles.brandRow}>
+      <View testID="workspace-sidebar-header-row" style={styles.brandRow}>
         <Pressable
           ref={initialFocusRef}
           accessibilityRole="button"
@@ -322,10 +323,7 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   brandRow: {
     paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 18,
-    flexDirection: "row",
-    alignItems: "center",
+    ...WORKSPACE_HEADER_ROW,
     gap: 12,
   },
   brand: { flex: 1, minHeight: 44, justifyContent: "center" },

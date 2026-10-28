@@ -21,7 +21,12 @@ function elements(root: Element): Element[] {
 
 function setup(value: string | undefined = "model-a") {
   const calls: (string | undefined)[] = [];
-  const props: { value: string | undefined; onChange: (value: string | undefined) => void; disabled: boolean; models: Model[] } = {
+  const props: {
+    value: string | undefined;
+    onChange: (value: string | undefined) => void;
+    disabled: boolean;
+    models: Model[];
+  } = {
     value,
     disabled: false,
     models: [
@@ -32,6 +37,9 @@ function setup(value: string | undefined = "model-a") {
     onChange: (model: string | undefined) => calls.push(model),
   };
   const harness = hookHarness<Element>({
+    "../../lib/accessibility/useReducedMotion": {
+      useReducedMotion: () => false,
+    },
     "react/jsx-runtime": {
       jsx: (type: unknown, props: unknown) => ({ type, props }),
       jsxs: (type: unknown, props: unknown) => ({ type, props }),

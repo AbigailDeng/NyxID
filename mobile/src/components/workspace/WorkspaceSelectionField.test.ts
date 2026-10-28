@@ -47,6 +47,15 @@ function setup(overrides: Record<string, any> = {}, field = false) {
     ...overrides,
   };
   const harness = hookHarness<Element>({
+    "./useNativeSheetDismiss": {
+      useNativeSheetDismiss: (onClose: () => void) => ({
+        modalProps: { visible: true, animationType: "slide" },
+        close: (after?: () => void) => {
+          after?.();
+          onClose();
+        },
+      }),
+    },
     "react/jsx-runtime": {
       jsx: (type: unknown, props: unknown) => ({ type, props }),
       jsxs: (type: unknown, props: unknown) => ({ type, props }),
@@ -85,7 +94,10 @@ function setup(overrides: Record<string, any> = {}, field = false) {
   });
   const exports = harness.load(
     fileURLToPath(new URL("./WorkspaceSelectionField.tsx", import.meta.url)),
-  ) as { WorkspaceSelectionField: (props: any) => Element; WorkspaceSelectionSheet: (props: any) => Element };
+  ) as {
+    WorkspaceSelectionField: (props: any) => Element;
+    WorkspaceSelectionSheet: (props: any) => Element;
+  };
   harness.mount(() =>
     (field ? exports.WorkspaceSelectionField : exports.WorkspaceSelectionSheet)(
       props,

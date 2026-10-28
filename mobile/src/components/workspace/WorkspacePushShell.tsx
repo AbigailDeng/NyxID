@@ -1,4 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import {
   BackHandler,
   Pressable,
@@ -11,6 +18,7 @@ import Animated, {
   cancelAnimation,
   runOnJS,
   useAnimatedStyle,
+  useAnimatedReaction,
   useSharedValue,
   withSpring,
   withTiming,
@@ -26,7 +34,13 @@ import {
   sidebarPushWidth,
 } from "./workspacePushState";
 
+export type WorkspaceContentTransitionHandle = {
+  fadeOut: (onHidden: () => void) => void;
+  reveal: () => void;
+};
+
 type Props = {
+  contentTransition?: RefObject<WorkspaceContentTransitionHandle | null>;
   enabled: boolean;
   visible: boolean;
   presented: boolean;
@@ -50,8 +64,12 @@ export function WorkspacePushShell(props: Props) {
   const visible = props.visible;
   const edgeBack = Boolean(props.onEdgeBack) && !visible;
   const reduced = useReducedMotion();
+  const [settledOpen, setSettledOpen] = useState(false);
   const offset = useSharedValue(0);
   const dragOrigin = useSharedValue(0);
+  const contentOpacity = useSharedValue(1);
+  const contentChanging = useSharedValue(false);
+  const fadeGeneration = useRef(0);
   const programmatic = useSharedValue(false);
   const dragActive = useSharedValue(false);
   const transition = useSharedValue(0);
@@ -60,51 +78,120 @@ export function WorkspacePushShell(props: Props) {
   const dragging = useRef(false);
   const mounted = useRef(true);
   const focusOwner = useRef(Symbol("navigation-sidebar")).current;
+  const acknowledgedClosed = useRef(false);
   const latest = useRef(props);
   latest.current = props;
+  if (!props.presented || props.visible) acknowledgedClosed.current = false;
   useLayoutEffect(() => {
     workspaceFocus.setModalActive(
       focusOwner,
-      props.enabled && props.presented && !props.obscured,
+      props.enabled && settledOpen && !props.obscured,
     );
-  }, [focusOwner, props.enabled, props.presented, props.obscured]);
+  }, [focusOwner, props.enabled, settledOpen, props.obscured]);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
       generation.current++;
       cancelAnimation(offset);
+      cancelAnimation(contentOpacity);
+      fadeGeneration.current++;
       workspaceFocus.setModalActive(focusOwner, false);
     };
   }, [focusOwner, offset]);
 
-  function finish(id: number, open: boolean) {
+  useLayoutEffect(() => {
+    const controller = props.contentTransition;
+    if (!controller) return;
+    controller.current = {
+      fadeOut(onHidden) {
+        const id = ++fadeGeneration.current;
+        contentChanging.value = true;
+        cancelAnimation(contentOpacity);
+        const complete = () => {
+          if (
+            mounted.current &&
+            fadeGeneration.current === id &&
+            latest.current.enabled
+          )
+            onHidden();
+        };
+        if (reduced) {
+          contentOpacity.value = 0;
+          complete();
+        } else
+          contentOpacity.value = withTiming(0, { duration: 120 }, (done) => {
+            "worklet";
+            if (done) runOnJS(complete)();
+          });
+      },
+      reveal() {
+        contentChanging.value = false;
+        fadeGeneration.current++;
+        cancelAnimation(contentOpacity);
+        contentOpacity.value = reduced ? 1 : withTiming(1, { duration: 180 });
+      },
+    };
+    return () => {
+      controller.current = null;
+      fadeGeneration.current++;
+    };
+  }, [props.contentTransition, reduced, contentOpacity]);
+
+  function reconcileEndpoint(open: boolean) {
     const state = latest.current;
+    // Read the live UI endpoint as well as the current controlled request.
+    // A cancelled/zero-distance drag can reach an endpoint without the original
+    // timing callback; an obsolete callback cannot acknowledge a newer drag.
     if (
       !mounted.current ||
-      id !== generation.current ||
       !state.enabled ||
-      state.visible !== open
+      dragging.current ||
+      dragActive.value ||
+      programmatic.value ||
+      state.visible !== open ||
+      Math.abs(offset.value - (open ? openWidth : 0)) > 0.5
     )
       return;
-    if (open) {
-      workspaceFocus.focusModalOnce(focusOwner, () =>
-        latest.current.visible && !latest.current.obscured
-          ? latest.current.initialFocusTarget()
-          : null,
-      );
-    } else if (state.presented) {
-      workspaceFocus.setModalActive(focusOwner, false);
+    setSettledOpen(open);
+    if (!open && state.presented && !acknowledgedClosed.current) {
+      acknowledgedClosed.current = true;
       state.onDismiss();
     }
   }
+  function finish(id: number, open: boolean) {
+    if (id === generation.current) reconcileEndpoint(open);
+  }
+  useAnimatedReaction(
+    () => {
+      if (programmatic.value || dragActive.value) return null;
+      if (Math.abs(offset.value) < 0.5) return false;
+      if (Math.abs(offset.value - openWidth) < 0.5) return true;
+      return null;
+    },
+    (open, previous) => {
+      if (open !== null && open !== previous) runOnJS(reconcileEndpoint)(open);
+    },
+    [openWidth],
+  );
+  useEffect(() => {
+    reconcileEndpoint(props.visible);
+  }, [props.visible, props.presented]);
+  useEffect(() => {
+    if (!settledOpen || !props.enabled || props.obscured) return;
+    workspaceFocus.focusModalOnce(focusOwner, () =>
+      latest.current.visible && !latest.current.obscured
+        ? latest.current.initialFocusTarget()
+        : null,
+    );
+  }, [settledOpen, props.enabled, props.obscured, focusOwner]);
   function animate(open: boolean, fingerRelease = false) {
     endpoint.current = `${open}:${openWidth}:${reduced}`;
     const id = ++generation.current;
     const target = open ? openWidth : 0;
     cancelAnimation(offset);
     transition.value = id;
-    programmatic.value = !fingerRelease && !reduced;
+    programmatic.value = !reduced;
     if (reduced) {
       offset.value = target;
       // The controlled visibility/AX commit must precede focus or navigation.
@@ -134,6 +221,7 @@ export function WorkspacePushShell(props: Props) {
       generation.current++;
       cancelAnimation(offset);
       offset.value = 0;
+      setSettledOpen(false);
       programmatic.value = false;
       endpoint.current = undefined;
       return;
@@ -195,10 +283,10 @@ export function WorkspacePushShell(props: Props) {
     .activeOffsetX(visible ? -18 : 18)
     .failOffsetY([-10, 10])
     .onTouchesDown((_event, manager) => {
-      if (programmatic.value) manager.fail();
+      if (programmatic.value || contentChanging.value) manager.fail();
     })
     .onStart(() => {
-      if (programmatic.value) return;
+      if (programmatic.value || contentChanging.value) return;
       dragActive.value = true;
       cancelAnimation(offset);
       dragOrigin.value = offset.value;
@@ -237,11 +325,12 @@ export function WorkspacePushShell(props: Props) {
     shadowOpacity: offset.value > 0 ? 0.2 : 0,
   }));
   const clipStyle = useAnimatedStyle(() => ({
+    opacity: contentOpacity.value,
     borderTopLeftRadius: offset.value > 0 ? 16 : 0,
     borderBottomLeftRadius: offset.value > 0 ? 16 : 0,
   }));
   const active = props.enabled && props.presented;
-  const sidebarInteractive = active && !props.obscured;
+  const sidebarInteractive = props.enabled && settledOpen && !props.obscured;
   return (
     <View
       style={[styles.root, { backgroundColor: colors.sidebarBase }]}
@@ -277,9 +366,12 @@ export function WorkspacePushShell(props: Props) {
         ]}
       >
         <Animated.View
+          testID="workspace-slab-content"
           accessible={false}
-          accessibilityElementsHidden={active}
-          importantForAccessibility={active ? "no-hide-descendants" : "auto"}
+          accessibilityElementsHidden={sidebarInteractive}
+          importantForAccessibility={
+            sidebarInteractive ? "no-hide-descendants" : "auto"
+          }
           style={[styles.content, clipStyle]}
         >
           {props.children}

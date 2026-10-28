@@ -78,6 +78,15 @@ function setup(
     ...overrides,
   };
   const harness = hookHarness<Element>({
+    "../../components/workspace/useNativeSheetDismiss": {
+      useNativeSheetDismiss: (onClose: () => void) => ({
+        modalProps: { visible: true, animationType: "slide" },
+        close: (after?: () => void) => {
+          after?.();
+          onClose();
+        },
+      }),
+    },
     "react/jsx-runtime": {
       jsx: (type: unknown, props: unknown) => ({ type, props }),
       jsxs: (type: unknown, props: unknown) => ({ type, props }),
@@ -126,7 +135,10 @@ function setup(
   });
   const exports = harness.load(
     fileURLToPath(new URL("./AgentPermissionsField.tsx", import.meta.url)),
-  ) as { AgentPermissionsField: (props: SheetProps) => Element; AgentPermissionsSheet: (props: SheetProps) => Element };
+  ) as {
+    AgentPermissionsField: (props: SheetProps) => Element;
+    AgentPermissionsSheet: (props: SheetProps) => Element;
+  };
   harness.mount(() =>
     component === "field"
       ? exports.AgentPermissionsField(props)

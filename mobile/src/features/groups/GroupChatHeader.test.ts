@@ -37,6 +37,9 @@ test("crew header shows member identity and narrows recipients through its picke
     },
   };
   const h = hookHarness<E>({
+    "../../lib/accessibility/useReducedMotion": {
+      useReducedMotion: () => false,
+    },
     "../assistant/assistantDraftStore": {
       assistantDraftStore: createAssistantDraftStore(() => 1),
     },

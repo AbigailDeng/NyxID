@@ -626,9 +626,6 @@ function SettingsSheetRoute({
             headerShadowVisible: false,
             headerBackButtonDisplayMode: "minimal",
             contentStyle: { backgroundColor: colors.bg },
-            ...(route.name === "AccountSettings"
-              ? { headerLeft: () => null }
-              : {}),
           })}
         >
           <SheetStack.Screen

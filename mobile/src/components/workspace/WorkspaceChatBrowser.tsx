@@ -1,3 +1,4 @@
+import { useReducedMotion } from "../../lib/accessibility/useReducedMotion";
 import {
   useCallback,
   useEffect,
@@ -57,6 +58,7 @@ export function WorkspaceChatBrowser<T extends { id: string }>({
   emptyText?: string;
 }) {
   const { colors } = useTheme();
+  const reducedMotion = useReducedMotion();
   const [query, setQuery] = useState("");
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
@@ -97,7 +99,7 @@ export function WorkspaceChatBrowser<T extends { id: string }>({
   return (
     <Modal
       visible={visible}
-      animationType="slide"
+      animationType={reducedMotion ? "none" : "slide"}
       presentationStyle="pageSheet"
       onRequestClose={close}
       onDismiss={Platform.OS === "ios" ? notifyDismissed : undefined}

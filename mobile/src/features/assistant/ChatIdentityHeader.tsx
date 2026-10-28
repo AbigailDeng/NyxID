@@ -1,5 +1,6 @@
+import { WORKSPACE_HEADER_ROW } from "../../components/workspace/workspaceHeaderMetrics";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackHeaderProps } from "@react-navigation/native-stack";
 import { ChevronDown } from "lucide-react-native";
 import { AgentAvatar, AgentAvatarStack } from "../../components/AgentAvatar";
@@ -17,9 +18,13 @@ export function ChatHeaderFrame(props: NativeStackHeaderProps) {
 
 function ChatHeaderContent({ options, back, route }: NativeStackHeaderProps) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const props = { canGoBack: !!back, tintColor: colors.textPrimary };
   return (
-    <SafeAreaView edges={["top"]} style={{ backgroundColor: colors.bg }}>
+    <View
+      testID="workspace-chat-header"
+      style={{ paddingTop: insets.top, backgroundColor: colors.bg }}
+    >
       <View style={styles.header}>
         {options.headerLeft?.(props)}
         <View style={styles.identitySlot}>
@@ -32,7 +37,7 @@ function ChatHeaderContent({ options, back, route }: NativeStackHeaderProps) {
         </View>
         {options.headerRight?.(props)}
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 export function chatThreadInfo(
@@ -130,11 +135,8 @@ export function ChatIdentity({
 }
 const styles = StyleSheet.create({
   header: {
-    flexDirection: "row",
-    alignItems: "center",
-    minHeight: 60,
+    ...WORKSPACE_HEADER_ROW,
     paddingHorizontal: 8,
-    paddingVertical: 4,
     gap: 4,
   },
   identitySlot: { flex: 1, minWidth: 0 },

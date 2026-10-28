@@ -33,9 +33,15 @@ function setup(reduced = false) {
     complete: (done: boolean) => void;
   }[] = [];
   const focus: unknown[][] = [];
+  let reaction: {
+    read: () => any;
+    changed: (value: any, previous: any) => void;
+  };
+  let previousEndpoint: any;
   let hardwareBack: (() => boolean) | undefined;
   let dismissed = 0;
   let reveals = 0;
+  const contentTransition = { current: null as any };
   const changes: boolean[] = [];
   let handlers: Record<string, any> = {};
   const settings: Record<string, any> = {};
@@ -100,6 +106,12 @@ function setup(reduced = false) {
         return (shared[index] ??= { value });
       },
       useAnimatedStyle: (read: () => unknown) => ({ read }),
+      useAnimatedReaction: (
+        read: () => any,
+        changed: (value: any, previous: any) => void,
+      ) => {
+        reaction = { read, changed };
+      },
       cancelAnimation() {},
       runOnJS: (callback: unknown) => callback,
       Easing: { bezier: (...points: number[]) => points },
@@ -147,6 +159,7 @@ function setup(reduced = false) {
     fileURLToPath(new URL("./WorkspacePushShell.tsx", import.meta.url)),
   ).WorkspacePushShell as (props: any) => Element;
   props = {
+    contentTransition,
     enabled: true,
     visible: false,
     presented: false,
@@ -189,14 +202,27 @@ function setup(reduced = false) {
     timings,
     focus,
     changes,
+    contentTransition,
     child,
     sidebar,
     settings,
     handlers: () => handlers,
     offset: () => shared[0]!.value,
     style: () => find("workspace-content-slab").props.style[2].read(),
-    lastComplete: (done = true) => timings.at(-1)!.complete(done),
-    springComplete: (done = true) => springs.at(-1)!.complete(done),
+    lastComplete: (done = true) => {
+      timings.at(-1)!.complete(done);
+      harness.render();
+    },
+    springComplete: (done = true) => {
+      springs.at(-1)!.complete(done);
+      harness.render();
+    },
+    reconcile: () => {
+      const value = reaction.read();
+      reaction.changed(value, previousEndpoint);
+      previousEndpoint = value;
+      harness.render();
+    },
     counts: () => ({ dismissed, reveals }),
     hardwareBack: () => hardwareBack?.(),
   };
@@ -217,6 +243,12 @@ test("the stationary base and full-width translated slab retain the actual navig
   x.set({ visible: true, presented: true });
   assert.equal(x.style().transform[0].translateX, 310);
   assert.equal(x.style().borderTopLeftRadius, 16);
+  assert.equal(
+    x.find("workspace-sidebar-base").props.accessibilityElementsHidden,
+    true,
+    "opening travel does not expose an invisible sidebar",
+  );
+  x.lastComplete();
   assert.equal(
     x.find("workspace-sidebar-base").props.accessibilityElementsHidden,
     false,
@@ -439,5 +471,93 @@ test("Settings owns input and Back above the shell without changing its open off
   assert.equal(x.timings.length, timings);
   assert.ok(x.all().includes(x.sidebar));
   assert.equal(x.find("workspace-sidebar-base").props.pointerEvents, "auto");
+  x.harness.unmount();
+});
+
+test("content opacity has separate 120ms out and 180ms in phases; the slab stays opaque", () => {
+  const x = setup();
+  let swaps = 0;
+  x.set({ visible: true, presented: true });
+  x.lastComplete();
+  x.contentTransition.current.fadeOut(() => swaps++);
+  assert.equal(swaps, 0);
+  assert.equal(x.timings.at(-1)!.target, 0);
+  assert.equal(x.timings.at(-1)!.config.duration, 120);
+  x.lastComplete();
+  assert.equal(swaps, 1);
+  x.contentTransition.current.reveal();
+  assert.equal(x.timings.at(-1)!.target, 1);
+  assert.equal(x.timings.at(-1)!.config.duration, 180);
+  assert.equal(
+    x.style().opacity,
+    undefined,
+    "opacity belongs to content, not slab or sidebar",
+  );
+  x.harness.unmount();
+});
+
+test("cancelled and unmounted fades cannot dispatch stale roots; reduced motion uses no fade", () => {
+  const x = setup();
+  let swaps = 0;
+  x.contentTransition.current.fadeOut(() => swaps++);
+  const stale = x.timings.at(-1)!;
+  x.contentTransition.current.reveal();
+  stale.complete(true);
+  assert.equal(swaps, 0);
+  x.contentTransition.current.fadeOut(() => swaps++);
+  const removed = x.timings.at(-1)!;
+  x.harness.unmount();
+  removed.complete(true);
+  assert.equal(swaps, 0);
+  const reduced = setup(true);
+  reduced.contentTransition.current.fadeOut(() => swaps++);
+  reduced.contentTransition.current.reveal();
+  assert.equal(swaps, 1);
+  assert.equal(reduced.timings.length, 0);
+  reduced.harness.unmount();
+});
+
+// Reproduced on device: a cancelled edge gesture left presented=true while the
+// requested and painted endpoint were closed. Completion must reconcile all three.
+test("a zero-distance/cancelled endpoint cannot leave invisible sidebar AX exposed", () => {
+  const x = setup();
+  x.set({ presented: true, visible: false });
+  x.reconcile();
+  assert.equal(x.offset(), 0);
+  assert.equal(x.counts().dismissed, 1);
+  assert.equal(
+    x.find("workspace-sidebar-base").props.accessibilityElementsHidden,
+    true,
+  );
+  const content = x.find("workspace-slab-content");
+  assert.equal(content.props.accessibilityElementsHidden, false);
+  x.harness.unmount();
+});
+test("UI endpoint reconciliation survives a missed completion and rejects an old endpoint after reopening", () => {
+  const x = setup();
+  x.set({ visible: true, presented: true });
+  x.lastComplete();
+  x.set({ visible: false });
+  x.lastComplete(false);
+  x.reconcile();
+  assert.equal(x.counts().dismissed, 1);
+  assert.equal(
+    x.find("workspace-sidebar-base").props.accessibilityElementsHidden,
+    true,
+  );
+  x.set({ visible: true, presented: true });
+  x.shared[0]!.value = 0;
+  x.reconcile();
+  assert.equal(
+    x.counts().dismissed,
+    1,
+    "stale closed acknowledgement cannot dismiss a new open request",
+  );
+  x.shared[0]!.value = 310;
+  x.lastComplete();
+  assert.equal(
+    x.find("workspace-sidebar-base").props.accessibilityElementsHidden,
+    false,
+  );
   x.harness.unmount();
 });

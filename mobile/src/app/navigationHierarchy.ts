@@ -33,7 +33,7 @@ export function openWorkspaceSheetAction<
     target: undefined as string | undefined,
     payload: {
       name: "WorkspaceSheet",
-      params: { screen: name, params, initial: false, merge: true, pop: true },
+      params: { screen: name, params, initial: true, merge: true, pop: true },
       merge: true,
     },
   };
@@ -78,7 +78,7 @@ export function workspaceSharedEntryNavigationAction<
       ...StackActions.replace("WorkspaceSheet", {
         screen: name,
         params,
-        initial: false,
+        initial: true,
       }),
       source: entry.key,
       target: state.key,

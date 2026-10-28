@@ -191,6 +191,9 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     },
   };
   const harness = hookHarness<Element>({
+    "../../lib/accessibility/useReducedMotion": {
+      useReducedMotion: () => false,
+    },
     "./assistantDraftStore": {
       assistantDraftKey,
       assistantDraftStore: createAssistantDraftStore(() => epoch),

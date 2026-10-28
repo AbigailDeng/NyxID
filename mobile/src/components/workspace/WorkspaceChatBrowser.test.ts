@@ -90,6 +90,9 @@ function setup(
     ...overrides,
   };
   const harness = hookHarness<Element>({
+    "../../lib/accessibility/useReducedMotion": {
+      useReducedMotion: () => false,
+    },
     "react/jsx-runtime": {
       jsx: (type: unknown, elementProps: unknown) => ({
         type,

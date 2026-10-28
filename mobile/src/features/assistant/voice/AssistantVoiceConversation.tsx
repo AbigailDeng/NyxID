@@ -1,3 +1,5 @@
+import { useNativeSheetDismiss } from "../../../components/workspace/useNativeSheetDismiss";
+import { useReducedMotion } from "../../../lib/accessibility/useReducedMotion";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -54,6 +56,7 @@ type Props = {
 type Picker = "source" | "voice" | "mode";
 
 export function AssistantVoiceConversation(props: Props) {
+  const sheet = useNativeSheetDismiss(props.onClose);
   const [setup] = useState(() => {
     try {
       return { environment: nativeVoiceEnvironment() };
@@ -68,18 +71,17 @@ export function AssistantVoiceConversation(props: Props) {
     <VoiceConversation {...props} environment={setup.environment} />
   ) : (
     <Modal
-      visible
+      {...sheet.modalProps}
       transparent
-      animationType="slide"
-      onRequestClose={props.onClose}
+      onRequestClose={() => sheet.close()}
     >
-      <WorkspaceSheetSurface onClose={props.onClose}>
+      <WorkspaceSheetSurface nativePresentation onClose={() => sheet.close()}>
         <View style={styles.body}>
           <Notice
             message={setup.error ?? "Voice is unavailable."}
             tone="error"
           />
-          <ActionButton label="Return to chat" onPress={props.onClose} />
+          <ActionButton label="Return to chat" onPress={() => sheet.close()} />
         </View>
       </WorkspaceSheetSurface>
     </Modal>
@@ -97,6 +99,8 @@ function VoiceConversation({
   environment: ReturnType<typeof nativeVoiceEnvironment>;
 }) {
   const { colors } = useTheme();
+  const sheet = useNativeSheetDismiss(onClose);
+  const reducedMotion = useReducedMotion();
   const focused = useIsFocused();
   const { isConnected } = useNetworkStatus();
   const voice = useNativeVoice(thread, environment, onUpdate);
@@ -191,7 +195,8 @@ function VoiceConversation({
 
   function close() {
     void voice.end();
-    onClose();
+    if (minimized) onClose();
+    else sheet.close();
   }
   function minimize() {
     voice.hold(false);
@@ -314,13 +319,14 @@ function VoiceConversation({
         </View>
       ) : null}
       <Modal
-        visible={!minimized}
+        {...sheet.modalProps}
+        visible={!minimized && sheet.modalProps.visible}
         transparent
-        animationType="slide"
+        animationType={reducedMotion ? "none" : "slide"}
         presentationStyle="overFullScreen"
         onRequestClose={() => (picker ? setPicker(undefined) : close())}
       >
-        <WorkspaceSheetSurface onClose={close}>
+        <WorkspaceSheetSurface nativePresentation onClose={close}>
           <View style={[styles.header, { borderBottomColor: colors.border }]}>
             {picker ? (
               <Pressable

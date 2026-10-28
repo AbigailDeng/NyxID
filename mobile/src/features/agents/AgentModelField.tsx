@@ -1,3 +1,4 @@
+import { useReducedMotion } from "../../lib/accessibility/useReducedMotion";
 import { useEffect, useMemo, useState } from "react";
 import {
   FlatList,
@@ -34,6 +35,7 @@ export function AgentModelField({
   onChange: (value: string | undefined) => void;
 }) {
   const { colors } = useTheme();
+  const reducedMotion = useReducedMotion();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(value);
   const [query, setQuery] = useState("");
@@ -109,7 +111,7 @@ export function AgentModelField({
       </Pressable>
       <Modal
         visible={open}
-        animationType="slide"
+        animationType={reducedMotion ? "none" : "slide"}
         presentationStyle="pageSheet"
         onRequestClose={close}
         onDismiss={close}

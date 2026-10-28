@@ -1,3 +1,4 @@
+import { useNativeSheetDismiss } from "./useNativeSheetDismiss";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   FlatList,
@@ -125,6 +126,7 @@ export function WorkspaceSelectionSheet({
   children,
 }: SelectionProps & { onClose: () => void }) {
   const { colors } = useTheme();
+  const sheet = useNativeSheetDismiss(onClose);
   const [draft, setDraft] = useState(() => [...new Set(value)]);
   const [query, setQuery] = useState("");
   const [selectedOnly, setSelectedOnly] = useState(false);
@@ -139,7 +141,7 @@ export function WorkspaceSelectionSheet({
   const blocked = disabled || readOnly || stale;
   const close = () => {
     Keyboard.dismiss();
-    onClose();
+    sheet.close();
   };
   useEffect(() => {
     if (stale || (disabled && !readOnly)) onClose();
@@ -196,8 +198,7 @@ export function WorkspaceSelectionSheet({
 
   return (
     <Modal
-      visible
-      animationType="slide"
+      {...sheet.modalProps}
       presentationStyle="pageSheet"
       onRequestClose={close}
     >
@@ -439,8 +440,10 @@ export function WorkspaceSelectionSheet({
                   onPress={() => {
                     if (!canApply || applied.current) return;
                     applied.current = true;
-                    onChange([...draft]);
-                    close();
+                    Keyboard.dismiss();
+                    sheet.close(() => {
+                      if (!stale) onChange([...draft]);
+                    });
                   }}
                 />
               )}

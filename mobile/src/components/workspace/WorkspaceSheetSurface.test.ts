@@ -36,7 +36,10 @@ function setup(
   dimensions = { width: 390, height: 844 },
   insetTop = 47,
   deferAnimation = false,
+  autoLayout = true,
+  motionReady = true,
 ) {
+  let preference: boolean | undefined = motionReady ? reduced : undefined;
   let handlers!: PanHandlers;
   let closeAttempts = 0;
   let allowedCloses = 0;
@@ -80,11 +83,17 @@ function setup(
       workspaceFocus: { capture() {}, restore() {} },
     },
     "../../lib/accessibility/useReducedMotion": {
-      useReducedMotion: () => reduced,
+      useReducedMotionPreference: () => preference,
     },
     "react/jsx-runtime": { jsx, jsxs: jsx },
     "react-native": {
       View: "View",
+      InteractionManager: {
+        runAfterInteractions: (callback: () => void) => {
+          callback();
+          return { cancel() {} };
+        },
+      },
       useWindowDimensions: () => dimensions,
       BackHandler: {
         addEventListener: (_: string, callback: () => boolean) => {
@@ -195,6 +204,7 @@ function setup(
       },
     }),
   );
+  if (autoLayout) harness.value().props.onLayout();
   const all = () => elements(harness.value());
   const panel = () => {
     const value = all().find(
@@ -207,6 +217,11 @@ function setup(
   const gesture = (dy: number, vy = 0, dx = 0): Gesture => ({ dx, dy, vy });
   return {
     panel,
+    present: () => harness.value().props.onLayout(),
+    resolveMotion: () => {
+      preference = reduced;
+      harness.render();
+    },
     harness,
     handlers: () => handlers,
     all,
@@ -598,5 +613,50 @@ for (const source of ["Close", "backdrop", "drag", "Android Back", "Escape"]) {
     assert.equal(closedAction.target, state.key);
     headerHarness.unmount();
     env.harness.unmount();
+  });
+}
+
+test("a sheet does not consume its entrance before native layout and motion readiness", () => {
+  const x = setup(false, { width: 390, height: 844 }, 47, false, false, false);
+  assert.equal(x.timings.length, 0);
+  assert.equal(x.offset().value, 844);
+  x.present();
+  assert.equal(x.timings.length, 0);
+  x.resolveMotion();
+  assert.equal(x.timings.length, 2);
+  assert.deepEqual(
+    x.timings.map((t) => [t.from, t.to]),
+    [
+      [844, 0],
+      [0, 1],
+    ],
+  );
+  x.present();
+  assert.equal(x.timings.length, 2);
+  x.harness.unmount();
+});
+for (const entry of [
+  "Settings",
+  "Account & security",
+  "Usage & credits",
+  "Scan QR code",
+  "Terminal login code",
+]) {
+  test(`${entry} repeats a full entrance and guarded exit over the unchanged sidebar`, async () => {
+    for (let presentation = 0; presentation < 2; presentation++) {
+      const x = setup(false, { width: 390, height: 844 }, 47, true, false);
+      assert.equal(x.timings.length, 0);
+      x.present();
+      assert.equal(x.timings[0]!.from, 844);
+      x.timings[0]!.complete();
+      x.timings[1]!.complete();
+      x.controller.current!.dismiss();
+      await x.harness.settle();
+      assert.equal(x.counts().allowedCloses, 0);
+      assert.equal(x.timings.at(-1)!.to, 844);
+      x.timings.at(-1)!.complete();
+      assert.equal(x.counts().allowedCloses, 1);
+      x.harness.unmount();
+    }
   });
 }

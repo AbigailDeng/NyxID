@@ -1,3 +1,4 @@
+import { useReducedMotion } from "../../lib/accessibility/useReducedMotion";
 import { transcriptColumnStyle } from "../display/chatLayout";
 import { assistantDraftStore } from "../assistant/assistantDraftStore";
 import { ChatHeaderFrame, ChatIdentity } from "../assistant/ChatIdentityHeader";
@@ -123,6 +124,7 @@ function GroupChat({
   onOpenAgent,
 }: GroupChatScreenProps) {
   const { colors } = useTheme();
+  const reducedMotion = useReducedMotion();
   const chatColumn = useChatColumn();
   const transcriptEdges = useScrollEdges();
   const chat = useGroupChat(groupId);
@@ -815,7 +817,7 @@ function GroupChat({
       <Modal
         visible={!!pickingRecipients}
         transparent
-        animationType="slide"
+        animationType={reducedMotion ? "none" : "slide"}
         onRequestClose={() => setPickingRecipients(false)}
       >
         <View style={styles.modalBackdrop}>

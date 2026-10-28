@@ -1,3 +1,4 @@
+import { useReducedMotion } from "../../lib/accessibility/useReducedMotion";
 import {
   AssistantApprovalCard,
   AssistantWaitingNote,
@@ -1845,10 +1846,11 @@ function Sheet({
   children: React.ReactNode;
 }) {
   const { colors } = useTheme();
+  const reducedMotion = useReducedMotion();
   return (
     <Modal
       visible={visible}
-      animationType="slide"
+      animationType={reducedMotion ? "none" : "slide"}
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >

@@ -1,3 +1,4 @@
+import { WORKSPACE_HEADER_ROW_HEIGHT } from "../../components/workspace/workspaceHeaderMetrics";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { URL, fileURLToPath } from "node:url";
@@ -30,7 +31,7 @@ const mocks = {
     Pressable: "Pressable",
     StyleSheet: { create: (value: unknown) => value },
   },
-  "react-native-safe-area-context": { SafeAreaView: "SafeAreaView" },
+  "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 62 }) },
   "lucide-react-native": { ChevronDown: "ChevronDown" },
   "../../components/AgentAvatar": {
     AgentAvatar: "AgentAvatar",
@@ -165,10 +166,11 @@ test("shared custom header anchors Menu/Back then flexible identity then existin
       });
       return (element.type as (props: any) => E)(element.props);
     });
-    assert.equal(x.h.value().type, "SafeAreaView");
-    assert.equal(x.h.value().props.edges[0], "top");
+    assert.equal(x.h.value().type, "View");
+    assert.equal(x.h.value().props.style.paddingTop, 62);
     const row = x.h.value().props.children;
     assert.equal(row.props.style.flexDirection, "row");
+    assert.equal(row.props.style.height, WORKSPACE_HEADER_ROW_HEIGHT);
     const children = row.props.children;
     assert.equal(children[0].type, "MenuOrBack");
     assert.equal(children[1].props.style.flex, 1);

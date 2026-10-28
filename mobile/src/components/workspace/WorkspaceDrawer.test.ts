@@ -1,3 +1,4 @@
+import { WORKSPACE_HEADER_ROW_HEIGHT } from "./workspaceHeaderMetrics";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { URL, fileURLToPath } from "node:url";
@@ -230,5 +231,21 @@ test("scrolling rows fade into an opaque control band while max-scroll rows rema
   assert.equal(props().contentContainerStyle[1].paddingBottom, reserve);
   scroll(100);
   assert.equal(fade().props.style.height, reserve + 52);
+  x.h.unmount();
+});
+
+test("sidebar logo and Search are centered in the shared slab header row", () => {
+  const x = setup();
+  const row = x
+    .all()
+    .find((n) => n.props.testID === "workspace-sidebar-header-row")!;
+  assert.equal(row.props.style.height, WORKSPACE_HEADER_ROW_HEIGHT);
+  assert.equal(row.props.style.paddingTop, undefined);
+  assert.equal(row.props.style.paddingBottom, undefined);
+  const search = x.label("Search");
+  const center =
+    (row.props.style.height - search.props.style.height) / 2 +
+    search.props.style.height / 2;
+  assert.ok(Math.abs(center - WORKSPACE_HEADER_ROW_HEIGHT / 2) <= 0.5);
   x.h.unmount();
 });

@@ -544,16 +544,22 @@ account pages and QR/terminal quick actions use the retained pull-up surface. Se
   followed by date-grouped History, with Active grants as a secondary page.
   Logo and the pinned Chat pill open Home. The Settings gear and Quick actions
   present above the current sidebar/slab without changing its offset or scroll.
-  Their dismissal restores that exact state. Root selection swaps with no fade
-  or inner transition, waits for the opaque new page's layout and paint, then
-  closes the slab in a single300ms ease-out. Only the24pt root edge reveals it;
+  Their dismissal restores that exact state. Root selection fades the old content
+  out over 120ms, swaps with no inner stack animation, and waits for the new page's
+  layout and paint. It then fades the new content in over 180ms while closing the
+  opaque slab in a single 300ms ease-out. Only the 24pt root edge reveals it;
   only the exposed slab sliver closes it. Finger releases spring; reduced motion
   has no travel. The pinned controls have a measured bottom content spacer.
 - Drawer top is the window's safe-area top plus 10pt. Top corners are 24pt; the
   centered 36×4pt handle has a 44pt drag region. A dedicated translucent scrim
   stays fixed over retained chat and fades independently while the panel slides.
-  Headers use a left-aligned 18pt title and circular 44pt Close; nested routes
-  add Back.
+  Sidebar and content headers share a 60pt row below the same safe-area inset.
+  Page and Settings titles are centered across the full header, with equal control
+  columns, 18pt type, one line and a 1.25 scaling cap. Chat identity keeps its avatar
+  and name alignment. Close is a circular 44pt target. Only pages pushed within a
+  sheet add Back; directly opened QR, Terminal or account pages are local roots.
+  Sidebar accessibility follows the settled UI endpoint; cancelled or zero-distance
+  gestures release its focus ownership and restore the content at offset zero.
   Forms retain async dirty/pending guards across every dismissal path. Reduced
   motion removes stack travel and springs. No fake home indicator or native rail.
 - Home is an explicit primary-chat state, reached from the navigation logo/Chats,

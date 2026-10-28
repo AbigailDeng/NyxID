@@ -1,3 +1,4 @@
+import { useReducedMotion } from "../../lib/accessibility/useReducedMotion";
 import {
   useEffect,
   useRef,
@@ -184,10 +185,11 @@ export function AutomationSheet({
   onClose: () => void;
 }>) {
   const { colors } = useTheme();
+  const reducedMotion = useReducedMotion();
   return (
     <Modal
       visible={visible}
-      animationType="slide"
+      animationType={reducedMotion ? "none" : "slide"}
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
