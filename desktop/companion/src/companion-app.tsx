@@ -7,22 +7,13 @@ import {
   type PointerEvent,
 } from "react";
 
-import { CelebrationPanel } from "./components/celebration-panel";
 import { ChatPanel, type CompanionChatMessage } from "./components/chat-panel";
 import { IdleView } from "./components/idle-view";
 import type { MascotState } from "./components/mascot";
-import { MealPanel, type MealSuggestionView } from "./components/meal-panel";
 import { OnboardingPanel } from "./components/onboarding-panel";
 import { SettingsPanel } from "./components/settings-panel";
-import {
-  dateKeyAt,
-  dueLabel,
-  nextMealOccurrence,
-  recommendMeals,
-  type CompanionSnapshot,
-  type RecommendationMood,
-} from "./domain";
-import { MEAL_LABELS, recommendationCopy } from "./meal-copy";
+import { VoicePanel } from "./components/voice-panel";
+import type { CompanionSnapshot } from "./domain";
 import {
   createCompanionRuntime,
   isTauriHost,
@@ -37,11 +28,7 @@ import {
   type WindowDragEvent,
 } from "./runtime";
 
-type Screen = "idle" | "chat" | "meal" | "settings" | "celebration";
-
-interface Celebration {
-  readonly choice: string;
-}
+type Screen = "idle" | "chat" | "voice" | "settings";
 
 interface CompanionAppProps {
   readonly runtime?: CompanionRuntime;
@@ -171,72 +158,6 @@ function historyOutcome(history: NyxIdChatHistory): MascotState {
   return lastMessage?.status === "failed" ? "failed" : "review";
 }
 
-function nextMealText(snapshot: CompanionSnapshot, now: Date): string {
-  if (snapshot.runtime.snoozedUntil) {
-    const snoozed = new Date(snapshot.runtime.snoozedUntil);
-    if (snoozed.getTime() > now.getTime()) {
-      const timing = dueLabel(snoozed, now, snapshot.settings.timezone);
-      if (timing.kind === "in_minutes") {
-        return `${String(timing.minutes)} 分钟后再来叫你`;
-      }
-      if (timing.kind === "in_hours") {
-        return `${String(timing.hours)} 小时后再来叫你`;
-      }
-    }
-  }
-
-  const next = nextMealOccurrence(
-    snapshot.settings.meals,
-    now,
-    snapshot.settings.timezone,
-  );
-  if (!next) {
-    return "还没有开启饭点提醒";
-  }
-
-  const label = MEAL_LABELS[next.mealId];
-  const timing = dueLabel(
-    new Date(next.scheduledAt),
-    now,
-    snapshot.settings.timezone,
-  );
-  switch (timing.kind) {
-    case "now":
-      return `${label}就是现在`;
-    case "overdue":
-      return `${label}已经到了`;
-    case "in_minutes":
-      return `${String(timing.minutes)} 分钟后是${label}`;
-    case "in_hours":
-      return `${String(timing.hours)} 小时后是${label}`;
-    case "tomorrow":
-      return `明天 ${timing.time} 提醒${label}`;
-    case "on_date":
-      return `${timing.dateKey} ${timing.time} 提醒${label}`;
-  }
-}
-
-function rotate<T>(values: ReadonlyArray<T>, offset: number): T[] {
-  if (values.length === 0) {
-    return [];
-  }
-  const normalized = offset % values.length;
-  return [...values.slice(normalized), ...values.slice(0, normalized)];
-}
-
-function logicalPromptDateKey(snapshot: CompanionSnapshot): string | undefined {
-  const prompt = snapshot.runtime.activePrompt;
-  if (!prompt) {
-    return undefined;
-  }
-  const match = /^(\d{4}-\d{2}-\d{2}):(breakfast|lunch|dinner)$/.exec(
-    snapshot.runtime.lastPromptKey ?? "",
-  );
-  return match?.[2] === prompt.mealId
-    ? match[1]
-    : dateKeyAt(new Date(prompt.dueAt), snapshot.settings.timezone);
-}
-
 export function CompanionApp({ runtime: suppliedRuntime }: CompanionAppProps) {
   const runtime = useMemo(
     () => suppliedRuntime ?? defaultRuntime(),
@@ -250,6 +171,12 @@ export function CompanionApp({ runtime: suppliedRuntime }: CompanionAppProps) {
   const [chatMessages, setChatMessages] = useState<CompanionChatMessage[]>([]);
   const [chatConversationId, setChatConversationId] = useState<string>();
   const [chatPending, setChatPending] = useState(false);
+  const [voiceHistoryId, setVoiceHistoryId] = useState<string>();
+  const [voiceRequestIds, setVoiceRequestIds] = useState<string[]>([]);
+  const [voicePendingRequestIds, setVoicePendingRequestIds] = useState<
+    string[]
+  >([]);
+  const [voiceWorkPending, setVoiceWorkPending] = useState(false);
   const [chatStopping, setChatStopping] = useState(false);
   const [chatRecovering, setChatRecovering] = useState(false);
   const [chatOutcome, setChatOutcome] = useState<MascotState>();
@@ -259,19 +186,9 @@ export function CompanionApp({ runtime: suppliedRuntime }: CompanionAppProps) {
   const [chatListenerRevision, setChatListenerRevision] = useState(0);
   const [chatOwnerKey, setChatOwnerKey] = useState("signed-out");
   const [windowDragEvent, setWindowDragEvent] = useState<WindowDragEvent>();
-  const [mood, setMood] = useState<RecommendationMood>();
-  const [refreshRound, setRefreshRound] = useState(0);
-  const [dislikedIds, setDislikedIds] = useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
-  const [refreshing, setRefreshing] = useState(false);
-  const [mealActionPending, setMealActionPending] = useState(false);
   const [launchAtLogin, setLaunchAtLoginState] = useState(false);
-  const [celebration, setCelebration] = useState<Celebration>();
   const [status, setStatus] = useState<string>();
   const [fatalError, setFatalError] = useState<string>();
-  const [now, setNow] = useState(() => new Date());
-  const activePromptKey = useRef<string | undefined>(undefined);
   const chatGeneration = useRef(0);
   const activeChatTurn = useRef<ActiveChatTurn>();
   const chatConversationIdRef = useRef<string>();
@@ -283,6 +200,10 @@ export function CompanionApp({ runtime: suppliedRuntime }: CompanionAppProps) {
     chatConversationIdRef.current = undefined;
     setChatConversationId(undefined);
     setChatMessages([]);
+    setVoiceHistoryId(undefined);
+    setVoiceRequestIds([]);
+    setVoicePendingRequestIds([]);
+    setVoiceWorkPending(false);
     setChatPending(false);
     setChatStopping(false);
     setChatRecovering(false);
@@ -393,43 +314,12 @@ export function CompanionApp({ runtime: suppliedRuntime }: CompanionAppProps) {
           if (!alive) return;
           receivedLiveState = true;
           setSnapshot(next);
-          if (next.runtime.activePrompt) {
-            const promptKey = `${next.runtime.activePrompt.mealId}:${next.runtime.activePrompt.dueAt}`;
-            if (activePromptKey.current !== promptKey) {
-              activePromptKey.current = promptKey;
-              setMood(undefined);
-              setRefreshRound(0);
-              setDislikedIds(new Set());
-            }
-            setScreen((current) => (current === "settings" ? current : "meal"));
-          } else {
-            activePromptKey.current = undefined;
-            setScreen((current) => (current === "meal" ? "idle" : current));
-          }
         });
         if (!alive) {
           await stateUnlisten();
           return;
         }
         unlisteners.push(stateUnlisten);
-
-        const mealUnlisten = await runtime.onMealDue((prompt) => {
-          if (alive) {
-            const promptKey = `${prompt.mealId}:${prompt.dueAt}`;
-            if (activePromptKey.current !== promptKey) {
-              activePromptKey.current = promptKey;
-              setMood(undefined);
-              setRefreshRound(0);
-              setDislikedIds(new Set());
-            }
-            setScreen((current) => (current === "settings" ? current : "meal"));
-          }
-        });
-        if (!alive) {
-          await mealUnlisten();
-          return;
-        }
-        unlisteners.push(mealUnlisten);
 
         const initialSnapshot = await runtime.snapshot();
         let initialLaunchAtLogin = false;
@@ -442,10 +332,6 @@ export function CompanionApp({ runtime: suppliedRuntime }: CompanionAppProps) {
         setLaunchAtLoginState(initialLaunchAtLogin);
         if (!receivedLiveState) {
           setSnapshot(initialSnapshot);
-          activePromptKey.current = initialSnapshot.runtime.activePrompt
-            ? `${initialSnapshot.runtime.activePrompt.mealId}:${initialSnapshot.runtime.activePrompt.dueAt}`
-            : undefined;
-          setScreen(initialSnapshot.runtime.activePrompt ? "meal" : "idle");
         }
         setFatalError(undefined);
       } catch (error) {
@@ -599,11 +485,6 @@ export function CompanionApp({ runtime: suppliedRuntime }: CompanionAppProps) {
   );
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 30_000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
     if (!snapshot) return;
     const expanded = !snapshot.settings.onboardingComplete || screen !== "idle";
     void runtime
@@ -618,96 +499,6 @@ export function CompanionApp({ runtime: suppliedRuntime }: CompanionAppProps) {
     const timer = window.setTimeout(() => setStatus(undefined), 2_800);
     return () => window.clearTimeout(timer);
   }, [status]);
-
-  useEffect(() => {
-    if (!refreshing) return;
-    const timer = window.setTimeout(() => setRefreshing(false), 360);
-    return () => window.clearTimeout(timer);
-  }, [refreshing]);
-
-  useEffect(() => {
-    if (screen !== "celebration") return;
-    const timer = window.setTimeout(() => {
-      setCelebration(undefined);
-      setScreen("idle");
-    }, 2_200);
-    return () => window.clearTimeout(timer);
-  }, [screen]);
-
-  const activePrompt = snapshot?.runtime.activePrompt;
-  const activeMeal = snapshot?.settings.meals.find(
-    (meal) => meal.id === activePrompt?.mealId,
-  );
-
-  const recommendationView = useMemo<{
-    suggestions: MealSuggestionView[];
-    canRefresh: boolean;
-  }>(() => {
-    if (!snapshot || !activePrompt || !mood) {
-      return { suggestions: [], canRefresh: false };
-    }
-    const currentDateKey =
-      logicalPromptDateKey(snapshot) ??
-      dateKeyAt(new Date(activePrompt.dueAt), snapshot.settings.timezone);
-    const recommendationSet = recommendMeals({
-      mealId: activePrompt.mealId,
-      mood,
-      settings: snapshot.settings,
-      history: snapshot.history,
-      dateKey: currentDateKey,
-      limit: 6,
-    });
-    const ranked = [
-      ...(recommendationSet.primary ? [recommendationSet.primary] : []),
-      ...recommendationSet.alternatives,
-    ];
-    const rejected = new Set([
-      ...dislikedIds,
-      ...snapshot.history
-        .filter(
-          (entry) =>
-            entry.action === "disliked" &&
-            entry.mealId === activePrompt.mealId &&
-            entry.dateKey === currentDateKey &&
-            entry.choiceId,
-        )
-        .map((entry) => entry.choiceId!),
-    ]);
-    const remaining = ranked.filter(
-      (recommendation) => !rejected.has(recommendation.id),
-    );
-    const suggestions = rotate(remaining, refreshRound)
-      .slice(0, 3)
-      .map((recommendation, index) => {
-        const copy = recommendationCopy(recommendation, mood);
-        const accents = ["coral", "mint", "violet"] as const;
-        return {
-          id: recommendation.id,
-          ...copy,
-          accent: accents[index] ?? "coral",
-        };
-      });
-    return {
-      suggestions,
-      canRefresh: remaining.length > suggestions.length,
-    };
-  }, [activePrompt, dislikedIds, mood, refreshRound, snapshot]);
-
-  async function triggerMealPicker() {
-    try {
-      setMood(undefined);
-      setRefreshRound(0);
-      setDislikedIds(new Set());
-      const latest = await runtime.snapshot();
-      const demoMealId =
-        latest.settings.meals.find((meal) => meal.enabled)?.id ?? "lunch";
-      const next = await runtime.triggerDemoReminder(demoMealId);
-      setSnapshot(next);
-      setScreen("meal");
-    } catch (error) {
-      setStatus(`暂时没能打开推荐：${errorMessage(error)}`);
-    }
-  }
 
   const finishChatNotAdmitted = useCallback(
     (turn: ActiveChatTurn): void => {
@@ -859,10 +650,95 @@ export function CompanionApp({ runtime: suppliedRuntime }: CompanionAppProps) {
     runtime,
   ]);
 
+  useEffect(() => {
+    if (!voiceHistoryId || !connectedChatOwnerId) return;
+    let alive = true;
+    let timer: number | undefined;
+    const id = voiceHistoryId;
+    const owner = connectedChatOwnerId;
+    const requests = new Set(voiceRequestIds);
+    // The server may finalize a last utterance during media shutdown.
+    let quietUntil = Date.now() + 6000;
+    async function refreshVoiceHistory() {
+      try {
+        const history = await runtime.nyxIdChatHistory(id);
+        if (!alive || chatOwnerId.current !== owner) return;
+        for (const entry of history.messages) {
+          if (
+            entry.requestId &&
+            entry.executionPending &&
+            !requests.has(entry.requestId)
+          ) {
+            requests.add(entry.requestId);
+            quietUntil = Date.now() + 6000;
+          }
+        }
+        const states = await Promise.all(
+          [...requests].map((requestId) =>
+            runtime.nyxIdVoiceRequest(id, requestId),
+          ),
+        );
+        if (!alive || chatOwnerId.current !== owner) return;
+        const pending = states.filter(
+          (request) =>
+            request.state !== "completed" && request.state !== "cancelled",
+        );
+        const awaitingPublication = states.some(
+          (request) =>
+            request.state === "completed" &&
+            !history.messages.some(
+              (entry) =>
+                entry.role === "assistant" && entry.turnId === request.turn_id,
+            ),
+        );
+        setChatMessages(messagesFromHistory(history));
+        setVoicePendingRequestIds(pending.map((request) => request.id));
+        setVoiceWorkPending(
+          pending.length > 0 || awaitingPublication || Date.now() < quietUntil,
+        );
+        if (
+          pending.length === 0 &&
+          !awaitingPublication &&
+          Date.now() >= quietUntil
+        ) {
+          setVoiceHistoryId(undefined);
+          setChatOutcome(historyOutcome(history));
+          return;
+        }
+      } catch {
+        if (!alive) return;
+      }
+      if (alive)
+        timer = window.setTimeout(() => void refreshVoiceHistory(), 2000);
+    }
+    void refreshVoiceHistory();
+    return () => {
+      alive = false;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [connectedChatOwnerId, runtime, voiceHistoryId, voiceRequestIds]);
+
+  function adoptVoiceConversation(id: string) {
+    chatConversationIdRef.current = id;
+    setChatConversationId(id);
+  }
+
+  function returnFromVoice(id?: string, requestIds: string[] = []) {
+    setScreen("chat");
+    if (id && nyxIdView.state === "connected") {
+      adoptVoiceConversation(id);
+      setVoiceWorkPending(true);
+      setVoiceRequestIds(requestIds);
+      setVoicePendingRequestIds(requestIds);
+      setVoiceHistoryId(id);
+    }
+  }
+
   async function sendChat(text: string): Promise<void> {
     if (
       activeChatTurn.current ||
       chatPending ||
+      voiceWorkPending ||
       chatRecovering ||
       chatListener.status !== "ready" ||
       nyxIdView.state !== "connected"
@@ -940,6 +816,21 @@ export function CompanionApp({ runtime: suppliedRuntime }: CompanionAppProps) {
   }
 
   async function stopChat(): Promise<void> {
+    if (voiceWorkPending && voiceHistoryId && !chatStopping) {
+      setChatStopping(true);
+      try {
+        await Promise.all(
+          voicePendingRequestIds.map((id) =>
+            runtime.cancelNyxIdVoiceRequest(voiceHistoryId, id),
+          ),
+        );
+      } catch (error) {
+        setStatus(`停止失败：${errorMessage(error)}`);
+      } finally {
+        setChatStopping(false);
+      }
+      return;
+    }
     const turn = activeChatTurn.current;
     const conversationId = turn?.conversationId;
     if (!chatPending || !turn || !conversationId || chatStopping) return;
@@ -954,75 +845,6 @@ export function CompanionApp({ runtime: suppliedRuntime }: CompanionAppProps) {
       }
     } finally {
       if (ownsChatTurn(turn)) setChatStopping(false);
-    }
-  }
-
-  async function snooze() {
-    if (!activePrompt || mealActionPending) return;
-    setMealActionPending(true);
-    try {
-      const next = await runtime.snoozeMeal(activePrompt.mealId, 10);
-      setSnapshot(next);
-      setScreen("idle");
-      setStatus("好，10 分钟后再来叫你");
-    } catch (error) {
-      setStatus(`稍后提醒失败：${errorMessage(error)}`);
-    } finally {
-      setMealActionPending(false);
-    }
-  }
-
-  async function skip() {
-    if (!activePrompt || mealActionPending) return;
-    setMealActionPending(true);
-    try {
-      const next = await runtime.skipMeal(activePrompt.mealId);
-      setSnapshot(next);
-      setScreen("idle");
-      setStatus("知道了，这一餐不再打扰你");
-    } catch (error) {
-      setStatus(`跳过失败：${errorMessage(error)}`);
-    } finally {
-      setMealActionPending(false);
-    }
-  }
-
-  async function choose(suggestion: MealSuggestionView) {
-    if (!activePrompt || mealActionPending) return;
-    setMealActionPending(true);
-    try {
-      const next = await runtime.completeMeal(
-        activePrompt.mealId,
-        suggestion.id,
-        mood,
-      );
-      setSnapshot(next);
-      setCelebration({ choice: suggestion.name });
-      setScreen("celebration");
-    } catch (error) {
-      setStatus(`还没能记住这个选择：${errorMessage(error)}`);
-    } finally {
-      setMealActionPending(false);
-    }
-  }
-
-  async function dislike(suggestion: MealSuggestionView) {
-    if (!activePrompt || mealActionPending) return;
-    setMealActionPending(true);
-    try {
-      const next = await runtime.dislikeSuggestion(
-        activePrompt.mealId,
-        suggestion.id,
-        mood,
-      );
-      setSnapshot(next);
-      setDislikedIds((current) => new Set([...current, suggestion.id]));
-      setRefreshRound((current) => current + 1);
-      setStatus("记住了，以后少推荐这个");
-    } catch (error) {
-      setStatus(`反馈没有保存：${errorMessage(error)}`);
-    } finally {
-      setMealActionPending(false);
     }
   }
 
@@ -1060,6 +882,21 @@ export function CompanionApp({ runtime: suppliedRuntime }: CompanionAppProps) {
         }}
       />
     );
+  } else if (screen === "voice") {
+    content = (
+      <VoicePanel
+        key={chatOwnerKey}
+        companionName={snapshot.settings.companionName}
+        bridge={runtime}
+        nyxIdView={nyxIdView}
+        conversationId={chatConversationId}
+        onConversationReady={adoptVoiceConversation}
+        onBack={returnFromVoice}
+        onConnect={async () => {
+          applyNyxIdView(await runtime.startNyxidLogin());
+        }}
+      />
+    );
   } else if (screen === "chat") {
     content = (
       <ChatPanel
@@ -1067,19 +904,23 @@ export function CompanionApp({ runtime: suppliedRuntime }: CompanionAppProps) {
         companionName={snapshot.settings.companionName}
         messages={chatMessages}
         nyxIdView={nyxIdView}
-        pending={chatPending}
+        pending={chatPending || voiceWorkPending}
         stopping={chatStopping}
         recovering={chatRecovering}
         listenerState={chatListener}
-        canStop={chatPending && Boolean(chatConversationId)}
+        canStop={
+          (chatPending && Boolean(chatConversationId)) ||
+          voicePendingRequestIds.length > 0
+        }
         onBack={() => setScreen("idle")}
         onConnect={async () => {
           applyNyxIdView(await runtime.startNyxidLogin());
         }}
         onNewConversation={() => {
-          if (!activeChatTurn.current) resetChat();
+          if (!activeChatTurn.current && !voiceWorkPending) resetChat();
         }}
         onOpenSettings={() => setScreen("settings")}
+        onVoice={() => setScreen("voice")}
         onRetryListener={() => {
           setChatListenerRevision((current) => current + 1);
         }}
@@ -1093,9 +934,7 @@ export function CompanionApp({ runtime: suppliedRuntime }: CompanionAppProps) {
         settings={snapshot.settings}
         launchAtLogin={launchAtLogin}
         nyxIdView={nyxIdView}
-        onClose={() =>
-          setScreen(snapshot.runtime.activePrompt ? "meal" : "idle")
-        }
+        onClose={() => setScreen("idle")}
         onSave={async (settings) => {
           const next = await runtime.saveSettings(settings);
           setSnapshot(next);
@@ -1106,7 +945,6 @@ export function CompanionApp({ runtime: suppliedRuntime }: CompanionAppProps) {
           const actual = await runtime.setLaunchAtLogin(enabled);
           setLaunchAtLoginState(actual);
         }}
-        onDemoReminder={triggerMealPicker}
         onConnectNyxId={async () => {
           applyNyxIdView(await runtime.startNyxidLogin());
         }}
@@ -1122,69 +960,30 @@ export function CompanionApp({ runtime: suppliedRuntime }: CompanionAppProps) {
         onOpenNyxIdAssistant={() => runtime.openNyxidAssistant()}
       />
     );
-  } else if (screen === "celebration" && celebration) {
-    content = (
-      <CelebrationPanel
-        companionName={snapshot.settings.companionName}
-        choice={celebration.choice}
-      />
-    );
-  } else if (screen === "meal" && activePrompt) {
-    content = (
-      <MealPanel
-        companionName={snapshot.settings.companionName}
-        userName={snapshot.settings.userName}
-        mealLabel={
-          MEAL_LABELS[activePrompt.mealId] ?? activeMeal?.label ?? "饭"
-        }
-        mood={mood}
-        suggestions={recommendationView.suggestions}
-        canRefresh={recommendationView.canRefresh}
-        refreshing={refreshing}
-        pending={mealActionPending}
-        onMood={setMood}
-        onChoose={(suggestion) => void choose(suggestion)}
-        onDislike={(suggestion) => void dislike(suggestion)}
-        onRefresh={() => {
-          setRefreshing(true);
-          setRefreshRound((current) => current + 1);
-        }}
-        onSnooze={() => void snooze()}
-        onSkip={() => void skip()}
-        onBack={() => setScreen("idle")}
-      />
-    );
   } else {
     content = (
       <IdleView
         name={snapshot.settings.companionName}
-        nextMeal={nextMealText(snapshot, now)}
-        quiet={snapshot.settings.quietMode}
+        statusText={
+          nyxIdView.state === "connected"
+            ? "随时和 NyxID 说话"
+            : "连接 NyxID，开始对话"
+        }
         mascotState={chatPending ? "running" : chatOutcome}
         dragEvent={windowDragEvent}
         onOpen={() => {
           setChatOutcome(undefined);
           setScreen("chat");
         }}
-        onMeal={() => {
-          if (activePrompt) setScreen("meal");
-          else void triggerMealPicker();
-        }}
         onSettings={() => setScreen("settings")}
+        onVoice={() =>
+          setScreen(
+            chatPending || chatRecovering || voiceWorkPending
+              ? "chat"
+              : "voice",
+          )
+        }
         onStartDrag={() => runtime.startWindowDrag()}
-        onToggleQuiet={() => {
-          void runtime
-            .setQuietMode(!snapshot.settings.quietMode)
-            .then((next) => {
-              setSnapshot(next);
-              setStatus(
-                next.settings.quietMode ? "饭点提醒已暂停" : "饭点提醒恢复了",
-              );
-            })
-            .catch((error) =>
-              setStatus(`提醒设置失败：${errorMessage(error)}`),
-            );
-        }}
       />
     );
   }

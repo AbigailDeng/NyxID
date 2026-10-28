@@ -8,16 +8,14 @@ function renderIdleView(
 ) {
   const callbacks = {
     onOpen: vi.fn(),
-    onMeal: vi.fn(),
+    onVoice: vi.fn(),
     onSettings: vi.fn(),
     onStartDrag: vi.fn(() => Promise.resolve()),
-    onToggleQuiet: vi.fn(),
   };
   const view = render(
     <IdleView
       name="Nyx"
-      nextMeal="午饭 12:30"
-      quiet={false}
+      statusText="随时和 NyxID 说话"
       {...callbacks}
       {...overrides}
     />,
@@ -67,8 +65,7 @@ function renderIdleView(
       view.rerender(
         <IdleView
           name="Nyx"
-          nextMeal="午饭 12:30"
-          quiet={false}
+          statusText="随时和 NyxID 说话"
           {...callbacks}
           {...next}
         />,
@@ -296,7 +293,7 @@ describe("IdleView pet interaction", () => {
         expireReaction?.();
       });
 
-      expect(screen.getByText("午饭 12:30")).toBeInTheDocument();
+      expect(screen.getByText("随时和 NyxID 说话")).toBeInTheDocument();
       expect(mascotButton).toHaveAttribute("data-interaction", "resting");
       expect(mascotButton.querySelector(".mascot--idle")).not.toBeNull();
     } finally {
@@ -354,9 +351,11 @@ describe("IdleView pet interaction", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "和 NyxID 对话" }));
     fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    fireEvent.click(screen.getByRole("button", { name: "和 NyxID 语音通话" }));
 
     expect(callbacks.onOpen).toHaveBeenCalledTimes(1);
     expect(callbacks.onSettings).toHaveBeenCalledTimes(1);
+    expect(callbacks.onVoice).toHaveBeenCalledTimes(1);
     expect(callbacks.onStartDrag).not.toHaveBeenCalled();
   });
 });

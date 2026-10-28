@@ -2,9 +2,10 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
+use serde::Deserialize;
 use thiserror::Error;
 
-use crate::model::{CompanionSnapshot, MAX_SNAPSHOT_BYTES, ValidationError};
+use crate::model::{CompanionSettings, CompanionSnapshot, MAX_SNAPSHOT_BYTES, ValidationError};
 
 const SNAPSHOT_FILE_NAME: &str = "companion-snapshot.json";
 
@@ -56,7 +57,26 @@ impl SnapshotStore {
             return Err(PersistenceError::TooLarge);
         }
 
-        let snapshot: CompanionSnapshot = serde_json::from_slice(&bytes)?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+        if value
+            .get("schemaVersion")
+            .and_then(serde_json::Value::as_u64)
+            == Some(1)
+        {
+            let legacy: LegacySnapshot = serde_json::from_value(value)?;
+            let snapshot = CompanionSnapshot {
+                settings: CompanionSettings {
+                    companion_name: legacy.settings.companion_name,
+                    user_name: legacy.settings.user_name,
+                    onboarding_complete: legacy.settings.onboarding_complete,
+                },
+                ..CompanionSnapshot::default()
+            };
+            // Rewrite the old file so removed feature data is no longer retained on disk.
+            self.save(&snapshot)?;
+            return Ok(Some(snapshot));
+        }
+        let snapshot: CompanionSnapshot = serde_json::from_value(value)?;
         snapshot.validate()?;
         Ok(Some(snapshot))
     }
@@ -91,6 +111,31 @@ impl SnapshotStore {
     }
 }
 
+// Read only settings that still belong to the companion. All other legacy data is discarded.
+#[derive(Deserialize)]
+struct LegacySnapshot {
+    settings: LegacySettings,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct LegacySettings {
+    companion_name: String,
+    user_name: String,
+    onboarding_complete: bool,
+}
+
+impl Default for LegacySettings {
+    fn default() -> Self {
+        let settings = CompanionSettings::default();
+        Self {
+            companion_name: settings.companion_name,
+            user_name: settings.user_name,
+            onboarding_complete: settings.onboarding_complete,
+        }
+    }
+}
+
 #[cfg(unix)]
 fn sync_directory(path: &Path) -> io::Result<()> {
     File::open(path)?.sync_all()
@@ -104,7 +149,7 @@ fn sync_directory(_path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{MAX_DIETARY_TAGS, SCHEMA_VERSION};
+    use crate::model::SCHEMA_VERSION;
 
     #[test]
     fn atomically_round_trips_a_valid_snapshot() {
@@ -133,18 +178,48 @@ mod tests {
         let path = directory.path().join("invalid.json");
         let store = SnapshotStore::at_path(&path);
         let invalid = format!(
-            r#"{{"schemaVersion":{},"settings":{{"companionName":"Nyx","userName":"","timezone":"UTC","budget":"everyday","dietary":{},"avoid":[],"quietMode":false,"onboardingComplete":false,"meals":[]}},"history":[],"runtime":{{}}}}"#,
-            SCHEMA_VERSION,
-            serde_json::to_string(
-                &(0..=MAX_DIETARY_TAGS)
-                    .map(|index| format!("tag-{index}"))
-                    .collect::<Vec<_>>()
-            )
-            .unwrap()
+            r#"{{"schemaVersion":{},"settings":{{"companionName":"","userName":"","onboardingComplete":false}}}}"#,
+            SCHEMA_VERSION
         );
         fs::write(path, invalid).unwrap();
 
         assert!(matches!(store.load(), Err(PersistenceError::Validation(_))));
+    }
+
+    #[test]
+    fn migrates_legacy_settings_and_erases_removed_data_from_disk() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(SNAPSHOT_FILE_NAME);
+        let store = SnapshotStore::in_directory(directory.path());
+        fs::write(
+            &path,
+            serde_json::to_vec(&serde_json::json!({
+                "schemaVersion": 1,
+                "settings": {
+                    "companionName": "Nova",
+                    "userName": "Ari",
+                    "onboardingComplete": true,
+                    "budget": "everyday",
+                    "dietary": ["old preference"],
+                    "meals": [{ "id": "breakfast" }]
+                },
+                "history": [{ "choiceId": "old choice" }],
+                "runtime": { "activePrompt": { "mealId": "breakfast" } }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let restored = store.load().unwrap().unwrap();
+        assert_eq!(restored.schema_version, SCHEMA_VERSION);
+        assert_eq!(restored.settings.companion_name, "Nova");
+        assert_eq!(restored.settings.user_name, "Ari");
+        assert!(restored.settings.onboarding_complete);
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        assert_eq!(persisted, serde_json::to_value(restored).unwrap());
+        assert_eq!(persisted.as_object().unwrap().len(), 2);
+        assert_eq!(persisted["settings"].as_object().unwrap().len(), 3);
     }
 
     #[test]

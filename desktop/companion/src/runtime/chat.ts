@@ -83,6 +83,8 @@ export const nyxIdChatCommandErrorSchema = z
 
 const historyMessageSchema = z
   .object({
+    requestId: requestIdSchema.optional(),
+    executionPending: z.boolean().optional(),
     id: z.string().min(1).max(256),
     seq: z.number().int().positive(),
     turnId: z.string().min(1).max(128),

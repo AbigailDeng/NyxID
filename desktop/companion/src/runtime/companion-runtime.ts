@@ -1,10 +1,5 @@
-import type {
-  ActivePrompt,
-  CompanionSettings,
-  CompanionSnapshot,
-  MealId,
-  RecommendationMood,
-} from "../domain/companion";
+import type { NyxIdVoiceBridge } from "./voice";
+import type { CompanionSettings, CompanionSnapshot } from "../domain/companion";
 import type { NyxIdView } from "./nyxid";
 import type {
   NyxIdChatCompletedEvent,
@@ -18,23 +13,9 @@ import type { WindowDragEvent } from "./window-drag";
 export type WindowMode = "compact" | "expanded";
 export type Unlisten = () => void | Promise<void>;
 
-export interface CompanionRuntime {
+export interface CompanionRuntime extends NyxIdVoiceBridge {
   snapshot(): Promise<CompanionSnapshot>;
   saveSettings(settings: CompanionSettings): Promise<CompanionSnapshot>;
-  snoozeMeal(mealId: MealId, minutes?: number): Promise<CompanionSnapshot>;
-  skipMeal(mealId: MealId): Promise<CompanionSnapshot>;
-  completeMeal(
-    mealId: MealId,
-    choiceId?: string,
-    mood?: RecommendationMood,
-  ): Promise<CompanionSnapshot>;
-  dislikeSuggestion(
-    mealId: MealId,
-    choiceId: string,
-    mood?: RecommendationMood,
-  ): Promise<CompanionSnapshot>;
-  setQuietMode(quietMode: boolean): Promise<CompanionSnapshot>;
-  triggerDemoReminder(mealId?: MealId): Promise<CompanionSnapshot>;
   setWindowMode(mode: WindowMode): Promise<void>;
   startWindowDrag(): Promise<void>;
   openNyxidAssistant(): Promise<void>;
@@ -52,7 +33,6 @@ export interface CompanionRuntime {
   onStateChanged(
     listener: (snapshot: CompanionSnapshot) => void,
   ): Promise<Unlisten>;
-  onMealDue(listener: (prompt: ActivePrompt) => void): Promise<Unlisten>;
   onWindowDrag(listener: (event: WindowDragEvent) => void): Promise<Unlisten>;
   onNyxidChanged(listener: (view: NyxIdView) => void): Promise<Unlisten>;
   onNyxIdChatEvent(

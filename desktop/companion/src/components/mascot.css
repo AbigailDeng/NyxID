@@ -66,7 +66,7 @@
 .mascot__wing-mark,
 .mascot__eyes--closed path,
 .mascot__mouth,
-.mascot__hungry-mark path {
+.mascot__speaking-mark path {
   fill: none;
   stroke: #202126;
   stroke-width: 3;
@@ -81,16 +81,16 @@
 
 .mascot__eyes--closed,
 .mascot__eyes--thinking,
-.mascot__mouth--hungry,
+.mascot__mouth--speaking,
 .mascot__mouth--thinking,
 .mascot__mouth--happy,
-.mascot__hungry-mark,
+.mascot__speaking-mark,
 .mascot__thinking-mark,
 .mascot__happy-mark {
   display: none;
 }
 
-.mascot--hungry .mascot__mouth--idle,
+.mascot--speaking .mascot__mouth--idle,
 .mascot--thinking .mascot__mouth--idle,
 .mascot--happy .mascot__mouth--idle,
 .mascot--happy .mascot__eyes--open,
@@ -101,8 +101,8 @@
   display: none;
 }
 
-.mascot--hungry .mascot__mouth--hungry,
-.mascot--hungry .mascot__hungry-mark,
+.mascot--speaking .mascot__mouth--speaking,
+.mascot--speaking .mascot__speaking-mark,
 .mascot--thinking .mascot__mouth--thinking,
 .mascot--thinking .mascot__eyes--thinking,
 .mascot--thinking .mascot__thinking-mark,
@@ -117,11 +117,11 @@
   display: block;
 }
 
-.mascot--hungry .mascot__wing--left {
+.mascot--speaking .mascot__wing--left {
   animation: mascot-wing-left 1.1s ease-in-out infinite;
 }
 
-.mascot--hungry .mascot__wing--right {
+.mascot--speaking .mascot__wing--right {
   animation: mascot-wing-right 1.1s ease-in-out infinite;
 }
 
@@ -338,4 +338,12 @@
     animation: none !important;
     transition: none !important;
   }
+}
+
+.mascot--listening .mascot__float {
+  animation: mascot-breathe 1.8s ease-in-out infinite;
+}
+
+.mascot--listening .mascot__ears {
+  transform: translateY(-3px);
 }

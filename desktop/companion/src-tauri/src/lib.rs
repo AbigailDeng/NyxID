@@ -3,7 +3,6 @@ mod desktop;
 mod model;
 mod nyxid;
 mod persistence;
-mod scheduler;
 mod state;
 mod window;
 
@@ -12,23 +11,9 @@ use tauri_plugin_autostart::MacosLauncher;
 
 use crate::model::CompanionSnapshot;
 use crate::persistence::SnapshotStore;
-use crate::scheduler::{CompanionEngine, SchedulerError};
 use crate::state::CompanionState;
 
 const AUTOSTART_ARGUMENT: &str = "--autostart";
-
-fn refresh_snapshot_timezone(
-    snapshot: &mut CompanionSnapshot,
-    detected_timezone: &str,
-) -> Result<bool, SchedulerError> {
-    let mut engine = CompanionEngine::new(snapshot.clone())?;
-    if !engine.refresh_timezone(detected_timezone) {
-        return Ok(false);
-    }
-
-    *snapshot = engine.into_snapshot();
-    Ok(true)
-}
 
 pub fn run() {
     tauri::Builder::default()
@@ -42,7 +27,6 @@ pub fn run() {
             let _ = result;
         }))
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec![AUTOSTART_ARGUMENT]),
@@ -53,7 +37,7 @@ pub fn run() {
 
             let app_data_dir = app.path().app_data_dir()?;
             let store = SnapshotStore::in_directory(&app_data_dir);
-            let mut snapshot = match store.load() {
+            let snapshot = match store.load() {
                 Ok(Some(snapshot)) => snapshot,
                 Ok(None) => {
                     let snapshot = CompanionSnapshot::default();
@@ -62,27 +46,23 @@ pub fn run() {
                 }
                 Err(error) => {
                     eprintln!("ignoring invalid companion snapshot: {error}");
-                    CompanionSnapshot::default()
+                    let snapshot = CompanionSnapshot::default();
+                    store.save(&snapshot)?;
+                    snapshot
                 }
             };
-            if let Ok(timezone) = iana_time_zone::get_timezone()
-                && refresh_snapshot_timezone(&mut snapshot, &timezone)?
-            {
-                store.save(&snapshot)?;
-            }
-            let quiet_mode = snapshot.settings.quiet_mode;
             app.manage(CompanionState::new(snapshot, store));
             let nyxid_state = nyxid::NyxIdState::system(app_data_dir)?;
             app.manage(nyxid_state.clone());
+            app.manage(nyxid::NyxIdVoiceState::default());
 
             window::configure_main_window(app.handle())?;
-            desktop::install_tray(app, quiet_mode)?;
+            desktop::install_tray(app)?;
             if std::env::args().any(|argument| argument == AUTOSTART_ARGUMENT) {
                 window::present(app.handle())?;
             } else {
                 window::show(app.handle())?;
             }
-            desktop::start_scheduler(app.handle().clone());
             nyxid_state.bootstrap(app.handle().clone());
             Ok(())
         })
@@ -102,12 +82,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::companion_snapshot,
             commands::save_companion_settings,
-            commands::snooze_meal,
-            commands::skip_meal,
-            commands::complete_meal,
-            commands::dislike_suggestion,
-            commands::set_quiet_mode,
-            commands::trigger_demo_reminder,
             commands::set_window_mode,
             commands::start_window_drag,
             commands::get_launch_at_login,
@@ -122,38 +96,13 @@ pub fn run() {
             commands::recover_nyxid_chat,
             commands::nyxid_chat_history,
             commands::nyxid_chat_stop,
+            commands::nyxid_voice_options,
+            commands::start_nyxid_voice,
+            commands::control_nyxid_voice,
+            commands::send_nyxid_voice_frame,
+            commands::nyxid_voice_request,
+            commands::cancel_nyxid_voice_request,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run NyxID Companion");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::{ActivePrompt, MealId};
-
-    #[test]
-    fn restart_in_a_new_timezone_clears_runtime_from_the_old_local_day() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = SnapshotStore::in_directory(directory.path());
-        let mut snapshot = CompanionSnapshot::default();
-        snapshot.settings.timezone = "UTC".to_owned();
-        snapshot.runtime.active_prompt = Some(ActivePrompt {
-            meal_id: MealId::Breakfast,
-            due_at: "2026-10-09T08:00:00Z".to_owned(),
-        });
-        snapshot.runtime.snoozed_until = Some("2026-10-09T08:20:00Z".to_owned());
-        snapshot.runtime.last_prompt_key = Some("2026-10-09:breakfast".to_owned());
-        store.save(&snapshot).unwrap();
-
-        let mut restored = store.load().unwrap().unwrap();
-        assert!(refresh_snapshot_timezone(&mut restored, "Asia/Shanghai").unwrap());
-        store.save(&restored).unwrap();
-
-        let restarted = store.load().unwrap().unwrap();
-        assert_eq!(restarted.settings.timezone, "Asia/Shanghai");
-        assert!(restarted.runtime.active_prompt.is_none());
-        assert!(restarted.runtime.snoozed_until.is_none());
-        assert!(restarted.runtime.last_prompt_key.is_none());
-    }
 }

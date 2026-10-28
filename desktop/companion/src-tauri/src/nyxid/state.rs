@@ -393,7 +393,7 @@ impl NyxIdState {
         }
     }
 
-    fn connected_owner_id(&self) -> Result<String, String> {
+    pub(crate) fn connected_owner_id(&self) -> Result<String, String> {
         match &self.data().view {
             NyxIdView::Connected { user, .. } => Ok(user.id.clone()),
             _ => Err("请先连接 NyxID 账号。".to_owned()),
@@ -425,7 +425,7 @@ impl NyxIdState {
             .map_err(|_| "无法安全更新 NyxID 对话状态。".to_owned())
     }
 
-    async fn chat_credential(
+    pub(crate) async fn chat_credential(
         &self,
         app: &AppHandle,
     ) -> Result<(Zeroizing<String>, String), String> {
@@ -1625,6 +1625,8 @@ fn deleted_conversation_recovery(
                 active_turn: false,
             },
             messages: vec![NyxIdChatHistoryMessage {
+                request_id: None,
+                execution_pending: None,
                 id: format!("recovery-{request_id}"),
                 seq: 1,
                 turn_id: turn_id.to_owned(),
@@ -1707,6 +1709,8 @@ mod tests {
         };
 
         let mut messages = vec![NyxIdChatHistoryMessage {
+            request_id: None,
+            execution_pending: None,
             id: "recovery-user".to_owned(),
             seq: 1,
             turn_id: "turn-recovery-probe".to_owned(),
@@ -1717,6 +1721,8 @@ mod tests {
         }];
         if include_assistant {
             messages.push(NyxIdChatHistoryMessage {
+                request_id: None,
+                execution_pending: None,
                 id: "recovery-assistant".to_owned(),
                 seq: 2,
                 turn_id: "turn-recovery-probe".to_owned(),

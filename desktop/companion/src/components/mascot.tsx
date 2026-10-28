@@ -4,7 +4,8 @@ import "./mascot.css";
 
 export type MascotState =
   | "idle"
-  | "hungry"
+  | "speaking"
+  | "listening"
   | "thinking"
   | "happy"
   | "waving"
@@ -28,7 +29,8 @@ interface MascotProps {
 
 const DEFAULT_LABELS: Record<MascotState, string> = {
   idle: "Nyx is resting",
-  hungry: "Nyx says it is meal time",
+  speaking: "Nyx is speaking",
+  listening: "Nyx is listening",
   thinking: "Nyx is thinking",
   happy: "Nyx is happy",
   waving: "Nyx is waving",
@@ -168,7 +170,7 @@ export function Mascot({ state, size = 168, label, look }: MascotProps) {
             d="M105 111c3 3 7 3 10 0"
           />
           <path
-            className="mascot__mouth mascot__mouth--hungry"
+            className="mascot__mouth mascot__mouth--speaking"
             d="M104 110c4-3 8-3 12 0-1 7-11 7-12 0z"
           />
           <path
@@ -201,8 +203,8 @@ export function Mascot({ state, size = 168, label, look }: MascotProps) {
             <ellipse cx="129" cy="183" rx="16" ry="9" fill="#f4eee5" />
           </g>
 
-          <g className="mascot__hungry-mark">
-            <path d="M51 76v17M46 76v8c0 4 10 4 10 0v-8M65 76v17M65 76c8 3 8 11 0 13" />
+          <g className="mascot__speaking-mark">
+            <path d="M47 78c-4 4-4 10 0 14M40 72c-8 8-8 18 0 26M173 78c4 4 4 10 0 14M180 72c8 8 8 18 0 26" />
           </g>
           <g className="mascot__thinking-mark">
             <path d="m171 65 3 7 7 3-7 3-3 7-3-7-7-3 7-3z" fill="#57c6a5" />

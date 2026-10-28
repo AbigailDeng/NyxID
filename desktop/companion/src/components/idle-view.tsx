@@ -1,9 +1,4 @@
-import {
-  BellOff,
-  MessageCircle,
-  Settings,
-  UtensilsCrossed,
-} from "lucide-react";
+import { MessageCircle, Mic, Settings } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 
 import type { WindowDragEvent } from "../runtime";
@@ -32,15 +27,13 @@ function clampUnit(value: number): number {
 
 interface IdleViewProps {
   readonly name: string;
-  readonly nextMeal: string;
-  readonly quiet: boolean;
+  readonly statusText: string;
   readonly mascotState?: MascotState;
   readonly dragEvent?: WindowDragEvent;
   readonly onOpen: () => void;
-  readonly onMeal: () => void;
+  readonly onVoice: () => void;
   readonly onSettings: () => void;
   readonly onStartDrag: () => Promise<void>;
-  readonly onToggleQuiet: () => void;
 }
 
 function releasePointerCapture(
@@ -57,15 +50,13 @@ function releasePointerCapture(
 
 export function IdleView({
   name,
-  nextMeal,
-  quiet,
+  statusText,
   mascotState = "idle",
   dragEvent,
   onOpen,
-  onMeal,
+  onVoice,
   onSettings,
   onStartDrag,
-  onToggleQuiet,
 }: IdleViewProps) {
   const pointerStart = useRef<{
     x: number;
@@ -221,7 +212,7 @@ export function IdleView({
     <main className="idle-view">
       <div className="idle-bubble" aria-live="polite">
         <strong>{name}</strong>
-        <span>{petReaction ?? (quiet ? "饭点提醒已暂停" : nextMeal)}</span>
+        <span>{petReaction ?? statusText}</span>
       </div>
 
       <button
@@ -266,15 +257,8 @@ export function IdleView({
         <IconButton label="和 NyxID 对话" onClick={onOpen}>
           <MessageCircle aria-hidden="true" />
         </IconButton>
-        <IconButton label="现在选吃的" onClick={onMeal}>
-          <UtensilsCrossed aria-hidden="true" />
-        </IconButton>
-        <IconButton
-          label={quiet ? "恢复饭点提醒" : "暂停饭点提醒"}
-          tone={quiet ? "active" : "default"}
-          onClick={onToggleQuiet}
-        >
-          <BellOff aria-hidden="true" />
+        <IconButton label="和 NyxID 语音通话" onClick={onVoice}>
+          <Mic aria-hidden="true" />
         </IconButton>
         <IconButton label="设置" onClick={onSettings}>
           <Settings aria-hidden="true" />

@@ -1,15 +1,12 @@
+import { nyxIdVoiceBridge } from "./voice-bridge";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import {
-  activePromptSchema,
-  choiceIdSchema,
   companionSettingsSchema,
   parseCompanionSnapshot,
   type CompanionSettings,
   type CompanionSnapshot,
-  type MealId,
-  type RecommendationMood,
 } from "../domain/companion";
 import type {
   CompanionRuntime,
@@ -34,7 +31,6 @@ import { nyxIdViewSchema, parseNyxIdView, type NyxIdView } from "./nyxid";
 import { windowDragEventSchema, type WindowDragEvent } from "./window-drag";
 
 const STATE_CHANGED_EVENT = "companion://state-changed";
-const MEAL_DUE_EVENT = "companion://meal-due";
 const WINDOW_DRAG_EVENT = "companion://window-drag";
 const NYXID_CHANGED_EVENT = "companion://nyxid-changed";
 const NYXID_CHAT_EVENT = "companion://nyxid-chat";
@@ -51,6 +47,14 @@ async function invokeNyxId(command: string): Promise<NyxIdView> {
 }
 
 export class TauriCompanionRuntime implements CompanionRuntime {
+  nyxIdVoiceOptions = nyxIdVoiceBridge.nyxIdVoiceOptions;
+  nyxIdVoiceRequest = nyxIdVoiceBridge.nyxIdVoiceRequest;
+  cancelNyxIdVoiceRequest = nyxIdVoiceBridge.cancelNyxIdVoiceRequest;
+  startNyxIdVoice = nyxIdVoiceBridge.startNyxIdVoice;
+  controlNyxIdVoice = nyxIdVoiceBridge.controlNyxIdVoice;
+  sendNyxIdVoiceFrame = nyxIdVoiceBridge.sendNyxIdVoiceFrame;
+  onNyxIdVoiceEvent = nyxIdVoiceBridge.onNyxIdVoiceEvent;
+
   snapshot(): Promise<CompanionSnapshot> {
     return invokeSnapshot("companion_snapshot");
   }
@@ -59,47 +63,6 @@ export class TauriCompanionRuntime implements CompanionRuntime {
     return invokeSnapshot("save_companion_settings", {
       settings: companionSettingsSchema.parse(settings),
     });
-  }
-
-  snoozeMeal(mealId: MealId, minutes = 10): Promise<CompanionSnapshot> {
-    return invokeSnapshot("snooze_meal", { mealId, minutes });
-  }
-
-  skipMeal(mealId: MealId): Promise<CompanionSnapshot> {
-    return invokeSnapshot("skip_meal", { mealId });
-  }
-
-  completeMeal(
-    mealId: MealId,
-    choiceId?: string,
-    mood?: RecommendationMood,
-  ): Promise<CompanionSnapshot> {
-    return invokeSnapshot("complete_meal", {
-      mealId,
-      choiceId:
-        choiceId === undefined ? undefined : choiceIdSchema.parse(choiceId),
-      mood,
-    });
-  }
-
-  dislikeSuggestion(
-    mealId: MealId,
-    choiceId: string,
-    mood?: RecommendationMood,
-  ): Promise<CompanionSnapshot> {
-    return invokeSnapshot("dislike_suggestion", {
-      mealId,
-      choiceId: choiceIdSchema.parse(choiceId),
-      mood,
-    });
-  }
-
-  setQuietMode(quietMode: boolean): Promise<CompanionSnapshot> {
-    return invokeSnapshot("set_quiet_mode", { quietMode });
-  }
-
-  triggerDemoReminder(mealId?: MealId): Promise<CompanionSnapshot> {
-    return invokeSnapshot("trigger_demo_reminder", { mealId });
   }
 
   async setWindowMode(mode: WindowMode): Promise<void> {
@@ -190,17 +153,6 @@ export class TauriCompanionRuntime implements CompanionRuntime {
   ): Promise<Unlisten> {
     return listen<unknown>(STATE_CHANGED_EVENT, (event) => {
       listener(parseCompanionSnapshot(event.payload));
-    });
-  }
-
-  onMealDue(
-    listener: (prompt: { mealId: MealId; dueAt: string }) => void,
-  ): Promise<Unlisten> {
-    return listen<unknown>(MEAL_DUE_EVENT, (event) => {
-      const parsed = activePromptSchema.safeParse(event.payload);
-      if (parsed.success) {
-        listener(parsed.data);
-      }
     });
   }
 

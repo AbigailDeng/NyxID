@@ -3,6 +3,7 @@ import {
   Cloud,
   LoaderCircle,
   MessageCircle,
+  Mic,
   RefreshCw,
   Send,
   Settings,
@@ -38,6 +39,7 @@ interface ChatPanelProps {
   readonly onConnect: () => Promise<void>;
   readonly onNewConversation: () => void;
   readonly onOpenSettings: () => void;
+  readonly onVoice: () => void;
   readonly onRetryListener: () => void;
   readonly onSend: (text: string) => Promise<void>;
   readonly onStop: () => Promise<void>;
@@ -81,6 +83,7 @@ export function ChatPanel({
   onConnect,
   onNewConversation,
   onOpenSettings,
+  onVoice,
   onRetryListener,
   onSend,
   onStop,
@@ -229,6 +232,16 @@ export function ChatPanel({
       </div>
 
       <div className="chat-composer">
+        <button
+          type="button"
+          className="chat-settings-button"
+          aria-label="和 NyxID 语音通话"
+          title="语音通话"
+          disabled={!connected || pending || recovering}
+          onClick={onVoice}
+        >
+          <Mic aria-hidden="true" />
+        </button>
         <textarea
           value={draft}
           rows={1}

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ZodError } from "zod";
 
+import { createDefaultCompanionSettings } from "../domain/companion";
+
 const { invokeMock, listenMock, unlistenMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
   listenMock: vi.fn(),
@@ -52,6 +54,30 @@ describe("TauriCompanionRuntime NyxID contract", () => {
         return unlistenMock;
       },
     );
+  });
+
+  it("reads and saves only the retained companion identity", async () => {
+    const settings = {
+      ...createDefaultCompanionSettings(),
+      companionName: "Orbit",
+      userName: "Sam",
+      onboardingComplete: true,
+    };
+    const snapshot = { schemaVersion: 2, settings };
+    invokeMock.mockResolvedValueOnce(snapshot).mockResolvedValueOnce(snapshot);
+    const runtime = new TauriCompanionRuntime();
+
+    await expect(runtime.snapshot()).resolves.toEqual(snapshot);
+    await expect(runtime.saveSettings(settings)).resolves.toEqual(snapshot);
+
+    expect(invokeMock).toHaveBeenNthCalledWith(
+      1,
+      "companion_snapshot",
+      undefined,
+    );
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "save_companion_settings", {
+      settings,
+    });
   });
 
   it.each([

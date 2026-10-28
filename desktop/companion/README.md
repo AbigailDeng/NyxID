@@ -1,26 +1,41 @@
 # NyxID Companion
 
-NyxID Companion is a local-first desktop pet that stays near the lower-right
-edge of the screen and helps with one complete routine: remembering meal times,
-offering a few explainable meal ideas, and learning from explicit choices.
+NyxID Companion is a small desktop spirit that connects to NyxID Assistant.
+Talk to it with text or your microphone: NyxID owns the conversation, connected
+services, permissions, task execution and billing.
 
 ## Current scope
 
-- Three configurable local meal reminders with native notifications.
-- Snooze, skip, quiet mode, tray controls, close-to-hide, and launch at login.
-- Deterministic on-device recommendations based on mood, budget, dietary
-  preferences, avoided ingredients, and explicit accept/dislike history.
-- Atomic local persistence and reminder recovery after an app restart.
-- Native NyxID device authorization, account-session refresh/logout, and a
-  live summary of the user's authorized services from `GET /api/v1/keys`.
-- A fixed external link to the NyxID Assistant. Embedded Assistant chat is not
-  part of this slice.
+- Transparent, always-on-top desktop spirit with petting, directional drag,
+  persistent window placement, tray controls and launch at login.
+- Native NyxID device authorization, session refresh/logout, and a live summary
+  of the user's authorized services from `GET /api/v1/keys`.
+- Embedded Assistant chat with streaming replies, Stop and durable recovery
+  after an interrupted send or application restart.
+- Realtime voice in the same NyxID conversation, using eligible OpenAI WebRTC
+  or xAI PCM services returned by NyxID. Select a service and voice, then start
+  explicitly. Hold the microphone button (or Space/Enter while focused) to
+  talk; release to send. Microphone mute, speaker mute, audio resume, captions
+  and end-call controls are available during calls.
+- Accepted NyxID tasks continue after a call ends. Return to text chat to see
+  their persisted progress/results or stop an active task. Approval cards and
+  other rich task controls remain available in NyxID Assistant.
 
-Nearby restaurant search, delivery ordering, payment, cloud preference sync,
-and embedded Assistant chat are intentionally outside this first slice. The
-meal loop keeps working without NyxID login or network access.
+## Requirements for voice
 
-## Browser development
+Voice requires the native desktop app, a microphone, NyxID login, the account's
+`assistant:voice` feature, and an available voice-enabled service/connection.
+Provider availability, permissions, limits and pricing come from NyxID. Audio
+and task execution may have separate charges. No provider API key or thread
+Agent Key is passed to the webview.
+
+The app requests microphone access only after **Start voice call**. macOS
+bundles declare microphone usage and audio-input entitlement. If microphone
+access was denied, enable NyxID Companion in System Settings → Privacy &
+Security → Microphone. Browser development displays the product UI and reports
+native account/voice functionality as unavailable.
+
+## Development
 
 ```bash
 cd desktop/companion
@@ -28,48 +43,48 @@ npm ci
 npm run dev
 ```
 
-Open <http://127.0.0.1:1420>. Browser mode uses `localStorage`, simulates the
-launch-at-login switch, and keeps the same reminder/recommendation contract as
-the native app.
+Open <http://127.0.0.1:1420>. Reuse an existing development tab/server when
+available. Browser mode stores names/onboarding in `localStorage` and simulates
+launch-at-login; it does not simulate authenticated chat or voice results.
 
-## Native development
-
-Install the [Tauri system prerequisites](https://v2.tauri.app/start/prerequisites/)
-for the host OS, then run:
+For native development, install the host's
+[Tauri system prerequisites](https://v2.tauri.app/start/prerequisites/) and run:
 
 ```bash
 cd desktop/companion
-npm ci
 npm run desktop:dev
 ```
 
-The Tauri app uses a transparent, always-on-top window. It stores
+## Persistence and transport
+
 `companion-snapshot.json` in the OS application-data directory for
-`dev.nyxid.companion`. The file contains meal settings and compact explicit
-feedback only; it contains no passwords, API keys, NyxID tokens, browsing
-history, or ambient activity data. NyxID access/refresh tokens and unfinished
-device-login recovery material remain in Rust and are stored only through the
-operating system keychain. React receives only public confirmation details,
-the sanitized account profile, and service-state summaries.
+`dev.nyxid.companion` stores only the spirit's name, the user's preferred name
+and onboarding completion (`schemaVersion: 2`). Upgrading from the previous
+version keeps these fields and rewrites the file without the retired routine,
+preferences or history. The browser performs the same migration. Native window
+placement is retained separately.
+
+Access/refresh tokens and pending device-login recovery material stay in Rust
+and the OS keychain. The chat outbox stores request identity only. Voice uses
+bounded, authenticated native HTTP/WebSocket requests to NyxID; provider
+credentials stay on the server. The webview handles ephemeral microphone audio
+and playback. Ending a call, losing the session or logging out releases local
+media. A lost end response is reported and NyxID's heartbeat expiry closes the
+server session. Transcripts and task state follow NyxID's retention policies.
 
 ## Focused verification
 
-```bash
-npx vitest run \
-  src/companion-app.test.tsx \
-  src/domain/companion.test.ts \
-  src/domain/meal-clock.test.ts \
-  src/domain/recommendations.test.ts \
-  src/runtime/browser-runtime.test.ts \
-  src/runtime/nyxid.test.ts \
-  src/runtime/tauri-runtime.test.ts
+Run dependency-related tests for the changed files, and explicitly run any
+changed or new tests. For example, voice changes use:
 
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-cargo test --manifest-path src-tauri/Cargo.toml
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+```bash
+pnpm exec vitest run src/components/voice-panel.test.tsx \
+  src/runtime/voice-client.test.ts src/runtime/voice-bridge.test.ts
+cargo test --manifest-path src-tauri/Cargo.toml --lib nyxid::voice::tests
 ```
 
-Run ESLint and Prettier only for the changed frontend files selected by the
-repository scope analyzer. Affected typechecking, the complete frontend suite,
-and production/native release builds run in GitHub Actions rather than as part
-of routine local validation.
+Run ESLint/Prettier only on changed frontend files selected by the scope
+analyzer. There is no affected TypeScript target; GitHub Actions owns full
+frontend typechecking, the complete test suite and production/native builds.
+Transport unit tests use fixtures and do not establish successful paid
+provider calls or microphone permission behavior on every host OS.
