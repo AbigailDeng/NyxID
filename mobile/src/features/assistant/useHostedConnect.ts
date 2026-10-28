@@ -27,6 +27,7 @@ export function useHostedConnect(
   const availability = useGroupAvailability();
   const [preview, setPreview] = useState<ConnectLinkPreview>();
   const [platformAvailable, setPlatformAvailable] = useState(false);
+  const [iconUrl, setIconUrl] = useState<string | null>();
   const [platformChoice, setPlatformChoice] = useState<boolean | null>(null);
   const [device, setDevice] = useState<ConnectDeviceChallenge>();
   const [oauth, setOAuth] = useState<{
@@ -96,6 +97,7 @@ export function useHostedConnect(
   async function reload() {
     if (!current() || lock.current) return;
     setLoading(true);
+    setIconUrl(undefined);
     try {
       const value = await request((signal) =>
         connectLinksApi.preview(token, signal),
@@ -113,10 +115,12 @@ export function useHostedConnect(
         const entry = await request((signal) =>
           servicesApi.catalogEntry(value.service_slug, signal),
         );
-        if (current())
+        if (current()) {
+          setIconUrl(entry.icon_url);
           setPlatformAvailable(
             !!entry.platform_key?.available && value.scopes.length === 0,
           );
+        }
       } catch {
         /* A missing catalog choice never widens credential authority. */
       }
@@ -357,6 +361,7 @@ export function useHostedConnect(
     error,
     setError,
     platformAvailable,
+    iconUrl,
     usePlatformKey,
     setPlatformChoice,
     device,

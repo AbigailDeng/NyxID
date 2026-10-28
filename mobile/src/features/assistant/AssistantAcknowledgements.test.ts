@@ -72,6 +72,7 @@ function setup(
         key,
       }),
     },
+    "../../components/ServiceIcon": { ServiceIcon: "ServiceIcon" },
     "react-native": {
       Pressable: "Pressable",
       View: "View",

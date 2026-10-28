@@ -1,3 +1,4 @@
+import { ServiceIcon } from "../../components/ServiceIcon";
 import { useEffect, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { ChevronDown, ChevronRight, History } from "lucide-react-native";
@@ -153,12 +154,27 @@ export function AssistantAcknowledgements({
                           </Label>
                         ) : null}
                         {row.service_name || row.service_slug ? (
-                          <Label muted style={styles.recordText}>
-                            Service: {row.service_name ?? row.service_slug}
-                            {row.service_name && row.service_slug
-                              ? ` (${row.service_slug})`
-                              : ""}
-                          </Label>
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 8,
+                            }}
+                          >
+                            <ServiceIcon
+                              slug={row.service_slug ?? "custom"}
+                              size="xs"
+                            />
+                            <Label
+                              muted
+                              style={[styles.recordText, { flex: 1 }]}
+                            >
+                              Service: {row.service_name ?? row.service_slug}
+                              {row.service_name && row.service_slug
+                                ? ` (${row.service_slug})`
+                                : ""}
+                            </Label>
+                          </View>
                         ) : null}
                         {row.tool_name ? (
                           <Label muted mono style={styles.recordText}>

@@ -1,10 +1,20 @@
-import { useState, type ReactElement } from "react";
-import { Image, StyleSheet, Text, View } from "react-native";
+import { useCallback, useState, type ReactElement } from "react";
+import { Image, View } from "react-native";
 import { SvgUri } from "react-native-svg";
 import { useTheme } from "../theme/ThemeContext";
-import { fonts } from "../theme/designTokens";
+import { FallbackIcon, SERVICE_ICONS } from "./service-icons";
 
-/** Match Web's public icon URLs; never pass them through authenticated API calls. */
+export const SERVICE_ICON_SIZES = {
+  "2xs": 14,
+  xs: 16,
+  sm: 20,
+  md: 24,
+  lg: 32,
+  xl: 36,
+} as const;
+export type ServiceIconSize = keyof typeof SERVICE_ICON_SIZES;
+
+/** Public images use the same URL policy as the web, never authenticated API calls. */
 export function serviceIconSource(value?: string | null) {
   if (!value || value.length > 2048 || value.includes("#")) return null;
   try {
@@ -18,7 +28,6 @@ export function serviceIconSource(value?: string | null) {
       return null;
     return {
       uri: url.href,
-      // Database uploads are SVGs served by an extensionless public endpoint.
       svg:
         /\/catalog-icons\/[^/]+\/?$/i.test(url.pathname) ||
         /\.svg$/i.test(url.pathname),
@@ -28,32 +37,46 @@ export function serviceIconSource(value?: string | null) {
   }
 }
 
-const ignoreSvgError = () => {};
-
 export function ServiceIcon({
+  slug,
   iconUrl,
-  initial,
+  size = "sm",
   color,
 }: {
-  iconUrl?: string | null;
-  initial: string;
-  color: string;
+  readonly slug?: string | null;
+  readonly iconUrl?: string | null;
+  readonly size?: ServiceIconSize;
+  readonly color?: string;
 }) {
   const { colors } = useTheme();
   const source = serviceIconSource(iconUrl);
-  const fallback = <Text style={[styles.initial, { color }]}>{initial}</Text>;
+  if (!slug && !iconUrl) return null;
+  const pixels = SERVICE_ICON_SIZES[size];
+  const tint = color ?? colors.textSecondary;
+  const Glyph =
+    slug && Object.prototype.hasOwnProperty.call(SERVICE_ICONS, slug)
+      ? SERVICE_ICONS[slug]!
+      : FallbackIcon;
+  const fallback = <Glyph size={pixels} color={tint} />;
   return (
     <View
       accessible={false}
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={[styles.tile, { backgroundColor: colors.ghostBg }]}
+      style={{
+        width: pixels,
+        height: pixels,
+        flexShrink: 0,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
     >
       {source ? (
         <RemoteIcon
           key={source.uri}
           source={source}
-          color={colors.textSecondary}
+          size={pixels}
+          color={tint}
           fallback={fallback}
         />
       ) : (
@@ -65,23 +88,28 @@ export function ServiceIcon({
 
 function RemoteIcon({
   source,
+  size,
   color,
   fallback,
 }: {
   source: NonNullable<ReturnType<typeof serviceIconSource>>;
+  size: number;
   color: string;
   fallback: ReactElement;
 }) {
-  const [trySvg, setTrySvg] = useState(source.svg);
-  if (trySvg)
+  const [mode, setMode] = useState(source.svg ? "svg" : "image");
+  const onSvgError = useCallback(() => setMode("failed"), []);
+  const onImageError = useCallback(() => setMode("svg"), []);
+  if (mode === "failed") return fallback;
+  if (mode === "svg")
     return (
       <SvgUri
         uri={source.uri}
-        width={24}
-        height={24}
+        width={size}
+        height={size}
         color={color}
         fallback={fallback}
-        onError={ignoreSvgError}
+        onError={onSvgError}
       />
     );
   return (
@@ -89,24 +117,10 @@ function RemoteIcon({
       accessible={false}
       source={{ uri: source.uri }}
       resizeMode="contain"
-      style={styles.image}
-      // An external SVG can also have an opaque URL. If the native image
-      // decoder cannot load it, try SVG before showing the fallback.
-      onError={() => setTrySvg(true)}
+      style={{ width: size, height: size }}
+      // Extensionless external SVGs cannot be decoded by Image. Try the SVG
+      // decoder before falling back to the registry glyph.
+      onError={onImageError}
     />
   );
 }
-
-const styles = StyleSheet.create({
-  tile: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-    overflow: "hidden",
-  },
-  image: { width: 24, height: 24 },
-  initial: { fontFamily: fonts.bodySemi, fontSize: 14 },
-});

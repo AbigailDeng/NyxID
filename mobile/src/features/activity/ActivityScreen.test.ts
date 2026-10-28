@@ -4,6 +4,7 @@ import test from "node:test";
 import { deferred, hookHarness } from "../assistant/assistantHookTestHarness";
 import * as challengeUiState from "./challengeUiState";
 import type { ApprovalItem, ChallengeDetail } from "../../lib/api/types";
+import type { ServiceConnection } from "../services/serviceContracts";
 
 type Element = { type: unknown; props: Record<string, any> };
 type FocusSlot = { callback: () => (() => void) | void; cleanup?: () => void };
@@ -44,12 +45,14 @@ function challenge(
 
 function setup({
   challengeId,
+  loadedConnections = [],
   connected = true,
   pending = [challenge("pending-real")],
   grants = false,
   history = [challenge("history-real", { status: "APPROVED" })],
 }: {
   challengeId?: string;
+  loadedConnections?: Partial<ServiceConnection>[];
   grants?: boolean;
   connected?: boolean;
   pending?: ChallengeDetail[];
@@ -111,6 +114,8 @@ function setup({
     27,
   );
   const queryClient = {
+    getQueryData: (key: string[]) =>
+      key.at(-1) === "connections" ? loadedConnections : undefined,
     setQueryData: (key: unknown, value: unknown) =>
       calls.push({ method: "cache", args: [key, value] }),
     invalidateQueries: async (args: unknown) => {
@@ -508,6 +513,37 @@ test("a paused first fetch remains pending instead of turning into a successful 
     env.harness.render();
     assert.equal(env.overview().props.pending.isLoading, true);
     assert.equal(env.overview().props.history.isLoading, true);
+  } finally {
+    env.unmount();
+  }
+});
+
+test("grant rows resolve brands and uploaded images from already-loaded connections without a new request", () => {
+  const env = setup({
+    grants: true,
+    loadedConnections: [
+      {
+        id: "connection-1",
+        catalog_service_id: "catalog-cloudflare",
+        slug: "work-cloudflare",
+        catalog_service_slug: "api-cloudflare",
+        catalog_icon_url: "https://assets.example/cloudflare.svg",
+      },
+    ],
+  });
+  try {
+    const list = env.find((node) => node.type === "FlatList");
+    const grant = { ...list.props.data[0], service_id: "catalog-cloudflare" };
+    const row = list.props.renderItem({ item: grant });
+    assert.equal(row.type, "GrantCard");
+    assert.equal(row.props.iconSlug, "api-cloudflare");
+    assert.equal(row.props.iconUrl, "https://assets.example/cloudflare.svg");
+    const unknown = list.props.renderItem({
+      item: { ...grant, service_id: "unknown-service" },
+    });
+    assert.equal(unknown.props.iconSlug, "unknown-service");
+    assert.equal(unknown.props.iconUrl, undefined);
+    assert.ok(env.calls.every((call) => call.method !== "getConnections"));
   } finally {
     env.unmount();
   }

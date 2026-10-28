@@ -1,3 +1,4 @@
+import { ServiceIcon } from "../../components/ServiceIcon";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import { Check, ChevronDown, ChevronRight, X } from "lucide-react-native";
@@ -135,6 +136,15 @@ export function AssistantActivityDisclosure({
                 accessibilityLabel={`${description}, ${activity.label}, ${activity.status === "error" ? "Failed" : activity.status === "completed" ? "Succeeded" : "Running"}${elapsed ? `, ${elapsed}` : ""}`}
                 style={styles.activity}
               >
+                <ServiceIcon
+                  slug={
+                    activity.label.includes("__") &&
+                    !activity.label.startsWith("nyx__")
+                      ? activity.label.split("__")[0]
+                      : undefined
+                  }
+                  size="xs"
+                />
                 <ActivityStatusIcon status={activity.status} />
                 <View style={styles.activityText}>
                   <Label

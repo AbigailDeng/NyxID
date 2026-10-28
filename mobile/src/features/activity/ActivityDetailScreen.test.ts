@@ -35,6 +35,7 @@ function setup() {
       jsx: (type: unknown, props: unknown) => ({ type, props }),
       jsxs: (type: unknown, props: unknown) => ({ type, props }),
     },
+    "../../components/ServiceIcon": { ServiceIcon: "ServiceIcon" },
     "react-native": {
       ...Object.fromEntries(
         ["Pressable", "ScrollView", "Text", "View"].map((n) => [n, n]),

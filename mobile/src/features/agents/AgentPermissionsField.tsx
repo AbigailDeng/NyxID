@@ -1,3 +1,4 @@
+import { ServiceIcon } from "../../components/ServiceIcon";
 import { useNativeSheetDismiss } from "../../components/workspace/useNativeSheetDismiss";
 import { useRef, useState } from "react";
 import {
@@ -37,7 +38,13 @@ export type AgentPermissions = Pick<
   AssistantAgent,
   "services" | "account_read" | "guest_access"
 >;
-type ServiceOption = { value: string; label: string; detail?: string };
+type ServiceOption = {
+  value: string;
+  label: string;
+  detail?: string;
+  iconSlug?: string;
+  iconUrl?: string | null;
+};
 type GuestLevel = "read" | "use" | "all";
 const GUEST_LEVELS: {
   value: GuestLevel;
@@ -308,7 +315,16 @@ export function AgentPermissionsSheet({
             </View>
             {guestService ? (
               <ScrollView contentContainerStyle={styles.guestContent}>
-                <Label style={styles.serviceName}>{guestService.label}</Label>
+                <View
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                >
+                  <ServiceIcon
+                    slug={guestService.iconSlug ?? guestService.value}
+                    iconUrl={guestService.iconUrl}
+                    size="sm"
+                  />
+                  <Label style={styles.serviceName}>{guestService.label}</Label>
+                </View>
                 <Label mono muted>
                   {guestService.value}
                 </Label>
@@ -488,6 +504,11 @@ export function AgentPermissionsSheet({
                               }));
                           }}
                         >
+                          <ServiceIcon
+                            slug={item.iconSlug ?? item.value}
+                            iconUrl={item.iconUrl}
+                            size="sm"
+                          />
                           <View style={styles.flex}>
                             <Label>{item.label}</Label>
                             <Label mono muted style={styles.serviceId}>

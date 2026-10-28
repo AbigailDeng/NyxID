@@ -3,14 +3,9 @@ import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { hookHarness } from "../features/assistant/assistantHookTestHarness";
 
-type Element = {
-  type: any;
-  key?: string;
-  props: Record<string, any>;
-};
-
-function setup(iconUrl?: string | null) {
-  const harness = hookHarness<Element>({
+type Element = { type: any; key?: string; props: Record<string, any> };
+function setup(iconUrl?: string | null, slug: string | null = "api-github") {
+  const harness = hookHarness<Element | null>({
     "react/jsx-runtime": {
       jsx: (type: unknown, props: unknown, key?: string) => ({
         type,
@@ -18,61 +13,78 @@ function setup(iconUrl?: string | null) {
         key,
       }),
     },
-    "react-native": {
-      Image: "Image",
-      Text: "Text",
-      View: "View",
-      StyleSheet: { create: (styles: unknown) => styles },
-    },
+    "react-native": { Image: "Image", View: "View" },
     "react-native-svg": { SvgUri: "SvgUri" },
     "../theme/ThemeContext": {
-      useTheme: () => ({ colors: { ghostBg: "#eee", textSecondary: "#444" } }),
+      useTheme: () => ({ colors: { textSecondary: "#444" } }),
     },
-    "../theme/designTokens": { fonts: {} },
+    "./service-icons": {
+      SERVICE_ICONS: { "api-github": "GitHub", github: "GitHub" },
+      FallbackIcon: "Globe",
+    },
   });
   const exports = harness.load(
     fileURLToPath(new URL("./ServiceIcon.tsx", import.meta.url)),
-  ) as { ServiceIcon: (props: unknown) => Element; serviceIconSource: (value: unknown) => {svg: boolean} | null };
-  const props = { iconUrl, initial: "GH", color: "green" };
+  ) as {
+    ServiceIcon: (props: unknown) => Element | null;
+    serviceIconSource: (value: unknown) => { svg: boolean; uri: string } | null;
+    SERVICE_ICON_SIZES: Record<string, number>;
+  };
+  const props = { iconUrl, slug, size: "md", color: "green" };
   harness.mount(() => exports.ServiceIcon(props));
-  return { harness, props, source: exports.serviceIconSource };
+  return {
+    harness,
+    props,
+    source: exports.serviceIconSource,
+    sizes: exports.SERVICE_ICON_SIZES,
+  };
+}
+function remote(view: ReturnType<typeof setup>) {
+  const child = view.harness.value()!.props.children;
+  view.harness.mount(() => child.type(child.props));
+  return view.harness.value()!;
 }
 
-test("database SVG endpoint is rendered as SVG despite having no file extension", () => {
+test("safe remote image takes precedence over a known glyph and uses public unauthenticated SVG loading", () => {
   const url =
     "https://id.example/catalog-icons/60badfba-533c-4305-b9bb-c545186b06d0";
   const view = setup(url);
-  const remote: Element = view.harness.value().props.children;
-  view.harness.mount(() => remote.type(remote.props));
-  const svg = view.harness.value();
+  const svg = remote(view);
   assert.equal(svg.type, "SvgUri");
   assert.equal(svg.props.uri, url);
   assert.equal(svg.props.width, 24);
   assert.equal(svg.props.height, 24);
   assert.equal(svg.props.headers, undefined);
-  assert.equal(svg.props.fallback.props.children, "GH");
+  assert.equal(svg.props.fallback.type, "GitHub");
+  assert.equal(
+    view.harness.render()!.props.onError,
+    svg.props.onError,
+    "rerender must not re-fetch SvgUri by changing its onError dependency",
+  );
+  svg.props.onError();
+  assert.equal(view.harness.flush()!.type, "GitHub");
 });
-
-test("raster icons retain their aspect ratio and opaque SVG URLs can recover from native decoding failure", () => {
-  const url = "https://assets.example/icon?id=123";
-  const view = setup(url);
-  const remote: Element = view.harness.value().props.children;
-  view.harness.mount(() => remote.type(remote.props));
-  const image = view.harness.value();
+test("opaque external SVG recovers from image decoding failure, then falls back to its glyph on SVG error", () => {
+  const view = setup("https://assets.example/icon?id=123");
+  const image = remote(view);
   assert.equal(image.type, "Image");
-  assert.equal(image.props.source.uri, url);
   assert.equal(image.props.source.headers, undefined);
   assert.equal(image.props.resizeMode, "contain");
   image.props.onError();
-  const svg = view.harness.flush();
+  const svg = view.harness.flush()!;
   assert.equal(svg.type, "SvgUri");
-  assert.equal(svg.props.uri, url);
-  assert.equal(svg.props.fallback.props.children, "GH");
+  svg.props.onError();
+  assert.equal(view.harness.flush()!.type, "GitHub");
 });
-
-test("icon URLs are validated without allowing local files, credentials or executable schemes", () => {
+test("remote failure with an unknown slug uses the globe", () => {
+  const view = setup("https://assets.example/icon.svg", "unknown");
+  const svg = remote(view);
+  svg.props.onError();
+  assert.equal(view.harness.flush()!.type, "Globe");
+});
+test("URL policy matches web: http/https only, no credentials or fragments, at most 2048 characters", () => {
   const view = setup();
-  for (const invalid of [
+  for (const value of [
     undefined,
     null,
     "",
@@ -83,37 +95,52 @@ test("icon URLs are validated without allowing local files, credentials or execu
     "data:image/svg+xml,<svg/>",
     "javascript:alert(1)",
     "https://user:password@assets.example/icon.png",
-    "https://assets.example/icon.svg#fragment",
+    "https://user@assets.example/icon.png",
+    "https://assets.example/icon.svg#",
     `https://assets.example/${"a".repeat(2048)}`,
   ])
-    assert.equal(view.source(invalid), null, String(invalid));
+    assert.equal(view.source(value), null, String(value));
+  const prefix = "https://assets.example/";
+  assert.ok(view.source(prefix + "a".repeat(2048 - prefix.length)));
+  assert.equal(view.source(prefix + "a".repeat(2049 - prefix.length)), null);
   assert.equal(view.source("http://localhost/catalog-icons/id")!.svg, true);
   assert.equal(view.source("https://assets.example/logo.SVG?v=2")!.svg, true);
   assert.equal(view.source("https://assets.example/logo.png")!.svg, false);
 });
-
-test("missing or invalid icons retain a decorative fallback without adding another accessibility stop", () => {
-  for (const value of [undefined, null, "file:///icon.svg"]) {
-    const view = setup(value);
-    const tile = view.harness.value();
-    assert.equal(tile.props.accessible, false);
-    assert.equal(tile.props.accessibilityElementsHidden, true);
-    assert.equal(tile.props.importantForAccessibility, "no-hide-descendants");
-    assert.equal(tile.props.children.type, "Text");
-    assert.equal(tile.props.children.props.children, "GH");
+test("known slug/alias resolves the brand, unknown resolves globe, absent slug and URL renders nothing", () => {
+  for (const slug of [
+    "api-github",
+    "github",
+    "unknown",
+    "constructor",
+    "toString",
+    "__proto__",
+  ]) {
+    const view = setup(null, slug);
+    const box = view.harness.value()!;
+    assert.equal(
+      box.props.children.type,
+      slug === "api-github" || slug === "github" ? "GitHub" : "Globe",
+    );
+    assert.equal(box.props.accessible, false);
+    assert.equal(box.props.accessibilityElementsHidden, true);
+    assert.equal(box.props.importantForAccessibility, "no-hide-descendants");
   }
+  assert.equal(setup(null, null).harness.value(), null);
+  assert.equal(
+    setup("file:///icon.svg").harness.value()!.props.children.type,
+    "GitHub",
+  );
 });
-
-test("a changed URL gets a fresh native loader and stable SVG callbacks avoid unnecessary refetches", () => {
+test("URL changes remount the failed loader and size tokens match the web scale", () => {
   const view = setup("https://assets.example/first.svg");
-  const first = view.harness.value().props.children;
+  const first = view.harness.value()!.props.children;
   view.props.iconUrl = "https://assets.example/second.svg";
-  const second = view.harness.render().props.children;
+  const second = view.harness.render()!.props.children;
   assert.notEqual(first.key, second.key);
-  view.harness.mount(() => first.type(first.props));
-  const firstSvg = view.harness.value();
-  view.harness.mount(() => second.type(second.props));
-  const secondSvg = view.harness.value();
-  assert.equal(firstSvg.props.onError, secondSvg.props.onError);
-  assert.equal(secondSvg.props.uri, "https://assets.example/second.svg");
+  assert.equal(second.props.source.uri, view.props.iconUrl);
+  assert.deepEqual(
+    { ...view.sizes },
+    { "2xs": 14, xs: 16, sm: 20, md: 24, lg: 32, xl: 36 },
+  );
 });

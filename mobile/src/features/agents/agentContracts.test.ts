@@ -141,11 +141,25 @@ test("org grant options are exact IDs in the same authorized owner scope", () =>
       ],
       orgAgent,
     ),
-    [{ value: "org-service-id", label: "GitHub" }],
+    [
+      {
+        value: "org-service-id",
+        label: "GitHub",
+        iconSlug: "api-github",
+        iconUrl: undefined,
+      },
+    ],
   );
   assert.deepEqual(
     grantOptions([key, { ...key, id: "disabled", is_active: false }]),
-    [{ value: "api-github", label: "GitHub" }],
+    [
+      {
+        value: "api-github",
+        label: "GitHub",
+        iconSlug: "api-github",
+        iconUrl: undefined,
+      },
+    ],
   );
 });
 

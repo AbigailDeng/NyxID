@@ -40,6 +40,7 @@ function render(file: string, name: string, props: any) {
       jsx: (type: unknown, props: unknown) => ({ type, props }),
       jsxs: (type: unknown, props: unknown) => ({ type, props }),
     },
+    "../../components/ServiceIcon": { ServiceIcon: "ServiceIcon" },
     "react-native": {
       View: "View",
       StyleSheet: { create: (value: unknown) => value },

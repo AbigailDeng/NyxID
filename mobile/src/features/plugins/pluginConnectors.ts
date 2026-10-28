@@ -6,7 +6,6 @@ import type {
 export interface ConnectorCardItem {
   readonly id: string;
   readonly name: string;
-  readonly initial: string;
   readonly iconSlug: string | null;
   readonly iconUrl?: string | null;
   readonly category: string;
@@ -26,11 +25,6 @@ export interface ConnectorCardItem {
 export interface ConnectorItems {
   readonly added: readonly ConnectorCardItem[];
   readonly available: readonly ConnectorCardItem[];
-}
-
-function connectorInitial(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  return `${words[0]?.charAt(0) ?? "?"}${words.length > 1 ? (words[1]?.charAt(0) ?? "") : ""}`.toUpperCase();
 }
 
 function catalogMeta(entry: CatalogEntry): string {
@@ -131,7 +125,6 @@ function addedItem(
   return {
     id,
     name,
-    initial: connectorInitial(name),
     iconSlug,
     iconUrl:
       iconSlug === null
@@ -190,7 +183,6 @@ export function deriveConnectorItems(
       .map((entry) => ({
         id: `catalog:${entry.slug}`,
         name: entry.name,
-        initial: connectorInitial(entry.name),
         iconSlug: entry.slug,
         iconUrl: entry.icon_url,
         category:

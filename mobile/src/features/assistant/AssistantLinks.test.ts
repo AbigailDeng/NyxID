@@ -439,6 +439,7 @@ test("real link host routes account panels, preserves channel URL, retains the t
       jsx: (type: any, props: any) => ({ type, props }),
       jsxs: (type: any, props: any) => ({ type, props }),
     },
+    "../../components/ServiceIcon": { ServiceIcon: "ServiceIcon" },
     "react-native": {
       Modal: "Modal",
       Pressable: "Pressable",
@@ -576,6 +577,7 @@ test("real native connection card exposes web credential/device/terminal control
       jsxs: (type: any, props: any) => ({ type, props }),
       Fragment: "Fragment",
     },
+    "../../components/ServiceIcon": { ServiceIcon: "ServiceIcon" },
     "react-native": { View: "View" },
     "../../components/SegmentControl": { SegmentControl: "Segment" },
     "../../components/workspace/WorkspaceUI": Object.fromEntries(

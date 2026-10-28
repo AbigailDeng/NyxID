@@ -194,7 +194,14 @@ export function grantOptions(
     const value = org ? row.id : row.slug;
     if (seen.has(value)) return [];
     seen.add(value);
-    return [{ value, label: row.label }];
+    return [
+      {
+        value,
+        label: row.label,
+        iconSlug: row.catalog_service_slug ?? row.slug,
+        iconUrl: row.icon_url || row.catalog_icon_url,
+      },
+    ];
   });
 }
 

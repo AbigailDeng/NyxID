@@ -181,16 +181,8 @@ function setup({
       },
     },
     "lucide-react-native": Object.fromEntries(
-      [
-        "ArrowRight",
-        "ExternalLink",
-        "KeyRound",
-        "RefreshCw",
-        "Search",
-        "X",
-      ].map((name) => [name, name]),
+      ["ArrowRight", "RefreshCw", "Search", "X"].map((name) => [name, name]),
     ),
-    "expo-web-browser": { openBrowserAsync: record("openBrowser") },
     "../../app/WorkspaceHeader": {
       useOpenWorkspaceChat: () => openChat,
       useWorkspaceBack: (options: typeof back) => {
@@ -209,13 +201,11 @@ function setup({
         catalog: record("catalog"),
       },
     },
-    "../../lib/env": { NYXID_FRONTEND_URL: "https://nyx.example" },
     "../../theme/designTokens": { fonts: {} },
     "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
     "../services/serviceContracts": {
       connectionOwner: (connection: ServiceConnection) =>
         connection.credential_source?.type === "org" ? "Work" : "Personal",
-      validateBrowserUrl: (url: string) => url,
     },
     "./pluginConnectors": { deriveConnectorItems, matchesPluginQuery },
     "./PluginSkills": { PluginSkills: "PluginSkills" },
@@ -270,11 +260,22 @@ test("Connectors defaults to Added and Discover displays only available services
   try {
     assert.equal(env.list().accessibilityLabel, "Added connectors");
     assert.deepEqual(
+      env
+        .all()
+        .filter((node) => node.type === "ServiceIcon")
+        .map((node) => node.props.slug),
+      ["api-github", "api-cloudflare"],
+    );
+    assert.deepEqual(
       Array.from(env.list().data, (item: { name: string }) => item.name),
       ["GitHub", "Cloudflare"],
     );
     env.control("Discover connectors, 1").props.onPress();
     assert.equal(env.list().accessibilityLabel, "Discover connectors");
+    assert.equal(
+      env.all().find((node) => node.type === "ServiceIcon")?.props.slug,
+      "api-slack",
+    );
     assert.deepEqual(
       Array.from(env.list().data, (item: { name: string }) => item.name),
       ["Slack"],

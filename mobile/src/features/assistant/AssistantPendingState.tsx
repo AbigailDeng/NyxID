@@ -1,3 +1,4 @@
+import { ServiceIcon } from "../../components/ServiceIcon";
 import { useEffect, useRef, useState } from "react";
 import { View } from "react-native";
 import {
@@ -71,9 +72,12 @@ export function AssistantApprovalCard({
           </Label>
         ) : null}
       </View>
-      <Label>
-        {approval.service_name}: {approval.summary}
-      </Label>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <ServiceIcon slug={approval.service_slug ?? "custom"} size="sm" />
+        <Label style={{ flex: 1 }}>
+          {approval.service_name}: {approval.summary}
+        </Label>
+      </View>
       <View
         style={{
           flexDirection: "row",

@@ -1,3 +1,4 @@
+import { ServiceIcon } from "../../components/ServiceIcon";
 import type { ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
 import {
@@ -81,7 +82,12 @@ export function AssistantAcknowledgementCard({
         {row.decider === "orchestrator" ? (
           <Label muted>Requested from NyxBot</Label>
         ) : null}
-        <Label style={styles.title}>{acknowledgementCardTitle(row)}</Label>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <ServiceIcon slug={row.service_slug} size="sm" />
+          <Label style={[styles.title, { flex: 1 }]}>
+            {acknowledgementCardTitle(row)}
+          </Label>
+        </View>
         {row.confirmation ? (
           <Label muted>
             {row.confirmation.risk.charAt(0).toUpperCase() +

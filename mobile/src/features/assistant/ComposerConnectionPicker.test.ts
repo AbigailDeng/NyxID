@@ -214,6 +214,7 @@ test("real native picker shows web copy, search, selected rows, unavailable chip
       jsx: (type: any, props: any) => ({ type, props }),
       jsxs: (type: any, props: any) => ({ type, props }),
     },
+    "../../components/ServiceIcon": { ServiceIcon: "ServiceIcon" },
     "react-native": {
       Modal: "Modal",
       Pressable: "Pressable",

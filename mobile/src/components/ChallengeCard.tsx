@@ -1,3 +1,4 @@
+import { ServiceIcon } from "./ServiceIcon";
 import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import {
@@ -97,6 +98,7 @@ export function ChallengeCard({
       accessibilityHint={onPress ? "View approval request details" : undefined}
     >
       <View style={styles.chipRow}>
+        <ServiceIcon slug={challenge.service_slug} size="sm" />
         {showOrgChip ? (
           <StatusBadge variant="orgChip" label={orgChipLabel} />
         ) : null}

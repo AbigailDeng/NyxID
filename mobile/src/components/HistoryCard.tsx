@@ -1,3 +1,4 @@
+import { ServiceIcon } from "./ServiceIcon";
 import { useMemo } from "react";
 import { BlurView } from "expo-blur";
 import { Pressable, StyleSheet, Text, View } from "react-native";
@@ -86,6 +87,7 @@ export function HistoryCard({ item, onPress }: HistoryCardProps) {
       accessibilityHint={onPress ? "View approval request details" : undefined}
     >
       <View style={styles.chipRow}>
+        <ServiceIcon slug={item.service_slug} size="sm" />
         <StatusBadge
           variant={decisionVariant(item.status)}
           label={decisionLabel(item.status)}

@@ -1,3 +1,4 @@
+import { ServiceIcon } from "../../components/ServiceIcon";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -15,13 +16,7 @@ import { useIsFocused, useNavigation } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as WebBrowser from "expo-web-browser";
 import * as Clipboard from "expo-clipboard";
-import {
-  ChevronRight,
-  ChevronDown,
-  KeyRound,
-  PlugZap,
-  ShieldCheck,
-} from "lucide-react-native";
+import { ChevronRight, ChevronDown } from "lucide-react-native";
 import {
   ActionButton,
   Card,
@@ -366,7 +361,11 @@ export function ServicesScreen({
           <Card style={styles.serviceCard}>
             <View style={styles.row}>
               <View style={[styles.icon, { backgroundColor: colors.ghostBg }]}>
-                <PlugZap size={18} color={colors.primary} />
+                <ServiceIcon
+                  slug={connection.catalog_service_slug ?? connection.slug}
+                  iconUrl={connection.icon_url || connection.catalog_icon_url}
+                  size="md"
+                />
               </View>
               <View style={styles.flex}>
                 <Text style={[styles.title, { color: colors.textPrimary }]}>
@@ -1063,7 +1062,13 @@ export function ServicesScreen({
                   <View
                     style={[styles.icon, { backgroundColor: colors.ghostBg }]}
                   >
-                    <PlugZap size={18} color={colors.primary} />
+                    <ServiceIcon
+                      slug={connection.catalog_service_slug ?? connection.slug}
+                      iconUrl={
+                        connection.icon_url || connection.catalog_icon_url
+                      }
+                      size="md"
+                    />
                   </View>
                   <View style={styles.flex}>
                     <Text style={[styles.title, { color: colors.textPrimary }]}>
@@ -1107,11 +1112,11 @@ export function ServicesScreen({
                   <View
                     style={[styles.icon, { backgroundColor: colors.ghostBg }]}
                   >
-                    {entry.platform_key?.available ? (
-                      <ShieldCheck size={18} color={colors.primary} />
-                    ) : (
-                      <KeyRound size={18} color={colors.primary} />
-                    )}
+                    <ServiceIcon
+                      slug={entry.slug}
+                      iconUrl={entry.icon_url}
+                      size="md"
+                    />
                   </View>
                   <View style={styles.flex}>
                     <Text style={[styles.title, { color: colors.textPrimary }]}>
@@ -1248,6 +1253,7 @@ function ConnectForm({
     <WorkspacePage title={`Connect ${entry.name}`} showHeading={false}>
       {error && <Notice message={error} tone="error" />}
       {linkError && <Notice message={linkError} tone="error" />}
+      <ServiceIcon slug={entry.slug} iconUrl={entry.icon_url} size="lg" />
       {entry.description && <Label muted>{entry.description}</Label>}
       <Card>
         <Label style={styles.sectionTitle}>Owner</Label>

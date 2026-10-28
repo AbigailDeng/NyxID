@@ -25,6 +25,7 @@ function setup(file: string, name: string, props: Record<string, any>) {
       jsx: (type: unknown, props: unknown) => ({ type, props }),
       jsxs: (type: unknown, props: unknown) => ({ type, props }),
     },
+    "../../components/ServiceIcon": { ServiceIcon: "ServiceIcon" },
     "react-native": {
       View: "View",
       Pressable: "Pressable",

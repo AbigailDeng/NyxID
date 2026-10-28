@@ -92,6 +92,7 @@ function setup(
       jsxs: (type: unknown, props: unknown) => ({ type, props }),
       Fragment: "Fragment",
     },
+    "../../components/ServiceIcon": { ServiceIcon: "ServiceIcon" },
     "react-native": {
       ...Object.fromEntries(
         [

@@ -1,3 +1,4 @@
+import type { ServiceConnection } from "../services/serviceContracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { capture } from "../../lib/telemetry";
 import {
@@ -591,13 +592,38 @@ export function ActivityScreen() {
           <FlatList
             data={sortedActiveItems}
             keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <GrantCard
-                grant={item}
-                isMutating={!isConnected || mutatingIds.has(item.id)}
-                onRevoke={() => handleRevoke(item)}
-              />
-            )}
+            renderItem={({ item }) => {
+              const loaded = [
+                ...(queryClient.getQueryData<ServiceConnection[]>([
+                  "workspace",
+                  "services",
+                  "connections",
+                ]) ?? []),
+                ...(queryClient.getQueryData<ServiceConnection[]>([
+                  "workspace",
+                  "services",
+                  "plugins",
+                ]) ?? []),
+              ];
+              const connection = loaded.find(
+                (row) =>
+                  row.id === item.service_id ||
+                  row.catalog_service_id === item.service_id,
+              );
+              return (
+                <GrantCard
+                  grant={item}
+                  iconSlug={
+                    connection?.catalog_service_slug ??
+                    connection?.slug ??
+                    item.service_id
+                  }
+                  iconUrl={connection?.icon_url || connection?.catalog_icon_url}
+                  isMutating={!isConnected || mutatingIds.has(item.id)}
+                  onRevoke={() => handleRevoke(item)}
+                />
+              );
+            }}
             ListHeaderComponent={
               approvalsQuery.isError ? (
                 <View style={styles.queryNotice}>

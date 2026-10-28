@@ -1,6 +1,7 @@
+import { ServiceIcon } from "../../components/ServiceIcon";
 import { useEffect, useState } from "react";
 import { Modal, Pressable, ScrollView, View } from "react-native";
-import { Check, Link2, X } from "lucide-react-native";
+import { Check, X } from "lucide-react-native";
 import { Field, Label } from "../../components/workspace/WorkspaceUI";
 import {
   workspaceCloseControlStyle,
@@ -39,7 +40,11 @@ export function ComposerConnectionPicker({
             borderColor: colors.border,
           }}
         >
-          <Link2 size={14} color={colors.textSecondary} />
+          <ServiceIcon
+            slug={connection.catalog_service_slug ?? connection.slug}
+            iconUrl={connection.icon_url || connection.catalog_icon_url}
+            size="2xs"
+          />
           <Label
             style={{
               flex: 1,
@@ -191,6 +196,11 @@ export function ComposerConnectionPicker({
                               : "transparent",
                         }}
                       >
+                        <ServiceIcon
+                          slug={key.catalog_service_slug ?? key.slug}
+                          iconUrl={key.icon_url || key.catalog_icon_url}
+                          size="sm"
+                        />
                         <View style={{ flex: 1 }}>
                           <Label style={{ fontSize: 14 }}>{key.label}</Label>
                           <Label muted style={{ fontSize: 11 }}>

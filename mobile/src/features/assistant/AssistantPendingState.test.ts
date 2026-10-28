@@ -30,6 +30,7 @@ function render(file: string, name: string, props: any) {
       jsx: (type: any, props: any) => ({ type, props }),
       jsxs: (type: any, props: any) => ({ type, props }),
     },
+    "../../components/ServiceIcon": { ServiceIcon: "ServiceIcon" },
     "react-native": { View: "View", Pressable: "Pressable" },
     "lucide-react-native": new Proxy({}, { get: (_, key) => String(key) }),
     "../../components/AgentAvatar": { AgentAvatar: "Avatar" },
@@ -249,6 +250,7 @@ test("real hook fences duplicate, expired, offline, account and thread approval 
   const response = deferred<void>();
   const h = hookHarness<any>({
     "./useAssistantLiveRefresh": { useAssistantLiveRefresh: () => {} },
+    "../../components/ServiceIcon": { ServiceIcon: "ServiceIcon" },
     "react-native": {
       AppState: {
         currentState: "active",
@@ -378,6 +380,7 @@ test("live metadata refresh projects authoritative approval, connected and faile
           return true;
         },
       },
+      "../../components/ServiceIcon": { ServiceIcon: "ServiceIcon" },
       "react-native": {
         AppState: {
           currentState: "active",

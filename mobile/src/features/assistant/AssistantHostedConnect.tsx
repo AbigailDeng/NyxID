@@ -1,3 +1,4 @@
+import { ServiceIcon } from "../../components/ServiceIcon";
 import { useEffect, useState } from "react";
 import { View } from "react-native";
 import { SegmentControl } from "../../components/SegmentControl";
@@ -83,6 +84,7 @@ export function AssistantHostedConnect({
   if (p.status !== "pending")
     return (
       <Card>
+        <ServiceIcon slug={p.service_slug} iconUrl={flow.iconUrl} size="md" />
         <Label accessibilityRole="header">
           {p.status === "completed"
             ? `${p.service_name} connected`
@@ -100,6 +102,7 @@ export function AssistantHostedConnect({
     );
   return (
     <View style={{ gap: 16 }}>
+      <ServiceIcon slug={p.service_slug} iconUrl={flow.iconUrl} size="lg" />
       <Label accessibilityRole="header">
         NyxID wants to connect to your {p.service_name}
       </Label>

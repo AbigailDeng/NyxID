@@ -1,3 +1,4 @@
+import { ServiceIcon } from "../../components/ServiceIcon";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import { capture } from "../../lib/telemetry";
@@ -395,7 +396,10 @@ export function ActivityDetailScreen({ navigation, route }: Props) {
         ) : null}
 
         <View style={styles.detailCard}>
-          <Text style={flowStyles.cardTitle}>Request Context</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <ServiceIcon slug={data.service_slug} size="md" />
+            <Text style={flowStyles.cardTitle}>Request Context</Text>
+          </View>
           <DetailRow
             label="Action"
             value={data.action}

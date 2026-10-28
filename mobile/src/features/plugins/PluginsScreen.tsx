@@ -13,15 +13,7 @@ import {
 } from "react-native";
 import { useIsFocused, useNavigation } from "@react-navigation/native";
 import { useQuery } from "@tanstack/react-query";
-import {
-  ArrowRight,
-  ExternalLink,
-  KeyRound,
-  RefreshCw,
-  Search,
-  X,
-} from "lucide-react-native";
-import * as WebBrowser from "expo-web-browser";
+import { ArrowRight, RefreshCw, Search, X } from "lucide-react-native";
 import type { WorkspaceNavigationProp } from "../../app/navigationTypes";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import { ServiceIcon } from "../../components/ServiceIcon";
@@ -33,13 +25,9 @@ import {
   WorkspacePage,
 } from "../../components/workspace/WorkspaceUI";
 import { servicesApi } from "../../lib/api/servicesApi";
-import { NYXID_FRONTEND_URL } from "../../lib/env";
 import { fonts } from "../../theme/designTokens";
 import { useTheme } from "../../theme/ThemeContext";
-import {
-  connectionOwner,
-  validateBrowserUrl,
-} from "../services/serviceContracts";
+import { connectionOwner } from "../services/serviceContracts";
 import {
   deriveConnectorItems,
   matchesPluginQuery,
@@ -69,8 +57,6 @@ export function PluginsScreen({
   const [queries, setQueries] = useState({ added: "", discover: "" });
   const query = queries[connectorTab];
   const manageId = connectorId;
-  const [browserError, setBrowserError] = useState<string>();
-  const [browserBusy, setBrowserBusy] = useState(false);
   const connections = useQuery({
     queryKey: [...ROOT, "plugins"],
     queryFn: ({ signal }) => servicesApi.pluginConnections(signal),
@@ -138,20 +124,6 @@ export function PluginsScreen({
       navigation.push("ServiceSetup", { catalogSlug: item.connectSlug });
   }
 
-  async function openStudio() {
-    if (browserBusy) return;
-    setBrowserBusy(true);
-    setBrowserError(undefined);
-    try {
-      const url = new URL("/keys", validateBrowserUrl(NYXID_FRONTEND_URL));
-      await WebBrowser.openBrowserAsync(url.href);
-    } catch (error) {
-      setBrowserError(errorText(error));
-    } finally {
-      setBrowserBusy(false);
-    }
-  }
-
   if (manageId)
     return (
       <WorkspacePage
@@ -177,7 +149,12 @@ export function PluginsScreen({
                     connection.catalog_icon_url ||
                     manageItem?.iconUrl
                   }
-                  initial={manageItem?.initial ?? "?"}
+                  slug={
+                    connection.catalog_service_slug ??
+                    manageItem?.iconSlug ??
+                    connection.slug
+                  }
+                  size="lg"
                   color={colors.textSecondary}
                 />
                 <View style={styles.flex}>
@@ -407,21 +384,6 @@ export function PluginsScreen({
               }
             />
           </View>
-          {browserError && <Notice message={browserError} tone="error" />}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Manage services and Agent Keys in browser"
-            accessibilityState={{ disabled: browserBusy }}
-            disabled={browserBusy}
-            onPress={() => void openStudio()}
-            style={styles.studio}
-          >
-            <KeyRound color={colors.textSecondary} size={16} />
-            <Label muted style={styles.footerLabel}>
-              Services &amp; Agent Keys in Studio
-            </Label>
-            <ExternalLink size={14} color={colors.textMuted} />
-          </Pressable>
         </View>
       )}
     </WorkspacePage>
@@ -518,8 +480,9 @@ function ConnectorCard({
     >
       <ServiceIcon
         iconUrl={item.iconUrl}
-        initial={item.initial}
-        color={statusColor}
+        slug={item.iconSlug ?? "custom"}
+        size="lg"
+        color={colors.textSecondary}
       />
       <View style={styles.flex}>
         <Text
@@ -620,14 +583,6 @@ const styles = StyleSheet.create({
   badge: { fontFamily: fonts.bodySemi, fontSize: 10, lineHeight: 14 },
   name: { fontFamily: fonts.bodySemi, fontSize: 14, lineHeight: 20 },
   description: { fontFamily: fonts.bodyRegular, fontSize: 12, lineHeight: 18 },
-  studio: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
-    minHeight: 44,
-  },
-  footerLabel: { fontSize: 12, lineHeight: 18 },
   externalLabel: { fontSize: 10, lineHeight: 15 },
   refresh: {
     minWidth: 44,

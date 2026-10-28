@@ -25,6 +25,7 @@ function loadCard(name: "HistoryCard" | "ChallengeCard") {
       jsx: (type: string, props: unknown) => ({ type, props }),
       jsxs: (type: string, props: unknown) => ({ type, props }),
     },
+    "./ServiceIcon": { ServiceIcon: "ServiceIcon" },
     "react-native": {
       Pressable: "Pressable",
       Text: "Text",
