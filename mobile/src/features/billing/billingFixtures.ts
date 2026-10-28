@@ -2,10 +2,8 @@ export const ORG_ADMIN = "10000000-0000-4000-8000-000000000001";
 export const ORG_MEMBER = "10000000-0000-4000-8000-000000000002";
 export const ORG_VIEWER = "10000000-0000-4000-8000-000000000003";
 export const walletFixture = {
-  owner_id: "person", balance: "-0.000000000001", reserved: "0.1", pending_debits: "0.000000000002",
-  pending_expiry: "1.234567890123", available: "-1.334567890126", available_with_overdraft: "98.665432109874",
-  overdraft_cap: "100", balance_credits: -999, reserved_credits: 999,
-  suspended: false, collection_state: "good", balance_synced_at: "2026-10-28T00:00:00Z",
+  balance: "-0.000000000001", reserved: "0.1", pending_debits: "0.000000000002",
+  pending_expiry: "1.234567890123", available: "-1.334567890126", overdraft_cap: "100", unit: "credits",
 };
 export const usageFixture = {
   owner_id: "person", period: "30d",

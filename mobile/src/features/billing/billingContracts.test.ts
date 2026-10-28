@@ -25,14 +25,19 @@ test("invalid, nonfinite, oversized and sub-pico credit amounts fail closed", ()
   assert.throws(() => walletSchema.parse({ ...walletFixture, balance: 0.1 }));
 });
 
-test("exact money wins over legacy mirrors, including authoritative nulls and unsafe mirrors", () => {
+test("wallet view needs only exact balances and strips legacy and provider metadata", () => {
   const wallet = walletSchema.parse({ ...walletFixture, balance_credits: 9007199254740992 });
   assert.equal(wallet.balance, "-0.000000000001");
-  assert.equal(wallet.availableWithOverdraft, "98.665432109874");
-  assert.equal(walletSchema.parse({ ...walletFixture, balance: null }).balance, null);
-  const legacyWallet = { ...walletFixture, balance: undefined, balance_credits: -123 };
-  assert.equal(walletSchema.parse(legacyWallet).balance, "-123");
-  assert.throws(() => walletSchema.parse({ ...legacyWallet, balance_credits: 9007199254740992 }));
+  assert.equal(wallet.available, "-1.334567890126");
+  assert.deepEqual(Object.keys(wallet).sort(), ["available", "balance", "overdraftCap", "pendingDebits", "pendingExpiry", "reserved", "unit"]);
+  assert.deepEqual(walletSchema.parse({ ...walletFixture, lago_customer_id: "unused", owner_id: "unused", created: true }), wallet);
+  assert.equal(walletSchema.parse({ ...walletFixture, unit: undefined }).unit, "credits");
+  assert.throws(() => walletSchema.parse({ ...walletFixture, unit: "USD" }));
+  assert.throws(() => walletSchema.parse({ ...walletFixture, balance: null }));
+  assert.throws(() => walletSchema.parse({ ...walletFixture, balance: undefined, balance_credits: -123 }));
+});
+
+test("usage exact money wins over legacy mirrors, including authoritative nulls", () => {
   assert.equal(legacyCredits(-1234567, "micros"), "-1.234567");
   const row = { ...usageFixture.rows[0], estimated_credits: null, estimated_credits_micros: 1000000 };
   assert.equal(usageSchema.parse({ ...usageFixture, rows: [row] }).rows[0]!.cost, null);

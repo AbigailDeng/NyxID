@@ -38,7 +38,6 @@ export function BillingWalletCard({ wallet, grants, allowances, now }: { wallet:
       style={[styles.balance, { color: wallet.available?.startsWith("-") ? colors.danger : colors.textPrimary }]}>
       {wallet.available === null ? "Unavailable" : formatExactCredits(wallet.available)}
     </Label>
-    {wallet.suspended ? <BillingBadge label="Suspended" /> : wallet.collectionState === "past_due" ? <BillingBadge label="Past due" /> : null}
     {balanceRows(wallet, grants, allowances, now).map((row) => <BillingFigure key={row.key} label={row.label} value={row.value} exactValue={row.exactValue} unit={row.unit} />)}
   </Card>;
 }

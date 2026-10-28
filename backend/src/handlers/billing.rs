@@ -163,6 +163,18 @@ pub struct BillingWalletResponse {
     pub overdraft_cap: Credits,
 }
 
+/// Stored exact balances for the native personal balance card.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct WalletViewResponse {
+    pub balance: Credits,
+    pub reserved: Credits,
+    pub pending_debits: Credits,
+    pub pending_expiry: Credits,
+    pub available: Credits,
+    pub overdraft_cap: Credits,
+    pub unit: &'static str,
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct TopUpResponse {
     pub owner_id: String,
@@ -563,7 +575,7 @@ pub async fn get_wallet(
     path = "/api/v1/billing/wallet/view",
     tag = "Billing",
     responses(
-        (status = 200, description = "Existing personal wallet, or null if absent; never provisions", body = Option<BillingWalletResponse>),
+        (status = 200, description = "Stored personal balances, or null if absent; first-party people only; never provisions", body = Option<WalletViewResponse>),
         (status = 401, description = "Authentication required"),
         (status = 403, description = "Credential or billing rollout does not permit wallet access")
     ),
@@ -572,7 +584,13 @@ pub async fn get_wallet(
 pub async fn view_wallet(
     State(state): State<AppState>,
     auth_user: AuthUser,
-) -> AppResult<Json<Option<BillingWalletResponse>>> {
+) -> AppResult<Json<Option<WalletViewResponse>>> {
+    super::login_client_context::require_first_party_human(&auth_user)?;
+    if auth_user.mfa_enabled.is_none() {
+        return Err(AppError::Forbidden(
+            "A first-party person account is required".into(),
+        ));
+    }
     let actor_id = auth_user.user_id.to_string();
     let owner = state
         .billing
@@ -582,9 +600,7 @@ pub async fn view_wallet(
     ensure_billing_rollout(&state, &owner.owner_id, &actor_id).await?;
     let wallet = state.billing.get_wallet(&owner.owner_id).await?;
     Ok(Json(
-        wallet
-            .map(|wallet| BillingWalletResponse::from_wallet(wallet, false))
-            .transpose()?,
+        wallet.map(WalletViewResponse::from_wallet).transpose()?,
     ))
 }
 
@@ -1338,6 +1354,20 @@ fn sum_optional(values: impl Iterator<Item = Option<Credits>>) -> AppResult<Opti
         total = Some(total.unwrap_or(Credits::ZERO).checked_add(value)?);
     }
     Ok(total)
+}
+
+impl WalletViewResponse {
+    fn from_wallet(wallet: BillingWallet) -> AppResult<Self> {
+        Ok(Self {
+            available: wallet.available_credits()?,
+            balance: wallet.balance_credits,
+            reserved: wallet.reserved_credits,
+            pending_debits: wallet.pending_lago_debits,
+            pending_expiry: wallet.pending_topup_expiry_credits,
+            overdraft_cap: wallet.overdraft_cap_credits,
+            unit: "credits",
+        })
+    }
 }
 
 impl BillingWalletResponse {

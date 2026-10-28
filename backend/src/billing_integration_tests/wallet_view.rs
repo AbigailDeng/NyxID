@@ -1,7 +1,13 @@
 use super::*;
 use crate::models::credits::Credits;
 use crate::services::feature_flag_service as flags;
+use futures::TryStreamExt;
+use mongodb::bson::Document;
 use serde_json::{Value, json};
+
+mod credentials;
+mod no_provider;
+use no_provider::NoLago;
 
 const VIEW: &str = "/api/v1/billing/wallet/view";
 const LEGACY: &str = "/api/v1/billing/wallet";
@@ -11,10 +17,20 @@ fn mounted_app(state: &crate::AppState) -> Router {
     private.with_state(state.clone())
 }
 
-async fn read(app: &Router, path: &str, token: Option<&str>) -> (StatusCode, Value) {
+fn view_state(db: mongodb::Database, lago: Arc<NoLago>) -> crate::AppState {
+    let mut state = billing_route_state(db.clone(), Arc::new(FakeLago::default()), 0);
+    state.billing = Arc::new(BillingService::new_with_lago(
+        db,
+        Arc::new(state.config.clone()),
+        lago,
+    ));
+    state
+}
+
+async fn read_headers(app: &Router, path: &str, headers: &[(&str, &str)]) -> (StatusCode, Value) {
     let mut request = Request::builder().uri(path);
-    if let Some(token) = token {
-        request = request.header("authorization", format!("Bearer {token}"));
+    for (name, value) in headers {
+        request = request.header(*name, *value);
     }
     let response = app
         .clone()
@@ -24,6 +40,53 @@ async fn read(app: &Router, path: &str, token: Option<&str>) -> (StatusCode, Val
     let status = response.status();
     let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
     (status, serde_json::from_slice(&body).unwrap())
+}
+
+async fn read(app: &Router, path: &str, token: Option<&str>) -> (StatusCode, Value) {
+    let auth = token.map(|token| format!("Bearer {token}"));
+    let headers: Vec<_> = auth
+        .as_deref()
+        .map(|auth| ("authorization", auth))
+        .into_iter()
+        .collect();
+    read_headers(app, path, &headers).await
+}
+
+// Raw documents retain unknown fields and exact BSON types. Auth/security
+// bookkeeping is outside this financial-state snapshot.
+async fn financial_state(db: &mongodb::Database) -> Vec<(&'static str, Vec<Document>)> {
+    let mut state = Vec::new();
+    for collection in [
+        BILLING_WALLET,
+        "billing_tax_profiles",
+        "billing_wallet_refresh_requests",
+        "billing_ledger",
+        "billing_accounts",
+    ] {
+        let documents = db
+            .collection::<Document>(collection)
+            .find(doc! {})
+            .sort(doc! {"_id": 1})
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+        state.push((collection, documents));
+    }
+    state
+}
+
+async fn seed_sentinels(db: &mongodb::Database) {
+    for collection in ["billing_tax_profiles", "billing_wallet_refresh_requests"] {
+        db.collection::<Document>(collection)
+            .insert_one(doc! {
+                "_id": "foreign-sentinel", "owner_id": "foreign-owner",
+                "unmodeled": {"exact": "0.000000000001", "version": 2_i64}
+            })
+            .await
+            .unwrap();
+    }
 }
 
 async fn insert_wallet(db: &mongodb::Database, owner: &str) -> BillingWallet {
@@ -53,121 +116,145 @@ async fn insert_wallet(db: &mongodb::Database, owner: &str) -> BillingWallet {
         .insert_one(&wallet)
         .await
         .unwrap();
+    db.collection::<Document>(BILLING_WALLET)
+        .update_one(
+            doc! {"_id": &wallet.id},
+            doc! {"$set": {
+                "exact_accounting_version": 2_i64, "unmodeled_sentinel": {"keep": true}
+            }},
+        )
+        .await
+        .unwrap();
     wallet
 }
 
-#[tokio::test]
-async fn billing_wallet_view_existing_matches_legacy_without_mutation() {
-    let db = connect_test_database("wallet_view_existing").await.unwrap();
-    let owner = insert_owner(&db).await;
-    let lago = Arc::new(FakeLago::default());
-    let state = billing_route_state(db.clone(), lago.clone(), 0);
-    let wallet = insert_wallet(&db, &owner).await;
-    let token = route_access_token(&state, &owner);
-    let app = mounted_app(&state);
-    let (status, body) = read(&app, VIEW, Some(&token)).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["owner_id"], owner);
-    assert_eq!(body["balance"], "10.123456789012");
-    assert_eq!(body["available"], "7.123456789006");
-    assert_eq!(body["available_with_overdraft"], "12.123456789006");
-    assert_eq!(body["created"], false);
-    assert!(body.get("_id").is_none(), "must serialize the response DTO");
-    assert_eq!(read(&app, LEGACY, Some(&token)).await, (status, body));
-    let stored = db
-        .collection::<BillingWallet>(BILLING_WALLET)
-        .find_one(doc! { "_id": &wallet.id })
-        .await
-        .unwrap()
-        .unwrap();
-    // MongoDB timestamps have millisecond precision.
+fn assert_balances(body: &Value) {
     assert_eq!(
-        bson::to_document(&stored).unwrap(),
-        bson::to_document(&wallet).unwrap()
+        body,
+        &json!({
+            "balance": "10.123456789012", "available": "7.123456789006", "overdraft_cap": "5",
+            "reserved": "1.000000000001", "pending_debits": "2.000000000002", "pending_expiry": "0.000000000003",
+            "unit": "credits"
+        }),
+        "dedicated balance DTO must contain no provider or operational fields"
     );
-    assert_eq!(lago.wallet_creates.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
-async fn billing_wallet_view_absent_returns_null_and_never_provisions() {
+async fn billing_wallet_view_existing_returns_only_exact_balances_without_mutation() {
+    let db = connect_test_database("wallet_view_existing").await.unwrap();
+    let owner = insert_owner(&db).await;
+    let lago = Arc::new(NoLago::default());
+    let state = view_state(db.clone(), lago.clone());
+    insert_wallet(&db, &owner).await;
+    seed_sentinels(&db).await;
+    let token = route_access_token(&state, &owner);
+    let app = mounted_app(&state);
+    let before = financial_state(&db).await;
+    let (status, body) = read(&app, VIEW, Some(&token)).await;
+    let after = financial_state(&db).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_balances(&body);
+    assert_eq!(after, before);
+    lago.assert_unused();
+    // Compare legacy amounts only after isolating this GET's raw side effects.
+    let (status, legacy) = read(&app, LEGACY, Some(&token)).await;
+    assert_eq!(status, StatusCode::OK);
+    for field in [
+        "balance",
+        "available",
+        "overdraft_cap",
+        "reserved",
+        "pending_debits",
+        "pending_expiry",
+    ] {
+        assert_eq!(legacy[field], body[field]);
+    }
+}
+
+#[tokio::test]
+async fn billing_wallet_view_absent_returns_null_preserves_foreign_wallet_and_never_provisions() {
     let db = connect_test_database("wallet_view_absent").await.unwrap();
     let owner = insert_owner(&db).await;
     let stranger = insert_owner(&db).await;
     insert_wallet(&db, &stranger).await;
-    let lago = Arc::new(FakeLago::default());
-    let state = billing_route_state(db.clone(), lago.clone(), 0);
+    seed_sentinels(&db).await;
+    let lago = Arc::new(NoLago::default());
+    let state = view_state(db.clone(), lago.clone());
     let token = route_access_token(&state, &owner);
     let app = mounted_app(&state);
-    let wallets = db.collection::<BillingWallet>(BILLING_WALLET);
-    let before = wallets.count_documents(doc! {}).await.unwrap();
-    assert_eq!(before, 1);
+    let before = financial_state(&db).await;
+    assert_eq!(before[0].1.len(), 1);
     for _ in 0..3 {
         assert_eq!(
             read(&app, VIEW, Some(&token)).await,
             (StatusCode::OK, Value::Null)
         );
+        assert_eq!(financial_state(&db).await, before);
+        lago.assert_unused();
     }
-    assert_eq!(wallets.count_documents(doc! {}).await.unwrap(), before);
     assert!(
-        wallets
-            .find_one(doc! { "owner_id": &owner })
+        db.collection::<Document>(BILLING_WALLET)
+            .find_one(doc! {"owner_id": &owner})
             .await
             .unwrap()
             .is_none()
     );
-    assert_eq!(lago.wallet_creates.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
-async fn billing_wallet_view_requires_auth_and_preserves_credential_restrictions() {
-    let db = connect_test_database("wallet_view_auth").await.unwrap();
+async fn billing_wallet_view_stale_subscribed_wallet_never_refreshes_or_contacts_provider() {
+    let db = connect_test_database("wallet_view_stale").await.unwrap();
     let owner = insert_owner(&db).await;
-    let state = billing_route_state(db.clone(), Arc::new(FakeLago::default()), 0);
-    let token = route_access_token(&state, &owner);
-    let mut claims = serde_json::to_value(
-        crate::crypto::jwt::verify_token(&state.jwt_keys, &state.config, &token).unwrap(),
-    )
-    .unwrap();
-    claims["scope"] = json!("account:read");
-    claims["delegated"] = json!(true);
-    claims["act"] = json!({"sub": Uuid::new_v4().to_string()});
-    let delegated = jsonwebtoken::encode(
-        &jsonwebtoken::decode_header(&token).unwrap(),
-        &claims,
-        &state.jwt_keys.encoding,
-    )
-    .unwrap();
+    let wallet = insert_wallet(&db, &owner).await;
+    let stale = bson::DateTime::from_chrono(Utc::now() - Duration::days(365));
+    db.collection::<Document>(BILLING_WALLET)
+        .update_one(
+            doc! {"_id": &wallet.id},
+            doc! {"$set": {
+                "lago_subscription_id": "live-subscription", "balance_synced_at": stale
+            }},
+        )
+        .await
+        .unwrap();
+    seed_sentinels(&db).await;
+    db.collection::<Document>("billing_tax_profiles")
+        .insert_one(doc! {
+            "_id": &owner, "owner_id": &owner, "synced_at": stale, "unmodeled": "preserve"
+        })
+        .await
+        .unwrap();
+    let lago = Arc::new(NoLago::default());
+    let state = view_state(db.clone(), lago.clone());
     let app = mounted_app(&state);
-    for path in [VIEW, LEGACY] {
-        assert_eq!(read(&app, path, None).await.0, StatusCode::UNAUTHORIZED);
-        assert_eq!(
-            read(&app, path, Some("invalid")).await.0,
-            StatusCode::UNAUTHORIZED
-        );
-        assert_eq!(
-            read(&app, path, Some(&delegated)).await.0,
-            StatusCode::FORBIDDEN
-        );
-        assert_eq!(
-            read(&app, path, Some("nyxid_ag_test")).await.0,
-            StatusCode::FORBIDDEN
-        );
-        let request = Request::builder()
-            .uri(path)
-            .header("x-api-key", "nyxid_ag_test")
-            .body(Body::empty())
-            .unwrap();
-        assert_eq!(
-            app.clone().oneshot(request).await.unwrap().status(),
-            StatusCode::FORBIDDEN
-        );
-    }
+    let token = route_access_token(&state, &owner);
+    let before = financial_state(&db).await;
+    let (status, body) = read(&app, VIEW, Some(&token)).await;
+    assert_eq!(financial_state(&db).await, before);
+    lago.assert_unused();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_balances(&body);
+}
+
+#[tokio::test]
+async fn billing_wallet_view_requires_auth_and_rejects_api_key_shapes() {
+    let db = connect_test_database("wallet_view_auth").await.unwrap();
+    let state = view_state(db, Arc::new(NoLago::default()));
+    let app = mounted_app(&state);
+    assert_eq!(read(&app, VIEW, None).await.0, StatusCode::UNAUTHORIZED);
     assert_eq!(
-        db.collection::<BillingWallet>(BILLING_WALLET)
-            .count_documents(doc! {})
+        read(&app, VIEW, Some("invalid")).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        read(&app, VIEW, Some("nyxid_ag_test")).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        read_headers(&app, VIEW, &[("x-api-key", "nyxid_ag_test")])
             .await
-            .unwrap(),
-        0
+            .0,
+        StatusCode::FORBIDDEN
     );
 }
 
@@ -175,8 +262,8 @@ async fn billing_wallet_view_requires_auth_and_preserves_credential_restrictions
 async fn billing_wallet_view_preserves_disabled_rollout_behavior() {
     let db = connect_test_database("wallet_view_rollout").await.unwrap();
     let owner = insert_owner(&db).await;
-    let lago = Arc::new(FakeLago::default());
-    let state = billing_route_state(db.clone(), lago.clone(), 0);
+    let lago = Arc::new(NoLago::default());
+    let state = view_state(db.clone(), lago.clone());
     let token = route_access_token(&state, &owner);
     let app = mounted_app(&state);
     flags::set_platform_override(
@@ -200,7 +287,7 @@ async fn billing_wallet_view_preserves_disabled_rollout_behavior() {
     );
     insert_wallet(&db, &owner).await;
     assert_eq!(read(&app, VIEW, Some(&token)).await, legacy);
-    assert_eq!(lago.wallet_creates.load(Ordering::SeqCst), 0);
+    lago.assert_unused();
 }
 
 #[tokio::test]
@@ -209,25 +296,19 @@ async fn billing_wallet_view_without_lago_or_charging_reads_existing_or_null() {
     let owner = insert_owner(&db).await;
     let absent = insert_owner(&db).await;
     insert_wallet(&db, &owner).await;
-    // Like the legacy GET, an existing wallet stays readable when charging is off.
     let state = test_app_state_with_config(db.clone(), test_app_config());
     assert!(!state.billing.billing_enabled());
     assert!(!state.billing.lago_configured());
     let token = route_access_token(&state, &owner);
     let app = mounted_app(&state);
-    let legacy = read(&app, LEGACY, Some(&token)).await;
-    assert_eq!(legacy.0, StatusCode::OK);
-    assert_eq!(read(&app, VIEW, Some(&token)).await, legacy);
+    let before = financial_state(&db).await;
+    let (status, body) = read(&app, VIEW, Some(&token)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_balances(&body);
     let absent_token = route_access_token(&state, &absent);
     assert_eq!(
         read(&app, VIEW, Some(&absent_token)).await,
         (StatusCode::OK, Value::Null)
     );
-    assert_eq!(
-        db.collection::<BillingWallet>(BILLING_WALLET)
-            .count_documents(doc! {})
-            .await
-            .unwrap(),
-        1
-    );
+    assert_eq!(financial_state(&db).await, before);
 }

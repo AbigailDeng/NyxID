@@ -19,24 +19,14 @@ function exact(value: string | null | undefined, fallback: number | null | undef
 }
 
 export const walletSchema = z.object({
-  owner_id: z.string().min(1),
-  balance: money, reserved: money, pending_debits: money, pending_expiry: money,
-  available: money, available_with_overdraft: money, overdraft_cap: money,
-  balance_credits: legacy, reserved_credits: legacy, pending_lago_debits: legacy,
-  pending_topup_expiry_credits: legacy, available_credits: legacy,
-  available_with_overdraft_credits: legacy, overdraft_cap_credits: legacy,
-  suspended: z.boolean(), collection_state: z.enum(["good", "past_due", "suspended"]),
-  balance_synced_at: instant,
+  balance: creditsSchema, reserved: creditsSchema, pending_debits: creditsSchema,
+  pending_expiry: creditsSchema, available: creditsSchema, overdraft_cap: creditsSchema,
+  // Earlier development responses omitted the unit; this endpoint always uses credits.
+  unit: z.literal("credits").default("credits"),
 }).transform((row) => ({
-  ownerId: row.owner_id,
-  balance: exact(row.balance, row.balance_credits, "whole"),
-  reserved: exact(row.reserved, row.reserved_credits, "whole"),
-  pendingDebits: exact(row.pending_debits, row.pending_lago_debits, "whole"),
-  pendingExpiry: exact(row.pending_expiry, row.pending_topup_expiry_credits, "whole"),
-  available: exact(row.available, row.available_credits, "whole"),
-  availableWithOverdraft: exact(row.available_with_overdraft, row.available_with_overdraft_credits, "whole"),
-  overdraftCap: exact(row.overdraft_cap, row.overdraft_cap_credits, "whole"),
-  suspended: row.suspended, collectionState: row.collection_state, syncedAt: row.balance_synced_at,
+  balance: row.balance, reserved: row.reserved, pendingDebits: row.pending_debits,
+  pendingExpiry: row.pending_expiry, available: row.available, overdraftCap: row.overdraft_cap,
+  unit: row.unit,
 }));
 
 const fundingFields = {

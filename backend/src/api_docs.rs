@@ -328,6 +328,7 @@
             crate::handlers::billing::ProvisionWalletRequest,
             crate::handlers::billing::TopUpRequest,
             crate::handlers::billing::BillingWalletResponse,
+            crate::handlers::billing::WalletViewResponse,
             crate::handlers::billing::CurrentBillResponse,
             crate::handlers::billing::BillChargeResponse,
             crate::handlers::billing::BillTaxResponse,

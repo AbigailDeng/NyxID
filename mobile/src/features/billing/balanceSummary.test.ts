@@ -10,10 +10,9 @@ const wallet = walletSchema.parse({ ...walletFixture, overdraft_cap: "0", reserv
 const grant = (overrides: Record<string, unknown> = {}) => grantsSchema.parse({ grants: [{ ...grantFixture, remaining: "10.123456789012", held: "0.000000000001", ...overrides }] }).grants[0]!;
 const allowance = (overrides: Record<string, unknown> = {}) => allowancesSchema.parse({ allowances: [{ ...allowanceFixture, ...overrides }] }).allowances[0]!;
 
-test("zero, absent and exhausted balances add no extra rows", () => {
+test("zero and exhausted balances add no extra rows", () => {
   assert.deepEqual(balanceRows(wallet, [], [], now), []);
-  const empty = walletSchema.parse({ ...walletFixture, overdraft_cap: null, reserved: null, pending_debits: null, pending_expiry: null });
-  assert.deepEqual(balanceRows(empty, [grant({ remaining: "0" })], [allowance({ remaining_quantity: 0 })], now), []);
+  assert.deepEqual(balanceRows(wallet, [grant({ remaining: "0" })], [allowance({ remaining_quantity: 0 })], now), []);
 });
 
 test("held credits and disjoint service ceilings bound a grant exactly, without floats", () => {
