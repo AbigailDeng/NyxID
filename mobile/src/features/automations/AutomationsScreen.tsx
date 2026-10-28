@@ -16,7 +16,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react-native";
 import type {
-  WorkspaceSheetParamList,
+  WorkspaceContentParamList,
   WorkspaceScreenProps,
 } from "../../app/navigationTypes";
 import {
@@ -268,7 +268,7 @@ export function AutomationsScreen({
 export function AutomationDetailScreen({
   navigation,
   route,
-}: NativeStackScreenProps<WorkspaceSheetParamList, "AutomationDetail">) {
+}: NativeStackScreenProps<WorkspaceContentParamList, "AutomationDetail">) {
   const write = useAutomationWrite();
   const { colors } = useTheme();
   const client = useQueryClient();
@@ -553,7 +553,7 @@ function AutomationDeliveryCard({
 
 export function AutomationRunsScreen({
   route,
-}: NativeStackScreenProps<WorkspaceSheetParamList, "AutomationRuns">) {
+}: NativeStackScreenProps<WorkspaceContentParamList, "AutomationRuns">) {
   const openChat = useOpenWorkspaceChat();
   const runtime = useAutomationRuntime();
   const settings = useQuery({

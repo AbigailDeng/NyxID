@@ -34,8 +34,12 @@ import {
 } from "react-native";
 import { ChevronLeft, Menu, X } from "lucide-react-native";
 import { useTheme } from "../theme/ThemeContext";
+import { workspaceContextChatNavigationAction } from "./workspaceChatNavigation";
 import type { RootStackParamList } from "./AppNavigator";
-import type { AssistantParams } from "./navigationTypes";
+import type {
+  WorkspaceNavigationProp,
+  AssistantParams,
+} from "./navigationTypes";
 
 export const WorkspaceSessionContext = createContext(true);
 export const WorkspaceSheetContext = createContext<{
@@ -55,14 +59,19 @@ export function useWorkspaceSheet() {
   return useContext(WorkspaceSheetContext);
 }
 
-/** A chat selected inside a drawer replaces the entire drawer on the root. */
+/** A chat opened from a workspace page keeps its caller and draft beneath it. */
 export function useOpenWorkspaceChat() {
   const sheet = useContext(WorkspaceSheetContext);
-  const navigation =
-    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const navigation = useNavigation<WorkspaceNavigationProp>();
   return (params?: AssistantParams) => {
     if (sheet) sheet.onOpenChat(params);
-    else navigation.push("AssistantContext", params);
+    else {
+      const action = workspaceContextChatNavigationAction(
+        navigation.getState(),
+        params ?? {},
+      );
+      if (action) navigation.dispatch(action);
+    }
   };
 }
 
@@ -70,9 +79,15 @@ export const WorkspaceMenuContext = createContext(() => {});
 export type WorkspaceNavigationGuardChange = (
   id: symbol,
   blocked: boolean,
+  critical?: boolean,
 ) => void;
 export const WorkspaceNavigationGuardContext =
   createContext<WorkspaceNavigationGuardChange>(() => {});
+
+export type WorkspaceEdgeBackChange = (id: symbol, back?: () => void) => void;
+export const WorkspaceEdgeBackContext = createContext<WorkspaceEdgeBackChange>(
+  () => {},
+);
 
 export function WorkspaceHeaderVisibility({
   children,
@@ -239,7 +254,7 @@ export function useWorkspaceBack({
   label?: string;
   /** Screen-specific title/actions must be applied with the navigation role. */
   options?: NativeStackNavigationOptions;
-  /** Dirty forms confirm an outer drawer dismissal independently of local Back. */
+  /** Dirty forms guard navigation away as well as Settings surface dismissal. */
   discardOnClose?: { title: string; message: string };
 }) {
   const navigation =
@@ -249,12 +264,14 @@ export function useWorkspaceBack({
   const onOpenMenu = useContext(WorkspaceMenuContext);
   const sheet = useContext(WorkspaceSheetContext);
   const onNavigationGuardChange = useContext(WorkspaceNavigationGuardContext);
+  const onEdgeBackChange = useContext(WorkspaceEdgeBackContext);
   const guardId = useRef(Symbol("workspace-navigation-guard"));
-  const current = useRef({ onBack, disabled, focused });
+  const current = useRef({ onBack, disabled, focused, sessionActive });
+  const confirmationPending = useRef(false);
   const mounted = useRef(true);
   const [allowedRemoval, setAllowedRemoval] = useState<NavigationAction>();
   const allowedFocus = useRef(true);
-  current.current = { onBack, disabled, focused };
+  current.current = { onBack, disabled, focused, sessionActive };
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -264,6 +281,13 @@ export function useWorkspaceBack({
   const localBack = useCallback(() => {
     if (!current.current.disabled) current.current.onBack();
   }, []);
+
+  useLayoutEffect(() => {
+    if (!focused || !active || sheet) return;
+    const id = guardId.current;
+    onEdgeBackChange(id, localBack);
+    return () => onEdgeBackChange(id);
+  }, [focused, active, Boolean(sheet), localBack, onEdgeBackChange]);
 
   useLayoutEffect(() => {
     if (!focused) return;
@@ -276,7 +300,8 @@ export function useWorkspaceBack({
         disabled,
         label: active ? label : "Back",
       }),
-      gestureEnabled: !disabled && (!active || Boolean(sheet)),
+      gestureEnabled:
+        !disabled && (Boolean(sheet) || (!active && defaultRole === "back")),
       ...options,
     });
   }, [
@@ -339,31 +364,49 @@ export function useWorkspaceBack({
       ((focused && (active || disabled)) || Boolean(discardOnClose)) &&
       (!allowedRemoval || disabled),
     ({ data }) => {
-      const outerDismiss =
-        sheet &&
-        (data.action.target === sheet.rootKey ||
-          data.action.source === sheet.sheetKey);
+      const outerDismiss = sheet
+        ? data.action.target === sheet.rootKey ||
+          data.action.source === sheet.sheetKey
+        : ["RESET", "NAVIGATE", "REPLACE", "POP_TO"].includes(data.action.type);
       if (!outerDismiss) {
         localBack();
         return;
       }
       if (current.current.disabled) return;
+      if (confirmationPending.current) return;
       const focusWhenRequested = current.current.focused;
       const proceed = () => {
         if (
           mounted.current &&
           current.current.focused === focusWhenRequested &&
-          !current.current.disabled
+          !current.current.disabled &&
+          current.current.sessionActive
         ) {
           allowedFocus.current = focusWhenRequested;
           setAllowedRemoval(data.action);
         }
       };
       if (discardOnClose) {
-        Alert.alert(discardOnClose.title, discardOnClose.message, [
-          { text: "Keep editing", style: "cancel" },
-          { text: "Discard", style: "destructive", onPress: proceed },
-        ]);
+        confirmationPending.current = true;
+        const cancel = () => {
+          confirmationPending.current = false;
+        };
+        Alert.alert(
+          discardOnClose.title,
+          discardOnClose.message,
+          [
+            { text: "Keep editing", style: "cancel", onPress: cancel },
+            {
+              text: "Discard",
+              style: "destructive",
+              onPress: () => {
+                cancel();
+                proceed();
+              },
+            },
+          ],
+          { cancelable: true, onDismiss: cancel },
+        );
       } else proceed();
     },
   );
@@ -384,9 +427,9 @@ export function useWorkspaceBack({
   // Defer external approval navigation while a critical write forbids leaving.
   // Local detail Back handling remains independent from notification delivery.
   useLayoutEffect(() => {
-    if ((!focused || !disabled) && !discardOnClose) return;
+    if (!(focused && disabled) && !discardOnClose) return;
     const id = guardId.current;
-    onNavigationGuardChange(id, true);
+    onNavigationGuardChange(id, true, disabled);
     return () => onNavigationGuardChange(id, false);
   }, [disabled, Boolean(discardOnClose), focused, onNavigationGuardChange]);
 

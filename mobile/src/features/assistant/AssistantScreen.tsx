@@ -62,6 +62,7 @@ import {
 } from "../../app/WorkspaceHeader";
 import {
   openWorkspaceSheetAction,
+  openWorkspacePageAction,
   workspaceNavigateAction,
 } from "../../app/navigationHierarchy";
 import {
@@ -252,7 +253,11 @@ export function AssistantScreen({
       ? ("Running" as const)
       : undefined;
   const headerDetail = chatThreadInfo(
-    assistant.conversationId ? conversation?.title : homeVisible ? "Home" : "New chat",
+    assistant.conversationId
+      ? conversation?.title
+      : homeVisible
+        ? "Home"
+        : "New chat",
     currentAgent?.name,
     assistant.conversationId ? conversation?.last_message_at : undefined,
   );
@@ -484,7 +489,7 @@ export function AssistantScreen({
       } else if (automation?.kind === "automation") {
         if (automation.params.setup) {
           navigation.dispatch(
-            openWorkspaceSheetAction("AutomationEditor", automation.params),
+            openWorkspacePageAction("AutomationEditor", automation.params),
           );
         } else {
           navigation.dispatch(
@@ -1001,10 +1006,10 @@ export function AssistantScreen({
               navigation.navigate("GroupChat", { groupId })
             }
             onNewAgent={() =>
-              navigation.dispatch(openWorkspaceSheetAction("AgentCreate"))
+              navigation.dispatch(openWorkspacePageAction("AgentCreate"))
             }
             onNewCrew={() =>
-              navigation.dispatch(openWorkspaceSheetAction("GroupEditor"))
+              navigation.dispatch(openWorkspacePageAction("GroupEditor"))
             }
           />
         ) : (
@@ -1683,7 +1688,7 @@ export function AssistantScreen({
             onManageMemory={(agentId) => {
               setSheet(undefined);
               navigation.dispatch(
-                openWorkspaceSheetAction("AgentDetail", { agentId }),
+                openWorkspacePageAction("AgentDetail", { agentId }),
               );
             }}
           />
@@ -1737,7 +1742,7 @@ export function AssistantScreen({
                 onPress={() => {
                   setSheet(undefined);
                   navigation.dispatch(
-                    openWorkspaceSheetAction("AgentDetail", {
+                    openWorkspacePageAction("AgentDetail", {
                       agentId: currentAgent.id,
                     }),
                   );

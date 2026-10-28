@@ -14,6 +14,7 @@ import {
 } from "@react-navigation/routers";
 import {
   openWorkspaceSheetAction,
+  isWorkspaceSidebarRoot,
   workspaceNavigateAction,
   workspaceRouterOptions,
 } from "./navigationHierarchy";
@@ -205,6 +206,7 @@ function setup() {
     workspaceNavigateAction,
     workspaceChatNavigationAction,
     openWorkspaceSheetAction,
+    isWorkspaceSidebarRoot,
     activeWorkspaceChatTarget,
   });
   const component = exports.ThemedAppShell;
@@ -313,6 +315,13 @@ function setup() {
   };
 }
 
+// Native routers allocate fresh keys for newly opened pages; retained-key coverage
+// lives in the real reducer tests. Compare destination/params/action targets here.
+const comparable = (value: unknown): unknown =>
+  JSON.parse(
+    JSON.stringify(value, (key, item) => (key === "key" ? undefined : item)),
+  );
+
 test("management, chat, scanner and login selections wait for actual slab settlement", () => {
   const target: WorkspaceChatTarget = {
     kind: "agent",
@@ -332,7 +341,8 @@ test("management, chat, scanner and login selections wait for actual slab settle
     },
     {
       choose: (drawer: Element) => drawer.props.onNavigate("Agents"),
-      expected: () => workspaceNavigateAction("Agents"),
+      expected: (state: NavigationState) =>
+        workspaceNavigateAction("Agents", undefined, state),
     },
     {
       choose: (drawer: Element) => drawer.props.onOpenChat(target),
@@ -350,11 +360,13 @@ test("management, chat, scanner and login selections wait for actual slab settle
     },
     {
       choose: (drawer: Element) => drawer.props.onCreateAgent(),
-      expected: () => openWorkspaceSheetAction("AgentCreate"),
+      expected: (state: NavigationState) =>
+        workspaceNavigateAction("AgentCreate", undefined, state),
     },
     {
       choose: (drawer: Element) => drawer.props.onCreateGroup(),
-      expected: () => openWorkspaceSheetAction("GroupEditor"),
+      expected: (state: NavigationState) =>
+        workspaceNavigateAction("GroupEditor", undefined, state),
     },
     {
       choose: (drawer: Element) => drawer.props.onNavigate("AccountSettings"),
@@ -362,7 +374,8 @@ test("management, chat, scanner and login selections wait for actual slab settle
     },
     ...["WorkspaceSearch", "WorkspaceRecents"].map((name) => ({
       choose: (drawer: Element) => drawer.props.onBrowse(name),
-      expected: () => ({ type: "NAVIGATE", payload: { name } }),
+      expected: (state: NavigationState) =>
+        workspaceNavigateAction(name as "WorkspaceSearch", undefined, state),
     })),
   ]) {
     const env = setup();
@@ -379,9 +392,10 @@ test("management, chat, scanner and login selections wait for actual slab settle
     );
     env.drawer().props.onDismiss();
     // Scanner/login params are created inside the isolated component realm.
-    assert.deepEqual(structuredClone(env.dispatched), [
-      selection.expected(env.state()),
-    ]);
+    assert.deepEqual(
+      comparable(env.dispatched),
+      comparable([selection.expected(env.state())]),
+    );
     env.drawer().props.onDismiss();
     assert.equal(env.dispatched.length, 1);
   }
@@ -544,7 +558,7 @@ test("chat selection preserves the latest mounted workspace rather than selectio
   assert.ok(action);
   assert.equal(action.target, latest.key);
   const payload = action.payload as { routes: unknown[] } | undefined;
-  assert.equal(payload?.routes[0], latestWorkspace);
+  assert.equal((payload?.routes[0] as any).key, latestWorkspace.key);
 });
 
 test("signing out clears every queued selection before a stale dismissal callback can run", () => {
@@ -603,9 +617,12 @@ test("navigation readiness is checked at dismissal and unavailable actions are c
   env.flush();
   env.readiness(true);
   env.drawer().props.onDismiss();
-  assert.deepEqual(structuredClone(env.dispatched), [
-    { type: "NAVIGATE", payload: { name: "WorkspaceRecents" } },
-  ]);
+  assert.deepEqual(
+    comparable(env.dispatched),
+    comparable([
+      workspaceNavigateAction("WorkspaceRecents", undefined, env.state()),
+    ]),
+  );
 });
 
 test("a second selection before dismissal replaces the queued destination", () => {
@@ -617,5 +634,10 @@ test("a second selection before dismissal replaces the queued destination", () =
   env.flush();
   assert.deepEqual(env.dispatched, []);
   env.drawer().props.onDismiss();
-  assert.deepEqual(env.dispatched, [workspaceNavigateAction("Automations")]);
+  assert.deepEqual(
+    comparable(env.dispatched),
+    comparable([
+      workspaceNavigateAction("Automations", undefined, env.state()),
+    ]),
+  );
 });

@@ -14,7 +14,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import {
+  usePreventRemove,
+  type NavigationAction,
+} from "@react-navigation/native";
 import {
   createNativeStackNavigator,
   type NativeStackScreenProps,
@@ -23,16 +26,14 @@ import { AuthHomeScreen } from "../features/auth/AuthHomeScreen";
 import { DeviceLoginScreen } from "../features/auth/DeviceLoginScreen";
 import { AgentKeyLoginScreen } from "../features/auth/AgentKeyLoginScreen";
 import { useAuthSession } from "../features/auth/AuthSessionContext";
-import {
-  AccountSettingsScreen,
-  AccountSettingsTitle,
-} from "../features/account/AccountSettingsScreen";
+import { AccountSettingsScreen } from "../features/account/AccountSettingsScreen";
 import { AccountSecurityScreen } from "../features/account/AccountSecurityScreen";
 import { MachinePolicyScreen } from "../features/machines/MachinePolicyScreen";
 import { MachineActivityScreen } from "../features/machines/MachineActivityScreen";
 import { AgentMachinesScreen } from "../features/machines/AgentMachinesScreen";
 import { MachineDesktopRoute } from "../features/machines/MachineDesktopRoute";
 import { MachinesScreen } from "../features/machines/MachinesScreen";
+import { WorkspacePageHeader } from "../components/workspace/WorkspacePageHeader";
 import { WorkspaceDrawerHeader } from "../components/workspace/WorkspaceDrawerHeader";
 import { ActivityScreen } from "../features/activity/ActivityScreen";
 import { ActivityDetailScreen } from "../features/activity/ActivityDetailScreen";
@@ -67,6 +68,8 @@ import { darkSheetColors, lightSheetColors } from "../theme/mobileTheme";
 import { fonts } from "../theme/designTokens";
 import {
   WorkspaceSessionContext,
+  WorkspaceEdgeBackContext,
+  type WorkspaceEdgeBackChange,
   WorkspaceMenuContext,
   WorkspaceSheetContext,
   useOpenWorkspaceChat,
@@ -75,8 +78,7 @@ import {
   workspaceHeaderOptions,
 } from "./WorkspaceHeader";
 import {
-  workspaceRouterOptions,
-  openWorkspaceSheetAction,
+  openWorkspacePageAction,
   dismissWorkspaceSheetAction,
   workspaceSharedEntryNavigationAction,
 } from "./navigationHierarchy";
@@ -86,8 +88,8 @@ import {
 } from "./workspaceChatNavigation";
 import type {
   RootStackParamList,
-  WorkspaceChatParamList,
-  WorkspacePanelParamList,
+  WorkspaceContentParamList,
+  ContentScreenProps,
   WorkspaceSheetParamList,
   WorkspaceScreenProps,
   AssistantParams,
@@ -101,19 +103,16 @@ export type {
 } from "./navigationTypes";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
-const Tabs = createBottomTabNavigator<WorkspacePanelParamList>();
-const ChatTabs = createBottomTabNavigator<WorkspaceChatParamList>();
+const ContentStack = createNativeStackNavigator<WorkspaceContentParamList>();
 const SheetStack = createNativeStackNavigator<WorkspaceSheetParamList>();
-const hideTabBar = () => null;
 
 function AgentsRoute({ navigation, route }: WorkspaceScreenProps<"Agents">) {
-  const sheet = useContext(WorkspaceSheetContext)!;
   const openChat = useOpenWorkspaceChat();
   return (
     <AgentsGroupsScreen
       tab={route.params?.tab === "groups" ? "groups" : "agents"}
       onTabChange={(tab) => navigation.setParams({ tab })}
-      onOpenGroup={sheet.onOpenGroup}
+      onOpenGroup={(groupId) => navigation.push("GroupChat", { groupId })}
       onCreateAgent={() => navigation.push("AgentCreate")}
       onCreateGroup={() => navigation.push("GroupEditor")}
       onOpenChat={openChat}
@@ -135,7 +134,7 @@ function AgentsRoute({ navigation, route }: WorkspaceScreenProps<"Agents">) {
 function GroupChatRoute({
   navigation,
   route,
-}: NativeStackScreenProps<RootStackParamList, "GroupChat">) {
+}: ContentScreenProps<"GroupChat">) {
   return (
     <WorkspaceInteractionSurface style={{ flex: 1 }}>
       <AssistantLinkHost scope={route.params.groupId}>
@@ -145,7 +144,7 @@ function GroupChatRoute({
           onBack={() => navigation.goBack()}
           onSettings={() =>
             navigation.dispatch(
-              openWorkspaceSheetAction("GroupEditor", {
+              openWorkspacePageAction("GroupEditor", {
                 groupId: route.params.groupId,
               }),
             )
@@ -155,7 +154,7 @@ function GroupChatRoute({
           }
           onOpenAgent={(agentId) =>
             navigation.dispatch(
-              openWorkspaceSheetAction("AgentDetail", { agentId }),
+              openWorkspacePageAction("AgentDetail", { agentId }),
             )
           }
         />
@@ -167,8 +166,7 @@ function GroupChatRoute({
 function GroupEditorRoute({
   navigation,
   route,
-}: NativeStackScreenProps<WorkspaceSheetParamList, "GroupEditor">) {
-  const sheet = useContext(WorkspaceSheetContext)!;
+}: ContentScreenProps<"GroupEditor">) {
   return (
     <GroupEditorScreen
       key={route.params?.groupId ?? "new"}
@@ -176,14 +174,10 @@ function GroupEditorRoute({
       onBack={() => navigation.goBack()}
       onSaved={(groupId) => {
         if (route.params?.groupId) navigation.goBack();
-        else sheet.onOpenGroup(groupId);
+        else navigation.push("GroupChat", { groupId });
       }}
       onRemoved={() =>
-        navigation.popTo(
-          "Pages",
-          { screen: "Agents", params: { tab: "groups" } },
-          { merge: true },
-        )
+        navigation.popTo("Agents", { tab: "groups" }, { merge: true })
       }
     />
   );
@@ -192,7 +186,7 @@ function GroupEditorRoute({
 function AgentDetailRoute({
   navigation,
   route,
-}: NativeStackScreenProps<WorkspaceSheetParamList, "AgentDetail">) {
+}: ContentScreenProps<"AgentDetail">) {
   const openChat = useOpenWorkspaceChat();
   return (
     <AgentsScreen
@@ -205,8 +199,8 @@ function AgentDetailRoute({
       }
       onOpenAutomations={(agentId) =>
         navigation.popTo(
-          "Pages",
-          { screen: "Automations", params: { agentId, setup: undefined } },
+          "Automations",
+          { agentId, setup: undefined },
           { merge: true },
         )
       }
@@ -214,9 +208,7 @@ function AgentDetailRoute({
   );
 }
 
-function AgentCreateRoute({
-  navigation,
-}: NativeStackScreenProps<WorkspaceSheetParamList, "AgentCreate">) {
+function AgentCreateRoute({ navigation }: ContentScreenProps<"AgentCreate">) {
   return (
     <AgentsScreen
       initialCreate
@@ -228,7 +220,7 @@ function AgentCreateRoute({
 
 function AssistantContextRoute({
   route,
-}: NativeStackScreenProps<RootStackParamList, "AssistantContext">) {
+}: ContentScreenProps<"AssistantContext">) {
   return (
     <WorkspaceInteractionSurface style={{ flex: 1 }}>
       <AssistantLinkHost
@@ -262,7 +254,7 @@ function PluginsRoute({ route }: WorkspaceScreenProps<"Plugins">) {
 function ServiceSetupRoute({
   navigation,
   route,
-}: NativeStackScreenProps<WorkspaceSheetParamList, "ServiceSetup">) {
+}: ContentScreenProps<"ServiceSetup">) {
   return (
     <ServicesScreen
       key={route.key}
@@ -273,9 +265,7 @@ function ServiceSetupRoute({
   );
 }
 
-function AgentSkillsRoute({
-  route,
-}: NativeStackScreenProps<WorkspaceSheetParamList, "AgentSkills">) {
+function AgentSkillsRoute({ route }: ContentScreenProps<"AgentSkills">) {
   return (
     <AgentSkillsScreen
       key={route.params.agentId}
@@ -284,111 +274,177 @@ function AgentSkillsRoute({
   );
 }
 
-/** The current conversation stays mounted below the workspace drawer. */
+/** Home, chats and workspace pages share the horizontally pushed content slab. */
 function WorkspaceNavigator() {
   const onOpenMenu = useContext(WorkspaceMenuContext);
   const { colors } = useTheme();
-  const header = workspaceHeaderOptions({ role: "menu", onOpenMenu });
+  const reducedMotion = useReducedMotion();
   return (
-    <WorkspaceInteractionSurface style={{ flex: 1 }}>
-      <ChatTabs.Navigator
-        {...workspaceRouterOptions}
-        tabBar={hideTabBar}
-        screenOptions={{
-          headerShown: true,
-          headerLeft: () => header.headerLeft?.({ canGoBack: false }),
-          headerLeftContainerStyle: { paddingLeft: 16 },
-          headerStyle: { backgroundColor: colors.bg },
-          headerTintColor: colors.textPrimary,
-          headerTitleStyle: { fontFamily: fonts.displaySemi, fontSize: 18 },
-          headerTitleAlign: "center",
-          headerShadowVisible: false,
-          sceneStyle: { backgroundColor: colors.bg },
-        }}
-      >
-        <ChatTabs.Screen
-          name="Assistant"
-          component={AssistantRoute}
-          initialParams={{ home: true }}
-          options={{ title: "NyxID" }}
-        />
-      </ChatTabs.Navigator>
-    </WorkspaceInteractionSurface>
-  );
-}
-
-/** Sibling module state is retained while navigating within the same drawer. */
-function WorkspacePages() {
-  const onOpenMenu = useContext(WorkspaceMenuContext);
-  const sheet = useContext(WorkspaceSheetContext)!;
-  const { colors } = useTheme();
-  const header = workspaceHeaderOptions({
-    role: "menu",
-    onOpenMenu,
-    onClose: sheet.onClose,
-  });
-  return (
-    <Tabs.Navigator
-      initialRouteName="Agents"
-      backBehavior="none"
-      tabBar={hideTabBar}
-      screenOptions={{
-        headerShown: true,
-        headerLeft: () => null,
-        headerRight: () => header.headerRight?.({ canGoBack: false }),
-        headerRightContainerStyle: { paddingRight: 12 },
+    <ContentStack.Navigator
+      initialRouteName="Assistant"
+      screenOptions={({ navigation }) => ({
+        ...workspaceHeaderOptions({
+          role: "back",
+          onBack: navigation.goBack,
+          onOpenMenu,
+        }),
+        header: WorkspacePageHeader,
         headerStyle: { backgroundColor: colors.bg },
         headerTintColor: colors.textPrimary,
-        headerTitleStyle: { fontFamily: fonts.displaySemi, fontSize: 18 },
-        headerTitleAlign: "left",
+        contentStyle: { backgroundColor: colors.bg },
         headerShadowVisible: false,
-        sceneStyle: { backgroundColor: colors.bg },
-        lazy: true,
-      }}
+        animation: reducedMotion ? "none" : "slide_from_right",
+      })}
+      screenLayout={({ children }) => (
+        <WorkspaceInteractionSurface style={{ flex: 1 }}>
+          {children}
+        </WorkspaceInteractionSurface>
+      )}
     >
-      <Tabs.Screen
-        name="Automations"
-        component={AutomationsScreen}
-        options={{ title: "Automations" }}
+      <ContentStack.Screen
+        name="Assistant"
+        component={AssistantRoute}
+        initialParams={{ home: true }}
       />
-      <Tabs.Screen
-        name="Agents"
-        component={AgentsRoute}
-        options={{ title: "Agents & Crews" }}
+      <ContentStack.Screen
+        name="AssistantContext"
+        component={AssistantContextRoute}
       />
-      <Tabs.Screen
-        name="Plugins"
-        component={PluginsRoute}
-        options={{ title: "Plugins" }}
+      <ContentStack.Screen name="GroupChat" component={GroupChatRoute} />
+      <ContentStack.Group
+        screenOptions={{
+          ...workspaceHeaderOptions({ role: "menu", onOpenMenu }),
+          gestureEnabled: false,
+        }}
+      >
+        <ContentStack.Screen
+          name="Automations"
+          component={AutomationsScreen}
+          options={{ title: "Automations" }}
+        />
+        <ContentStack.Screen
+          name="Agents"
+          component={AgentsRoute}
+          options={{ title: "Agents & Crews" }}
+        />
+        <ContentStack.Screen
+          name="Plugins"
+          component={PluginsRoute}
+          options={{ title: "Plugins" }}
+        />
+        <ContentStack.Screen
+          name="Services"
+          component={ServicesScreen}
+          options={{ title: "Services" }}
+        />
+        <ContentStack.Screen
+          name="Machines"
+          component={MachinesScreen}
+          options={{ title: "Machines" }}
+        />
+        <ContentStack.Screen
+          name="Activity"
+          component={ActivityScreen}
+          options={{ title: "Approvals" }}
+        />
+        <ContentStack.Screen
+          name="WorkspaceSearch"
+          component={WorkspaceSearchScreen}
+          options={{ title: "Search" }}
+        />
+        <ContentStack.Screen
+          name="WorkspaceRecents"
+          component={WorkspaceRecentsScreen}
+          options={{ title: "Recents" }}
+        />
+      </ContentStack.Group>
+      <ContentStack.Screen
+        name="AgentCreate"
+        component={AgentCreateRoute}
+        options={{ title: "New agent" }}
       />
-      <Tabs.Screen
-        name="Services"
-        component={ServicesScreen}
-        options={{ title: "Services" }}
+      <ContentStack.Screen
+        name="AgentDetail"
+        component={AgentDetailRoute}
+        options={{ title: "Agent" }}
       />
-      <Tabs.Screen
-        name="Machines"
-        component={MachinesScreen}
-        options={{ title: "Machines" }}
+      <ContentStack.Screen
+        name="GroupEditor"
+        component={GroupEditorRoute}
+        options={({ route }) => ({
+          title: route.params?.groupId ? "Crew settings" : "New crew",
+        })}
       />
-      <Tabs.Screen
-        name="Activity"
-        component={ActivityScreen}
-        options={{ title: "Approvals" }}
+      <ContentStack.Screen
+        name="ServiceSetup"
+        component={ServiceSetupRoute}
+        options={({ route }) => ({
+          title: route.params.catalogSlug
+            ? "Connect service"
+            : "Manage connection",
+        })}
       />
-      <Tabs.Screen
-        name="AccountSettings"
-        component={AccountSettingsScreen}
+      <ContentStack.Screen
+        name="MachinePolicy"
+        component={MachinePolicyScreen}
         options={{
-          title: "Settings",
-          headerTitle: (props) => <AccountSettingsTitle {...props} />,
+          title: "Owner policy and updates",
+          header: WorkspacePageHeader,
         }}
       />
-    </Tabs.Navigator>
+      <ContentStack.Screen
+        name="MachineActivity"
+        component={MachineActivityScreen}
+        options={{
+          title: "Machine activity",
+          header: WorkspacePageHeader,
+        }}
+      />
+      <ContentStack.Screen
+        name="AgentMachines"
+        component={AgentMachinesScreen}
+        options={{
+          title: "Agent machine access",
+          header: WorkspacePageHeader,
+        }}
+      />
+      <ContentStack.Screen
+        name="AgentSkills"
+        component={AgentSkillsRoute}
+        options={{ title: "Agent skills" }}
+      />
+      <ContentStack.Screen
+        name="AutomationDetail"
+        component={AutomationDetailScreen}
+        options={{ title: "Automation" }}
+      />
+      <ContentStack.Screen
+        name="AutomationEditor"
+        component={AutomationEditorScreen}
+        options={({ route }) => ({
+          title: route.params?.id ? "Edit automation" : "Create automation",
+        })}
+      />
+      <ContentStack.Screen
+        name="AutomationRuns"
+        component={AutomationRunsScreen}
+        options={{ title: "Run history" }}
+      />
+      <ContentStack.Screen
+        name="AutomationPreferences"
+        component={AutomationPreferencesScreen}
+        options={{ title: "Automation preferences" }}
+      />
+      <ContentStack.Screen
+        name="ActivityDetail"
+        component={ActivityDetailScreen}
+        options={{ title: "Approval detail" }}
+      />
+    </ContentStack.Navigator>
   );
 }
 
-function WorkspaceSheetRoute({
+function SettingsSheetRoute({
   navigation,
   route,
 }: NativeStackScreenProps<RootStackParamList, "WorkspaceSheet">) {
@@ -399,6 +455,7 @@ function WorkspaceSheetRoute({
   const controller = useRef<WorkspaceSheetHandle | null>(null);
   const guards = useRef(new Map<symbol, () => Promise<boolean>>());
   const [dismissAuthorized, setDismissAuthorized] = useState(false);
+  const pendingExit = useRef<NavigationAction | undefined>(undefined);
   const reducedMotion = useReducedMotion();
   useEffect(() => () => workspaceFocus.releaseDrawer(route.key), [route.key]);
   const registerDismissGuard = useCallback(
@@ -417,13 +474,21 @@ function WorkspaceSheetRoute({
     return true;
   }, []);
   const onClose = useCallback(() => {
+    pendingExit.current = undefined;
     controller.current?.dismiss();
   }, []);
+  const sessionActive = useContext(WorkspaceSessionContext);
+  usePreventRemove(sessionActive && !dismissAuthorized, ({ data }) => {
+    pendingExit.current = data.action;
+    controller.current?.dismiss();
+  });
   const [finishRequested, setFinishRequested] = useState(false);
   const finishClose = useCallback(() => setFinishRequested(true), []);
   useEffect(() => {
     if (!dismissAuthorized || !finishRequested) return;
-    const action = dismissWorkspaceSheetAction(navigation.getState());
+    const action =
+      pendingExit.current ?? dismissWorkspaceSheetAction(navigation.getState());
+    pendingExit.current = undefined;
     if (action) navigation.dispatch(action);
   }, [navigation, dismissAuthorized, finishRequested]);
   const onOpenChat = useCallback(
@@ -481,8 +546,8 @@ function WorkspaceSheetRoute({
         canHandleHardwareBack={canHandleHardwareBack}
       >
         <SheetStack.Navigator
-          initialRouteName="Pages"
-          screenOptions={({ navigation }) => ({
+          initialRouteName="AccountSettings"
+          screenOptions={({ navigation, route }) => ({
             ...workspaceHeaderOptions({
               role: "back",
               onBack: navigation.goBack,
@@ -498,94 +563,15 @@ function WorkspaceSheetRoute({
             headerShadowVisible: false,
             headerBackButtonDisplayMode: "minimal",
             contentStyle: { backgroundColor: colors.bg },
+            ...(route.name === "AccountSettings"
+              ? { headerLeft: () => null }
+              : {}),
           })}
         >
           <SheetStack.Screen
-            name="Pages"
-            component={WorkspacePages}
-            options={{ headerShown: false }}
-          />
-          <SheetStack.Screen
-            name="AgentCreate"
-            component={AgentCreateRoute}
-            options={{ title: "New agent" }}
-          />
-          <SheetStack.Screen
-            name="AgentDetail"
-            component={AgentDetailRoute}
-            options={{ title: "Agent" }}
-          />
-          <SheetStack.Screen
-            name="GroupEditor"
-            component={GroupEditorRoute}
-            options={({ route }) => ({
-              title: route.params?.groupId ? "Crew settings" : "New crew",
-            })}
-          />
-          <SheetStack.Screen
-            name="ServiceSetup"
-            component={ServiceSetupRoute}
-            options={({ route }) => ({
-              title: route.params.catalogSlug
-                ? "Connect service"
-                : "Manage connection",
-            })}
-          />
-          <SheetStack.Screen
-            name="MachinePolicy"
-            component={MachinePolicyScreen}
-            options={{
-              title: "Owner policy and updates",
-              header: WorkspaceDrawerHeader,
-            }}
-          />
-          <SheetStack.Screen
-            name="MachineActivity"
-            component={MachineActivityScreen}
-            options={{
-              title: "Machine activity",
-              header: WorkspaceDrawerHeader,
-            }}
-          />
-          <SheetStack.Screen
-            name="AgentMachines"
-            component={AgentMachinesScreen}
-            options={{
-              title: "Agent machine access",
-              header: WorkspaceDrawerHeader,
-            }}
-          />
-          <SheetStack.Screen
-            name="AgentSkills"
-            component={AgentSkillsRoute}
-            options={{ title: "Agent skills" }}
-          />
-          <SheetStack.Screen
-            name="AutomationDetail"
-            component={AutomationDetailScreen}
-            options={{ title: "Automation" }}
-          />
-          <SheetStack.Screen
-            name="AutomationEditor"
-            component={AutomationEditorScreen}
-            options={({ route }) => ({
-              title: route.params?.id ? "Edit automation" : "Create automation",
-            })}
-          />
-          <SheetStack.Screen
-            name="AutomationRuns"
-            component={AutomationRunsScreen}
-            options={{ title: "Run history" }}
-          />
-          <SheetStack.Screen
-            name="AutomationPreferences"
-            component={AutomationPreferencesScreen}
-            options={{ title: "Automation preferences" }}
-          />
-          <SheetStack.Screen
-            name="ActivityDetail"
-            component={ActivityDetailScreen}
-            options={{ title: "Approval detail" }}
+            name="AccountSettings"
+            component={AccountSettingsScreen}
+            options={{ title: "Settings" }}
           />
           <SheetStack.Screen
             name="UsageCredits"
@@ -648,9 +634,11 @@ function SheetEntryRoute({
 export function AppNavigator({
   onOpenMenu,
   onNavigationGuardChange,
+  onEdgeBackChange,
 }: {
   onOpenMenu: () => void;
   onNavigationGuardChange: WorkspaceNavigationGuardChange;
+  onEdgeBackChange: WorkspaceEdgeBackChange;
 }) {
   const { isAuthenticated, isRestoring } = useAuthSession();
   const reducedMotion = useReducedMotion();
@@ -668,129 +656,93 @@ export function AppNavigator({
         <WorkspaceNavigationGuardContext.Provider
           value={onNavigationGuardChange}
         >
-          <Stack.Navigator
-            initialRouteName={isAuthenticated ? "Workspace" : "Auth"}
-            screenOptions={{
-              headerShown: false,
-              headerStyle: { backgroundColor: colors.bg },
-              headerTintColor: colors.textPrimary,
-              headerTitleStyle: { fontFamily: fonts.displaySemi, fontSize: 18 },
-              headerShadowVisible: false,
-              contentStyle: { backgroundColor: colors.bg },
-              headerBackButtonDisplayMode: "minimal",
-            }}
-          >
-            {isAuthenticated ? (
-              <Stack.Group navigationKey="workspace">
-                <Stack.Screen name="Workspace" component={WorkspaceNavigator} />
+          <WorkspaceEdgeBackContext.Provider value={onEdgeBackChange}>
+            <Stack.Navigator
+              initialRouteName={isAuthenticated ? "Workspace" : "Auth"}
+              screenOptions={{
+                headerShown: false,
+                headerStyle: { backgroundColor: colors.bg },
+                headerTintColor: colors.textPrimary,
+                headerTitleStyle: {
+                  fontFamily: fonts.displaySemi,
+                  fontSize: 18,
+                },
+                headerShadowVisible: false,
+                contentStyle: { backgroundColor: colors.bg },
+                headerBackButtonDisplayMode: "minimal",
+              }}
+            >
+              {isAuthenticated ? (
+                <Stack.Group navigationKey="workspace">
+                  <Stack.Screen
+                    name="Workspace"
+                    component={WorkspaceNavigator}
+                  />
+                  <Stack.Screen
+                    name="WorkspaceSheet"
+                    component={SettingsSheetRoute}
+                    options={{
+                      presentation: "transparentModal",
+                      // The surface animates its panel and stationary scrim independently.
+                      animation: "none",
+                      gestureEnabled: false,
+                      headerShown: false,
+                      contentStyle: { backgroundColor: "transparent" },
+                    }}
+                  />
+                  <Stack.Screen
+                    name="MachineDesktop"
+                    component={MachineDesktopRoute}
+                    options={{
+                      presentation: "fullScreenModal",
+                      animation: reducedMotion ? "none" : "fade",
+                      headerShown: false,
+                      gestureEnabled: false,
+                    }}
+                  />
+                </Stack.Group>
+              ) : (
                 <Stack.Screen
-                  name="WorkspaceSearch"
-                  component={WorkspaceSearchScreen}
-                  options={{
-                    ...workspaceHeaderOptions({ role: "menu", onOpenMenu }),
-                    title: "Search",
-                    headerTitleAlign: "left",
-                    animation: reducedMotion ? "none" : "slide_from_right",
-                  }}
+                  name="Auth"
+                  navigationKey="auth"
+                  component={AuthHomeScreen}
+                  options={{ title: "NyxID Sign In" }}
+                />
+              )}
+              <Stack.Group
+                navigationKey={isAuthenticated ? "signed-in" : "signed-out"}
+              >
+                <Stack.Screen
+                  name="TermsOfService"
+                  component={
+                    isAuthenticated ? SheetEntryRoute : TermsOfServiceScreen
+                  }
+                  options={{ title: "Terms of Service" }}
                 />
                 <Stack.Screen
-                  name="WorkspaceRecents"
-                  component={WorkspaceRecentsScreen}
-                  options={{
-                    ...workspaceHeaderOptions({ role: "menu", onOpenMenu }),
-                    title: "Recents",
-                    headerTitleAlign: "left",
-                    animation: reducedMotion ? "none" : "slide_from_right",
-                  }}
+                  name="PrivacyPolicy"
+                  component={
+                    isAuthenticated ? SheetEntryRoute : PrivacyPolicyScreen
+                  }
+                  options={{ title: "Privacy Policy" }}
                 />
                 <Stack.Screen
-                  name="AssistantContext"
-                  component={AssistantContextRoute}
-                  options={({ navigation }) => ({
-                    ...workspaceHeaderOptions({
-                      role: "back",
-                      onOpenMenu,
-                      onBack: navigation.goBack,
-                    }),
-                    title: "NyxID",
-                  })}
+                  name="DeviceLogin"
+                  component={
+                    isAuthenticated ? SheetEntryRoute : DeviceLoginScreen
+                  }
+                  options={{ title: "Approve Device Login" }}
                 />
                 <Stack.Screen
-                  name="GroupChat"
-                  component={GroupChatRoute}
-                  options={({ navigation }) => ({
-                    ...workspaceHeaderOptions({
-                      role: "back",
-                      onOpenMenu,
-                      onBack: navigation.goBack,
-                    }),
-                    title: "Crew",
-                  })}
-                />
-                <Stack.Screen
-                  name="WorkspaceSheet"
-                  component={WorkspaceSheetRoute}
-                  options={{
-                    presentation: "transparentModal",
-                    // The surface animates its panel and stationary scrim independently.
-                    animation: "none",
-                    gestureEnabled: false,
-                    headerShown: false,
-                    contentStyle: { backgroundColor: "transparent" },
-                  }}
-                />
-                <Stack.Screen
-                  name="MachineDesktop"
-                  component={MachineDesktopRoute}
-                  options={{
-                    presentation: "fullScreenModal",
-                    animation: reducedMotion ? "none" : "fade",
-                    headerShown: false,
-                    gestureEnabled: false,
-                  }}
+                  name="AgentKeyLogin"
+                  component={
+                    isAuthenticated ? SheetEntryRoute : AgentKeyLoginScreen
+                  }
+                  options={{ title: "Agent Key Login" }}
                 />
               </Stack.Group>
-            ) : (
-              <Stack.Screen
-                name="Auth"
-                navigationKey="auth"
-                component={AuthHomeScreen}
-                options={{ title: "NyxID Sign In" }}
-              />
-            )}
-            <Stack.Group
-              navigationKey={isAuthenticated ? "signed-in" : "signed-out"}
-            >
-              <Stack.Screen
-                name="TermsOfService"
-                component={
-                  isAuthenticated ? SheetEntryRoute : TermsOfServiceScreen
-                }
-                options={{ title: "Terms of Service" }}
-              />
-              <Stack.Screen
-                name="PrivacyPolicy"
-                component={
-                  isAuthenticated ? SheetEntryRoute : PrivacyPolicyScreen
-                }
-                options={{ title: "Privacy Policy" }}
-              />
-              <Stack.Screen
-                name="DeviceLogin"
-                component={
-                  isAuthenticated ? SheetEntryRoute : DeviceLoginScreen
-                }
-                options={{ title: "Approve Device Login" }}
-              />
-              <Stack.Screen
-                name="AgentKeyLogin"
-                component={
-                  isAuthenticated ? SheetEntryRoute : AgentKeyLoginScreen
-                }
-                options={{ title: "Agent Key Login" }}
-              />
-            </Stack.Group>
-          </Stack.Navigator>
+            </Stack.Navigator>
+          </WorkspaceEdgeBackContext.Provider>
         </WorkspaceNavigationGuardContext.Provider>
       </WorkspaceMenuContext.Provider>
     </WorkspaceSessionContext.Provider>

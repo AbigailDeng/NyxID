@@ -20,6 +20,7 @@ import { NYXID_FRONTEND_URL } from "../../lib/env";
 import { useTheme } from "../../theme/ThemeContext";
 import {
   openWorkspaceSheetAction,
+  openWorkspacePageAction,
   workspaceNavigateAction,
 } from "../../app/navigationHierarchy";
 import {
@@ -221,7 +222,7 @@ export function ScopedAssistantLinkHost({
                         onPress={() => {
                           close();
                           navigation.dispatch(
-                            openWorkspaceSheetAction("AutomationPreferences"),
+                            openWorkspacePageAction("AutomationPreferences"),
                           );
                         }}
                       />

@@ -86,11 +86,15 @@ export function workspaceStateFromPath(
       : route,
   );
   if (!validConversation && !draft && !agentId && validGroup) {
-    const sheet = routes.findIndex((route) => route.name === "WorkspaceSheet");
-    routes.splice(sheet < 0 ? routes.length : sheet, 0, {
-      name: "GroupChat",
-      params: { groupId },
-    });
+    const workspace = routes.find((route) => route.name === "Workspace");
+    if (workspace)
+      workspace.state = {
+        index: 1,
+        routes: [
+          { name: "Assistant", params: assistantHomeParams() },
+          { name: "GroupChat", params: { groupId } },
+        ],
+      };
   }
   return { ...state, index: routes.length - 1, routes };
 }

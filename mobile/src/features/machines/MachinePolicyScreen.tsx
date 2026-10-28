@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Switch, View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import type { WorkspaceSheetParamList } from "../../app/navigationTypes";
+import type { WorkspaceContentParamList } from "../../app/navigationTypes";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import {
   ActionButton,
@@ -62,7 +62,7 @@ export function MachineSwitch({
 export function MachinePolicyScreen({
   navigation,
   route,
-}: NativeStackScreenProps<WorkspaceSheetParamList, "MachinePolicy">) {
+}: NativeStackScreenProps<WorkspaceContentParamList, "MachinePolicy">) {
   const runtime = useMachineRuntime();
   const query = useQuery({
     queryKey: [...machineKeys(runtime.epoch), "policy", route.params.machineId],

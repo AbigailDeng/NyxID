@@ -8,8 +8,7 @@ import {
   View,
 } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
-import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import type { RootStackParamList } from "../../app/navigationTypes";
+import type { ContentScreenProps } from "../../app/navigationTypes";
 import { workspaceChatNavigationAction } from "../../app/workspaceChatNavigation";
 import { ScreenContainer } from "../ScreenContainer";
 import { useTheme } from "../../theme/ThemeContext";
@@ -23,14 +22,14 @@ const recentKey = (item: WorkspaceRecent) => item.key;
 
 export function WorkspaceRecentsScreen({
   navigation,
-}: NativeStackScreenProps<RootStackParamList, "WorkspaceRecents">) {
+}: ContentScreenProps<"WorkspaceRecents">) {
   const focused = useIsFocused();
   const { colors } = useTheme();
   const data = useWorkspaceRecents(focused);
   const openChat = useCallback(
     (target: WorkspaceChatTarget) => {
       const action = workspaceChatNavigationAction(
-        navigation.getState(),
+        navigation.getParent()?.getState(),
         target,
       );
       if (action) navigation.dispatch(action);

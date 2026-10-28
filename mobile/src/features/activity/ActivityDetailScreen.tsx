@@ -37,7 +37,7 @@ import { useTheme } from "../../theme/ThemeContext";
 import type { ThemeColors } from "../../theme/mobileTheme";
 import { radius, spacing, typeScale } from "../../theme/designTokens";
 import { createFlowStyles } from "../../theme/flowStyles";
-import type { WorkspaceSheetParamList } from "../../app/navigationTypes";
+import type { WorkspaceContentParamList } from "../../app/navigationTypes";
 import { useNetworkStatus } from "../../hooks/useNetworkStatus";
 import {
   APPROVAL_BACKSTOP_POLL_INTERVAL_MS,
@@ -45,7 +45,10 @@ import {
   subscribeToApprovalRefreshSignals,
 } from "../../lib/notifications/approvalRefreshSignal";
 
-type Props = NativeStackScreenProps<WorkspaceSheetParamList, "ActivityDetail">;
+type Props = NativeStackScreenProps<
+  WorkspaceContentParamList,
+  "ActivityDetail"
+>;
 
 function DetailRow({
   label,
@@ -284,7 +287,7 @@ export function ActivityDetailScreen({ navigation, route }: Props) {
         if (navigation.canGoBack()) {
           navigation.goBack();
         } else {
-          navigation.replace("Pages", { screen: "Activity" });
+          navigation.replace("Activity");
         }
       }, 600);
     },

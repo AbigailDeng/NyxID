@@ -336,3 +336,23 @@ test("reduced motion uses instant endpoints without a spring or interactive trav
   assert.equal(x.springs.length, 0);
   x.harness.unmount();
 });
+
+test("a nested dirty editor edge swipe requests guarded Back without translating or exposing the sidebar", () => {
+  const x = setup();
+  let backs = 0;
+  x.set({ onEdgeBack: () => backs++ });
+  x.handlers().onStart();
+  x.handlers().onUpdate({ translationX: 160 });
+  assert.equal(x.offset(), 0);
+  assert.equal(x.counts().reveals, 0);
+  x.handlers().onEnd({ translationX: 160, velocityX: 0 });
+  assert.equal(backs, 1);
+  assert.deepEqual(x.changes, []);
+  x.handlers().onStart();
+  x.handlers().onEnd({ translationX: 15, velocityX: 0 });
+  assert.equal(backs, 1, "a short or cancelled drag keeps editing");
+  x.handlers().onStart();
+  x.handlers().onFinalize({}, false);
+  assert.equal(backs, 1);
+  x.harness.unmount();
+});

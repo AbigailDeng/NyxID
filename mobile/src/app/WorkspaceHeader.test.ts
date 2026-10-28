@@ -51,6 +51,8 @@ function setup({
   const guards = new Map<string, boolean>();
   const dismissGuards = new Map<symbol, () => Promise<boolean>>();
   const guardChanges: boolean[] = [];
+  const criticalChanges: boolean[] = [];
+  const edgeBacks = new Map<symbol, () => void>();
   const dispatched: NavigationAction[] = [];
   const dispatchPrevention: boolean[] = [];
   const alerts: { title: string; message: string; buttons: AlertButton[] }[] =
@@ -260,6 +262,7 @@ function setup({
     WorkspaceSessionContext: Context;
     WorkspaceMenuContext: Context;
     WorkspaceNavigationGuardContext: Context;
+    WorkspaceEdgeBackContext: Context;
   };
   module.WorkspaceSheetContext.value = inSheet
     ? {
@@ -285,7 +288,15 @@ function setup({
   module.WorkspaceNavigationGuardContext.value = (
     _id: symbol,
     blocked: boolean,
-  ) => guardChanges.push(blocked);
+    critical = false,
+  ) => {
+    guardChanges.push(blocked);
+    criticalChanges.push(critical);
+  };
+  module.WorkspaceEdgeBackContext.value = (id: symbol, back?: () => void) => {
+    if (back) edgeBacks.set(id, back);
+    else edgeBacks.delete(id);
+  };
 
   function commit(map: Map<number, Effect>, pending: number[]) {
     for (const i of pending) map.get(i)?.cleanup?.();
@@ -338,6 +349,8 @@ function setup({
     dispatched,
     dispatchPrevention,
     guardChanges,
+    criticalChanges,
+    edgeBack: () => [...edgeBacks.values()].at(-1)?.(),
     rootAction,
     button,
     flush,
@@ -754,4 +767,74 @@ test("home RESET waits for dirty drawer confirmation and preserves the exact hom
   env.choose("Discard");
   assert.equal(env.dispatched[0], action);
   env.unmount();
+});
+
+test("main-content sidebar and deep-link removals share dirty Cancel/Discard semantics", () => {
+  for (const type of ["RESET", "NAVIGATE", "REPLACE", "POP_TO"]) {
+    const env = setup({
+      inSheet: false,
+      active: true,
+      discardOnClose: { title: "Discard changes?", message: "Unsaved editor" },
+    });
+    const action = { ...env.rootAction, type };
+    assert.equal(env.attempt(action), true);
+    assert.equal(env.alerts.at(-1)?.title, "Discard changes?");
+    env.attempt(action);
+    assert.equal(
+      env.alerts.length,
+      1,
+      "one confirmation owns the pending leave intent",
+    );
+    env.choose("Keep editing");
+    assert.equal(env.dispatched.length, 0);
+    assert.equal(env.blocked(), true);
+    env.attempt(action);
+    env.choose("Discard");
+    assert.equal(env.dispatched.at(-1), action);
+    assert.equal(env.counts().localBacks, 0);
+    env.unmount();
+  }
+});
+
+test("dirty pages may reveal navigation but still defer external taps; critical writes block both", () => {
+  const env = setup({
+    inSheet: false,
+    active: true,
+    discardOnClose: { title: "Discard?", message: "Draft" },
+  });
+  assert.equal(env.guardChanges.at(-1), true);
+  assert.equal(env.criticalChanges.at(-1), false);
+  env.edgeBack();
+  assert.equal(
+    env.counts().localBacks,
+    1,
+    "edge Back uses the same editor callback as header and Android Back",
+  );
+  env.button("left")?.props.onPress();
+  env.hardwareBack();
+  assert.equal(env.counts().localBacks, 3);
+  env.update({ disabled: true });
+  assert.equal(env.criticalChanges.at(-1), true);
+  env.edgeBack();
+  assert.equal(env.counts().localBacks, 3);
+  env.focus(false);
+  env.edgeBack();
+  assert.equal(env.counts().localBacks, 3);
+  env.unmount();
+});
+
+test("main-content discard callbacks lose authority on sign-out, blur and unmount", () => {
+  for (const boundary of ["signout", "blur", "unmount"]) {
+    const env = setup({
+      inSheet: false,
+      active: true,
+      discardOnClose: { title: "Discard?", message: "Draft" },
+    });
+    env.attempt(env.rootAction);
+    if (boundary === "signout") env.setSessionActive(false);
+    else if (boundary === "blur") env.focus(false);
+    else env.unmount();
+    env.choose("Discard");
+    assert.equal(env.dispatched.length, 0, boundary);
+  }
 });

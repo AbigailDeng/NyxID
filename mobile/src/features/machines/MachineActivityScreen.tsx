@@ -2,7 +2,7 @@ import { useState } from "react";
 import { View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import type { WorkspaceSheetParamList } from "../../app/navigationTypes";
+import type { WorkspaceContentParamList } from "../../app/navigationTypes";
 import {
   ActionButton,
   Card,
@@ -18,7 +18,7 @@ import { machineStyles } from "./MachinePresentation";
 
 export function MachineActivityScreen({
   route,
-}: NativeStackScreenProps<WorkspaceSheetParamList, "MachineActivity">) {
+}: NativeStackScreenProps<WorkspaceContentParamList, "MachineActivity">) {
   const runtime = useMachineRuntime();
   const [filter, setFilter] = useState("");
   const [before, setBefore] = useState<string>();

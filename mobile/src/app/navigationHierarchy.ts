@@ -1,21 +1,30 @@
-import { CommonActions, StackActions } from "@react-navigation/routers";
-import type { NavigationState, PartialState } from "@react-navigation/routers";
+import {
+  CommonActions,
+  StackActions,
+  type NavigationState,
+  type PartialState,
+} from "@react-navigation/routers";
 import type {
+  WorkspaceContentParamList,
   WorkspaceParamList,
   WorkspaceSheetParamList,
 } from "./navigationTypes";
+import {
+  navigationSnapshot,
+  stackStateWithRoutes,
+  type WorkspaceState,
+} from "./navigationState";
+import {
+  workspaceContentRouteNames,
+  workspaceSettingsRouteNames,
+} from "./navigationTypes";
+import { assistantHomeParams } from "./assistantChatParams";
 
 export const workspaceRouterOptions = {
   initialRouteName: "Assistant",
-  backBehavior: "none",
 } as const;
 
-export const workspacePanelRouterOptions = {
-  initialRouteName: "Agents",
-  backBehavior: "none",
-} as const;
-
-/** Present or reuse one drawer; nested details remain inside its own stack. */
+/** Settings is the only navigation sheet; account/quick-action pages stay inside it. */
 export function openWorkspaceSheetAction<
   Name extends keyof WorkspaceSheetParamList,
 >(name: Name, params?: WorkspaceSheetParamList[Name]) {
@@ -30,13 +39,27 @@ export function openWorkspaceSheetAction<
   };
 }
 
+/** Main pages always resolve inside the slab, including calls from account pages. */
+export function openWorkspacePageAction<
+  Name extends keyof WorkspaceContentParamList,
+>(name: Name, params?: WorkspaceContentParamList[Name]) {
+  return {
+    type: "NAVIGATE" as const,
+    target: undefined as string | undefined,
+    payload: {
+      name: "Workspace",
+      params: { screen: name, params, initial: false, merge: true, pop: true },
+      merge: true,
+      pop: true,
+    },
+  };
+}
+
 export type WorkspaceSharedEntryName =
   | "DeviceLogin"
   | "AgentKeyLogin"
   | "TermsOfService"
   | "PrivacyPolicy";
-
-/** Move a signed-in external entry into the existing drawer without losing edits. */
 export function workspaceSharedEntryNavigationAction<
   Name extends WorkspaceSharedEntryName,
 >(
@@ -50,7 +73,7 @@ export function workspaceSharedEntryNavigationAction<
   const existing = state.routes.find(
     (route) => route.name === "WorkspaceSheet",
   );
-  if (!existing) {
+  if (!existing)
     return {
       ...StackActions.replace("WorkspaceSheet", {
         screen: name,
@@ -60,8 +83,6 @@ export function workspaceSharedEntryNavigationAction<
       source: entry.key,
       target: state.key,
     };
-  }
-
   const pending = existing.params as
     | {
         screen?: string;
@@ -69,56 +90,43 @@ export function workspaceSharedEntryNavigationAction<
         state?: NavigationState | PartialState<NavigationState>;
       }
     | undefined;
-  const previous = existing.state ?? pending?.state;
-  const sheetRoutes =
-    previous?.routes ??
-    (pending?.screen === "Pages"
-      ? [{ name: "Pages", params: pending.params }]
-      : [
-          { name: "Pages" },
-          ...(pending?.screen
-            ? [{ name: pending.screen, params: pending.params }]
-            : []),
-        ]);
+  const previous = existing.state
+    ? navigationSnapshot(existing.state)
+    : pending?.state
+      ? navigationSnapshot(pending.state)
+      : undefined;
+  const sheetRoutes = previous?.routes ?? [
+    { name: "AccountSettings" },
+    ...(pending?.screen && pending.screen !== "AccountSettings"
+      ? [{ name: pending.screen, params: pending.params }]
+      : []),
+  ];
   const sheet = {
     ...existing,
-    // Existing nested navigation instructions have already been consumed.
     params: undefined,
-    state: {
-      ...previous,
-      index: sheetRoutes.length,
-      routes: [...sheetRoutes, { ...entry, name, params }],
-    },
+    state: stackStateWithRoutes(
+      previous,
+      [...sheetRoutes, { key: entry.key, name, params }],
+      workspaceSettingsRouteNames,
+    ),
   };
   const routes = state.routes
     .filter((route) => route !== entry)
     .map((route) => (route === existing ? sheet : route));
   return {
-    ...CommonActions.reset({
-      ...state,
-      index: routes.indexOf(sheet),
-      routes,
-    }),
+    ...CommonActions.reset({ ...state, index: routes.indexOf(sheet), routes }),
     target: state.key,
   };
 }
 
-export function isWorkspaceChatRoute(route: { name: string }) {
-  return (
-    route.name === "Workspace" ||
-    route.name === "AssistantContext" ||
-    route.name === "GroupChat"
-  );
-}
-
-/** Close the entire management drawer without changing the calling chat. */
+/** The exact mounted content route remains beneath Settings. */
 export function dismissWorkspaceSheetAction(
   state: NavigationState | undefined,
 ) {
   if (!state?.routes.some((route) => route.name === "Workspace")) return null;
-  const routes = state.routes
-    .slice(0, state.index + 1)
-    .filter(isWorkspaceChatRoute);
+  const routes = state.routes.filter(
+    (route) => route.name !== "WorkspaceSheet",
+  );
   if (routes.length === state.routes.length) return null;
   return {
     ...CommonActions.reset({ ...state, index: routes.length - 1, routes }),
@@ -126,128 +134,128 @@ export function dismissWorkspaceSheetAction(
   };
 }
 
-/** Drawer destinations overlay chat; Chats simply dismisses that overlay. */
+/** Sidebar destinations replace obsolete content history, retaining its chat key. */
 export function workspaceNavigateAction<
-  Name extends Exclude<keyof WorkspaceParamList, "Assistant">,
+  Name extends keyof WorkspaceContentParamList | "AccountSettings",
 >(
   name: Name,
-  params?: WorkspaceParamList[Name],
-  state?: NavigationState,
-): ReturnType<typeof openWorkspaceSheetAction<"Pages">>;
-export function workspaceNavigateAction(
-  name: "Assistant",
-  params?: WorkspaceParamList["Assistant"],
-  state?: NavigationState,
-): ReturnType<typeof dismissWorkspaceSheetAction>;
-export function workspaceNavigateAction<Name extends keyof WorkspaceParamList>(
-  name: Name,
-  params?: WorkspaceParamList[Name],
-  state?: NavigationState,
-):
-  | ReturnType<typeof openWorkspaceSheetAction<"Pages">>
-  | ReturnType<typeof dismissWorkspaceSheetAction>;
-export function workspaceNavigateAction<Name extends keyof WorkspaceParamList>(
-  name: Name,
-  params?: WorkspaceParamList[Name],
+  params?: Name extends keyof WorkspaceContentParamList
+    ? WorkspaceContentParamList[Name]
+    : WorkspaceParamList["AccountSettings"],
   state?: NavigationState,
 ) {
-  if (name === "Assistant") return dismissWorkspaceSheetAction(state);
-  return openWorkspaceSheetAction("Pages", {
-    screen: name,
-    params,
-    initial: false,
-    merge: true,
-  } as WorkspaceSheetParamList["Pages"]);
+  if (name === "AccountSettings")
+    return openWorkspaceSheetAction(
+      "AccountSettings",
+      params as WorkspaceParamList["AccountSettings"],
+    );
+  if (!state) return openWorkspacePageAction(name, params as never);
+  const workspace = state.routes.find((route) => route.name === "Workspace");
+  if (!workspace) return openWorkspacePageAction(name, params as never);
+  const content = workspace.state
+    ? navigationSnapshot(workspace.state)
+    : undefined;
+  const chat = content?.routes.find((route) => route.name === "Assistant") ?? {
+    name: "Assistant",
+    params: assistantHomeParams(),
+  };
+  const previous = content?.routes.find((route) => route.name === name);
+  const routes =
+    name === "Assistant"
+      ? [{ ...chat, params }]
+      : [chat, { ...previous, name, params }];
+  return {
+    ...CommonActions.reset({
+      ...state,
+      index: 0,
+      routes: [
+        {
+          ...workspace,
+          params: undefined,
+          state: stackStateWithRoutes(
+            content,
+            routes,
+            workspaceContentRouteNames,
+          ),
+        },
+      ],
+    }),
+    target: state.key,
+  };
 }
 
-/** Keep notification taps pending until auth and critical writes allow them. */
 export function challengeNavigationAction(
   state: NavigationState | undefined,
   challengeId: string,
   blocked = false,
 ) {
-  if (
-    blocked ||
-    !state?.routeNames.includes("Workspace") ||
-    !state.routeNames.includes("WorkspaceSheet")
-  )
-    return null;
-  const action = openWorkspaceSheetAction("Pages", {
-    screen: "Activity",
-    params: { challengeId },
-    initial: false,
-    merge: true,
-  });
-  if (!state.routes.some((route) => route.name === "Workspace")) {
-    const routes = [
-      { name: "Workspace" },
-      ...state.routes.filter(isWorkspaceChatRoute),
-    ];
-    return {
-      ...CommonActions.reset({
-        ...state,
-        index: routes.length,
-        routes: [
-          ...routes,
-          { name: "WorkspaceSheet", params: action.payload.params },
-        ],
-      }),
-      target: state.key,
-    };
-  }
-  return { ...action, target: state.key };
+  if (blocked || !state?.routeNames.includes("Workspace")) return null;
+  return workspaceNavigateAction("Activity", { challengeId }, state);
 }
 
-/** Cold management links always have a chat beneath the dismissible drawer. */
+const contentParent = (name: string) =>
+  name.startsWith("Machine")
+    ? "Machines"
+    : name.startsWith("Automation")
+      ? "Automations"
+      : name === "ActivityDetail"
+        ? "Activity"
+        : name === "ServiceSetup"
+          ? "Plugins"
+          : [
+                "AgentDetail",
+                "AgentCreate",
+                "AgentMachines",
+                "AgentSkills",
+                "GroupEditor",
+              ].includes(name)
+            ? "Agents"
+            : undefined;
+
+/** Cold links get Home and a module root; Settings keeps that slab underneath. */
 export function withWorkspaceFallback(
-  state: PartialState<NavigationState> | undefined,
-): PartialState<NavigationState> | undefined;
-export function withWorkspaceFallback(
-  state: NavigationState,
-): NavigationState | PartialState<NavigationState>;
-export function withWorkspaceFallback(
-  state: NavigationState | PartialState<NavigationState> | undefined,
-) {
+  state: WorkspaceState | undefined,
+): PartialState<NavigationState> | undefined {
   if (!state) return state;
-  let changed = false;
-  const routes = state.routes.map((route) => {
-    if (route.name === "Workspace" && !route.state) {
-      changed = true;
-      return { ...route, state: { routes: [{ name: "Assistant" }] } };
-    }
-    if (route.name !== "WorkspaceSheet" || !route.state) return route;
-    const sheet = route.state;
-    const detail = sheet.routes[sheet.index ?? sheet.routes.length - 1];
-    if (!detail || detail.name === "Pages") return route;
-    const panel = detail.name.startsWith("Machine")
-      ? "Machines"
-      : detail.name.startsWith("Automation")
-        ? "Automations"
-        : detail.name === "AccountSecurity" || detail.name === "UsageCredits"
-          ? "AccountSettings"
-          : detail.name === "ActivityDetail"
-            ? "Activity"
-            : detail.name === "ServiceSetup"
-              ? "Plugins"
-              : "Agents";
-    const sheetRoutes = sheet.routes.map((page) => {
-      if (page.name !== "Pages" || page.state) return page;
-      changed = true;
+  const snapshot = navigationSnapshot(state);
+  let routes = snapshot.routes.map((route) => {
+    if (route.name === "Workspace") {
+      let pages = route.state?.routes ?? [
+        { name: "Assistant", params: assistantHomeParams() },
+      ];
+      const active = pages[route.state?.index ?? pages.length - 1];
+      const parent = active ? contentParent(active.name) : undefined;
+      if (parent && !pages.some((page) => page.name === parent))
+        pages = [
+          ...pages.slice(0, -1),
+          {
+            name: parent,
+            ...(active?.name === "GroupEditor"
+              ? { params: { tab: "groups" } }
+              : {}),
+          },
+          pages.at(-1)!,
+        ];
+      if (!pages.some((page) => page.name === "Assistant"))
+        pages = [
+          { name: "Assistant", params: assistantHomeParams() },
+          ...pages,
+        ];
       return {
-        ...page,
-        state: {
-          routes: [
-            {
-              name: panel,
-              ...(detail.name === "GroupEditor"
-                ? { params: { tab: "groups" } }
-                : {}),
-            },
-          ],
-        },
+        ...route,
+        state: { ...route.state, index: pages.length - 1, routes: pages },
       };
-    });
-    return { ...route, state: { ...sheet, routes: sheetRoutes } };
+    }
+    if (route.name === "WorkspaceSheet" && route.state) {
+      let pages = route.state.routes;
+      if (!pages.some((page) => page.name === "AccountSettings"))
+        pages = [{ name: "AccountSettings" }, ...pages];
+      return {
+        ...route,
+        state: { ...route.state, index: pages.length - 1, routes: pages },
+      };
+    }
+    return route;
   });
   if (
     !routes.some((route) => route.name === "Workspace") &&
@@ -255,16 +263,33 @@ export function withWorkspaceFallback(
       (route) =>
         route.name === "WorkspaceSheet" || route.name === "MachineDesktop",
     )
-  ) {
-    return {
-      ...state,
-      stale: true as const,
-      index: (state.index ?? routes.length - 1) + 1,
-      routes: [
-        { name: "Workspace", state: { routes: [{ name: "Assistant" }] } },
-        ...routes,
-      ],
-    };
-  }
-  return changed ? { ...state, routes } : state;
+  )
+    routes = [
+      {
+        name: "Workspace",
+        state: {
+          routes: [{ name: "Assistant", params: assistantHomeParams() }],
+        },
+      },
+      ...routes,
+    ];
+  return { ...snapshot, index: routes.length - 1, routes };
+}
+
+/** Native nested pages own Back swipes; root pages expose the base sidebar. */
+export function isWorkspaceSidebarRoot(name: string | undefined) {
+  return (
+    !!name &&
+    [
+      "Assistant",
+      "Automations",
+      "Machines",
+      "Agents",
+      "Plugins",
+      "Services",
+      "Activity",
+      "WorkspaceSearch",
+      "WorkspaceRecents",
+    ].includes(name)
+  );
 }

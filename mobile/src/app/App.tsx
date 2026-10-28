@@ -62,11 +62,14 @@ import {
   extractChallengeIdFromNotificationResponse,
 } from "./linking";
 import {
+  isWorkspaceSidebarRoot,
   challengeNavigationAction,
-  openWorkspaceSheetAction,
   workspaceNavigateAction,
 } from "./navigationHierarchy";
-import type { WorkspaceNavigationGuardChange } from "./WorkspaceHeader";
+import type {
+  WorkspaceNavigationGuardChange,
+  WorkspaceEdgeBackChange,
+} from "./WorkspaceHeader";
 import {
   consumePendingPushSyncSignal,
   initializeNotificationRuntime,
@@ -159,6 +162,7 @@ export default function App() {
   );
   const pendingChallengeFromTapRef = useRef<string | null>(null);
   const navigationGuardsRef = useRef(new Set<symbol>());
+  const criticalNavigationGuards = useRef(new Set<symbol>());
   const [navigationGuardRevision, setNavigationGuardRevision] = useState(0);
   const lastAppStateRef = useRef(AppState.currentState);
   const [pushToast, setPushToast] = useState<ToastState | null>(null);
@@ -181,10 +185,11 @@ export default function App() {
   }, [navigationRef]);
 
   const onNavigationGuardChange = useCallback<WorkspaceNavigationGuardChange>(
-    (id, blocked) => {
+    (id, blocked, critical = false) => {
       const guards = navigationGuardsRef.current;
+      if (blocked && critical) criticalNavigationGuards.current.add(id);
+      else criticalNavigationGuards.current.delete(id);
       if (blocked) {
-        if (guards.has(id)) return;
         guards.add(id);
       } else if (!guards.delete(id)) {
         return;
@@ -447,7 +452,9 @@ export default function App() {
                         flushPendingChallengeTapNavigation
                       }
                       onNavigationGuardChange={onNavigationGuardChange}
-                      navigationBlocked={navigationGuardsRef.current.size > 0}
+                      navigationBlocked={
+                        criticalNavigationGuards.current.size > 0
+                      }
                       pushToast={pushToast}
                     />
                   </AuthSessionProvider>
@@ -483,6 +490,13 @@ function ThemedAppShell({
   const { mode } = useTheme();
   const insets = useSafeAreaInsets();
   const { isAuthenticated } = useAuthSession();
+  const edgeBacks = useRef(new Map<symbol, () => void>());
+  const [edgeBackRevision, setEdgeBackRevision] = useState(0);
+  const onEdgeBackChange = useCallback<WorkspaceEdgeBackChange>((id, back) => {
+    if (back) edgeBacks.current.set(id, back);
+    else edgeBacks.current.delete(id);
+    setEdgeBackRevision((value) => value + 1);
+  }, []);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerPresented, setDrawerPresented] = useState(false);
   const sidebarFocus = useRef<View>(null);
@@ -579,7 +593,13 @@ function ThemedAppShell({
       gestureEnabled={
         !navigationBlocked &&
         !accessibility.sheetOpen &&
-        currentRouteName === "Assistant"
+        (Boolean(edgeBackRevision && edgeBacks.current.size) ||
+          isWorkspaceSidebarRoot(currentRouteName))
+      }
+      onEdgeBack={
+        edgeBacks.current.size
+          ? () => [...edgeBacks.current.values()].at(-1)?.()
+          : undefined
       }
       onOpenChange={changeSidebar}
       onRevealStart={revealSidebar}
@@ -596,13 +616,25 @@ function ThemedAppShell({
             onCreateAgent={() => {
               closeDrawerThen(() => {
                 if (!navigationRef.isReady()) return;
-                navigationRef.dispatch(openWorkspaceSheetAction("AgentCreate"));
+                navigationRef.dispatch(
+                  workspaceNavigateAction(
+                    "AgentCreate",
+                    undefined,
+                    navigationRef.getRootState(),
+                  ),
+                );
               });
             }}
             onCreateGroup={() => {
               closeDrawerThen(() => {
                 if (!navigationRef.isReady()) return;
-                navigationRef.dispatch(openWorkspaceSheetAction("GroupEditor"));
+                navigationRef.dispatch(
+                  workspaceNavigateAction(
+                    "GroupEditor",
+                    undefined,
+                    navigationRef.getRootState(),
+                  ),
+                );
               });
             }}
             onNavigate={navigateFromDrawer}
@@ -610,10 +642,13 @@ function ThemedAppShell({
             onBrowse={(name) => {
               closeDrawerThen(() => {
                 if (navigationRef.isReady())
-                  navigationRef.dispatch({
-                    type: "NAVIGATE",
-                    payload: { name },
-                  });
+                  navigationRef.dispatch(
+                    workspaceNavigateAction(
+                      name,
+                      undefined,
+                      navigationRef.getRootState(),
+                    ),
+                  );
               });
             }}
           />
@@ -646,6 +681,7 @@ function ThemedAppShell({
             <AppNavigator
               onOpenMenu={() => changeSidebar(true)}
               onNavigationGuardChange={onNavigationGuardChange}
+              onEdgeBackChange={onEdgeBackChange}
             />
           </WorkspaceAccessibilityContext.Provider>
         </NavigationContainer>

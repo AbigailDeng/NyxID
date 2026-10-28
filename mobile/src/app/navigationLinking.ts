@@ -19,42 +19,39 @@ export const navigationLinkingConfig: NonNullable<
     Auth: "auth",
     Workspace: {
       initialRouteName: "Assistant",
-      screens: { Assistant: { path: "chat", parse: assistantParams } },
-    },
-    WorkspaceSheet: {
-      initialRouteName: "Pages",
       screens: {
-        Pages: {
-          screens: {
-            Automations: {
-              path: "automations",
-              alias: ["assistant/automations"],
-              parse: { agentId: String, setup: String },
-            },
-            Agents: {
-              path: "agents",
-              parse: {
-                tab: (value: string) =>
-                  value === "groups" ? "groups" : "agents",
-              },
-            },
-            Plugins: {
-              path: "plugins",
-              parse: { tab: String, agentId: String },
-            },
-            Machines: {
-              path: "assistant/machines",
-              parse: {
-                machine: String,
-                tab: (value: string) =>
-                  value === "logins" ? "logins" : undefined,
-              },
-            },
-            Services: "services",
-            Activity: { path: "activity", parse: { challengeId: String } },
-            AccountSettings: "account",
+        Assistant: { path: "chat", parse: assistantParams },
+        AssistantContext: {
+          path: "chat/:conversationId",
+          parse: assistantParams,
+        },
+        GroupChat: { path: "groups/:groupId", parse: { groupId: String } },
+        WorkspaceSearch: "search",
+        WorkspaceRecents: "recents",
+        Automations: {
+          path: "automations",
+          alias: ["assistant/automations"],
+          parse: { agentId: String, setup: String },
+        },
+        Agents: {
+          path: "agents",
+          parse: {
+            tab: (value: string) => (value === "groups" ? "groups" : "agents"),
           },
         },
+        Plugins: {
+          path: "plugins",
+          parse: { tab: String, agentId: String },
+        },
+        Machines: {
+          path: "assistant/machines",
+          parse: {
+            machine: String,
+            tab: (value: string) => (value === "logins" ? "logins" : undefined),
+          },
+        },
+        Services: "services",
+        Activity: { path: "activity", parse: { challengeId: String } },
         AgentDetail: { path: "agents/:agentId", parse: { agentId: String } },
         GroupEditor: {
           path: "groups/edit/:groupId?",
@@ -67,6 +64,12 @@ export const navigationLinkingConfig: NonNullable<
         },
         AutomationRuns: { path: "automations/:id/runs", parse: { id: String } },
         AutomationPreferences: "automations/preferences",
+      },
+    },
+    WorkspaceSheet: {
+      initialRouteName: "AccountSettings",
+      screens: {
+        AccountSettings: "account",
         AccountSecurity: "account/security",
         UsageCredits: {
           path: "account/usage",
@@ -78,7 +81,7 @@ export const navigationLinkingConfig: NonNullable<
         },
       },
     },
-    AssistantContext: { path: "chat/:conversationId", parse: assistantParams },
+
     MachineDesktop: {
       path: "assistant/machines/:nodeId/desktop",
       parse: {
@@ -88,7 +91,7 @@ export const navigationLinkingConfig: NonNullable<
         display: String,
       },
     },
-    GroupChat: { path: "groups/:groupId", parse: { groupId: String } },
+
     DeviceLogin: { path: "login/device", parse: { user_code: String } },
     AgentKeyLogin: { path: "login/agent-key", parse: { user_code: String } },
     TermsOfService: "terms",

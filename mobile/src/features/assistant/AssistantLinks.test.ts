@@ -487,7 +487,7 @@ test("real link host routes account panels, preserves channel URL, retains the t
   open(`${origin}/assistant?panel=settings&panelTab=security`);
   assert.equal(actions.at(-1).payload.params.screen, "AccountSecurity");
   open(`${origin}/assistant?panel=settings&panelTab=display`);
-  assert.equal(actions.at(-1).payload.params.params.params.section, "display");
+  assert.equal(actions.at(-1).payload.params.params.section, "display");
   const channel = `${origin}/channel-bots/connect/telegram?label=Release%20crew&target_org_id=org&x=kept`;
   open(channel);
   nodes(h.value())

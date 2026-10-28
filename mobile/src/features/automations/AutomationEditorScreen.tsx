@@ -4,7 +4,7 @@ import { Alert, Switch, View } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
-import type { WorkspaceSheetParamList } from "../../app/navigationTypes";
+import type { WorkspaceContentParamList } from "../../app/navigationTypes";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import {
   ActionButton,
@@ -48,7 +48,7 @@ import {
 import { useTheme } from "../../theme/ThemeContext";
 
 type Props = NativeStackScreenProps<
-  WorkspaceSheetParamList,
+  WorkspaceContentParamList,
   "AutomationEditor"
 >;
 type SecretValue = { label: string; value: string };

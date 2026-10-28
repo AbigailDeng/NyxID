@@ -4,7 +4,8 @@ import {
   type PartialState,
 } from "@react-navigation/routers";
 import type { AssistantParams } from "./navigationTypes";
-import { isWorkspaceChatRoute } from "./navigationHierarchy";
+import { navigationSnapshot, stackStateWithRoutes } from "./navigationState";
+import { workspaceContentRouteNames } from "./navigationTypes";
 import {
   assistantHomeParams,
   newAssistantChatParams,
@@ -15,49 +16,35 @@ export type WorkspaceChatTarget =
   | { kind: "agent"; agentId?: string; conversationId?: string }
   | { kind: "group"; groupId: string };
 
-type NavigationRoute = NavigationState["routes"][number];
-
-/** Retain the mounted chat tab/key while selecting an explicit drawer target. */
-function selectWorkspaceChat(
-  workspace: NavigationRoute,
-  params: AssistantParams,
-): NavigationRoute {
-  const previous = workspace.state;
-  const index =
-    previous?.routes.findIndex((route) => route.name === "Assistant") ?? -1;
-  let nested: NavigationState | PartialState<NavigationState>;
-  if (previous?.stale === false && index >= 0) {
-    const selected = previous.routes[index]!;
-    nested = {
-      ...previous,
-      index,
-      routes: previous.routes.map((route, position) =>
-        position === index ? { ...route, params } : route,
-      ),
-      ...(previous.type === "tab"
-        ? { history: [{ type: "route", key: selected.key }] }
-        : {}),
-    };
-  } else {
-    nested = {
-      stale: true,
-      index: 0,
-      routes: [{ name: "Assistant", params }],
-    };
-  }
-  return { ...workspace, params: undefined, state: nested };
-}
-
-/** Drawer chat selection dismisses management without leaving it under chat. */
+type State = PartialState<NavigationState>;
+/** Select an explicit chat/Home without replacing the mounted Assistant key. */
 export function workspaceChatNavigationAction(
   state: NavigationState | undefined,
   target: WorkspaceChatTarget,
 ) {
   const workspace = state?.routes.find((route) => route.name === "Workspace");
   if (!state || !workspace) return null;
-
-  if (target.kind === "agent" || target.kind === "home") {
-    const params: AssistantParams =
+  const previous = workspace.state
+    ? navigationSnapshot(workspace.state)
+    : undefined;
+  const chat = previous?.routes.find((route) => route.name === "Assistant") ?? {
+    name: "Assistant",
+    params: assistantHomeParams(),
+  };
+  let routes: State["routes"];
+  if (target.kind === "group") {
+    const prior = previous?.routes.find(
+      (route) =>
+        route.name === "GroupChat" &&
+        (route.params as { groupId?: string } | undefined)?.groupId ===
+          target.groupId,
+    );
+    routes = [
+      chat,
+      { ...prior, name: "GroupChat", params: { groupId: target.groupId } },
+    ];
+  } else {
+    const params =
       target.kind === "home"
         ? assistantHomeParams()
         : target.conversationId
@@ -66,39 +53,25 @@ export function workspaceChatNavigationAction(
               agentId: target.agentId,
               conversationId: target.conversationId,
               acknowledgementId: undefined,
-              draft: !target.conversationId,
+              draft: false,
               openLatest: false,
             }
           : newAssistantChatParams(target.agentId);
-    return {
-      ...CommonActions.reset({
-        ...state,
-        index: 0,
-        routes: [selectWorkspaceChat(workspace, params)],
-      }),
-      target: state.key,
-    };
+    routes = [{ ...chat, params }];
   }
-
-  if (!state.routeNames.includes("GroupChat")) return null;
-  const previousGroup = [...state.routes]
-    .reverse()
-    .find(
-      (route) =>
-        route.name === "GroupChat" &&
-        (route.params as { groupId?: unknown } | undefined)?.groupId ===
-          target.groupId,
-    );
   return {
     ...CommonActions.reset({
       ...state,
-      index: 1,
+      index: 0,
       routes: [
-        workspace,
         {
-          ...previousGroup,
-          name: "GroupChat",
-          params: { groupId: target.groupId },
+          ...workspace,
+          params: undefined,
+          state: stackStateWithRoutes(
+            previous,
+            routes,
+            workspaceContentRouteNames,
+          ),
         },
       ],
     }),
@@ -106,54 +79,71 @@ export function workspaceChatNavigationAction(
   };
 }
 
-/** Open from a management flow without replacing the calling chat or its draft. */
+/** A contextual chat pushes above its actual caller, retaining every draft/editor. */
 export function workspaceContextChatNavigationAction(
   state: NavigationState | undefined,
   params: AssistantParams,
 ) {
-  if (
-    !state?.routes.some((route) => route.name === "Workspace") ||
-    !state.routeNames.includes("AssistantContext")
-  )
-    return null;
-  const chats = state.routes
-    .slice(0, state.index + 1)
-    .filter(isWorkspaceChatRoute);
+  if (!state) return null;
+  const workspace = state.routes.find((route) => route.name === "Workspace");
+  const candidate = workspace
+    ? workspace.state
+    : state.routeNames.includes("Assistant")
+      ? state
+      : undefined;
+  const content = candidate ? navigationSnapshot(candidate) : undefined;
+  if (!content) return null;
   const existing =
-    !params.draft && params.conversationId
-      ? chats.findIndex((route) => {
-          const previous = route.params as AssistantParams | undefined;
-          return (
-            route.name === "AssistantContext" &&
-            previous?.conversationId === params.conversationId &&
-            previous?.agentId === params.agentId
-          );
-        })
+    params.conversationId && !params.draft
+      ? content.routes.findLastIndex(
+          (route) =>
+            (route.name === "Assistant" || route.name === "AssistantContext") &&
+            (route.params as AssistantParams | undefined)?.conversationId ===
+              params.conversationId,
+        )
       : -1;
   const routes =
-    existing >= 0
-      ? chats
+    existing !== -1
+      ? content.routes
           .slice(0, existing + 1)
           .map((route, index) =>
             index === existing ? { ...route, params } : route,
           )
-      : [...chats, { name: "AssistantContext", params }];
+      : [
+          ...content.routes.slice(
+            0,
+            (content.index ?? content.routes.length - 1) + 1,
+          ),
+          { name: "AssistantContext", params },
+        ];
+  const nested = stackStateWithRoutes(
+    content,
+    routes,
+    workspaceContentRouteNames,
+  );
   return {
-    ...CommonActions.reset({ ...state, index: routes.length - 1, routes }),
+    ...CommonActions.reset(
+      workspace
+        ? {
+            ...state,
+            index: 0,
+            routes: [{ ...workspace, params: undefined, state: nested }],
+          }
+        : nested,
+    ),
     target: state.key,
   };
 }
 
-/** Map the deepest active route to the matching drawer chat selection. */
 export function activeWorkspaceChatTarget(
   route: { name: string; params?: object } | undefined,
 ): WorkspaceChatTarget | undefined {
   if (!route) return undefined;
   const params = route.params as Record<string, unknown> | undefined;
-  const stringParam = (name: string) => {
-    const value = params?.[name];
-    return typeof value === "string" && value.length ? value : undefined;
-  };
+  const stringParam = (name: string) =>
+    typeof params?.[name] === "string" && params[name].length
+      ? (params[name] as string)
+      : undefined;
   if (route.name === "Assistant" || route.name === "AssistantContext") {
     if (
       route.name === "Assistant" &&

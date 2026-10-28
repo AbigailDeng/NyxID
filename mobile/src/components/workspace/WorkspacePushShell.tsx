@@ -31,6 +31,7 @@ type Props = {
   gestureEnabled: boolean;
   onOpenChange: (open: boolean) => void;
   onRevealStart: () => void;
+  onEdgeBack?: () => void;
   onDismiss: () => void;
   initialFocusTarget: () => number | null;
   sidebar: ReactNode;
@@ -43,6 +44,7 @@ export function WorkspacePushShell(props: Props) {
   const { width } = useWindowDimensions();
   const openWidth = sidebarPushWidth(width);
   const visible = props.visible;
+  const edgeBack = Boolean(props.onEdgeBack) && !visible;
   const reduced = useReducedMotion();
   const offset = useSharedValue(0);
   const dragOrigin = useSharedValue(0);
@@ -119,7 +121,15 @@ export function WorkspacePushShell(props: Props) {
       return;
     generation.current++;
     dragging.current = true;
-    latest.current.onRevealStart();
+    if (!latest.current.onEdgeBack || latest.current.visible)
+      latest.current.onRevealStart();
+  }
+  function finishBack(translation: number, velocity: number) {
+    if (!mounted.current || !dragging.current || !latest.current.enabled)
+      return;
+    dragging.current = false;
+    if (translation > 40 || (translation > 8 && velocity > 500))
+      latest.current.onEdgeBack?.();
   }
   function settle(open: boolean) {
     if (!mounted.current || !latest.current.enabled || !dragging.current)
@@ -154,20 +164,29 @@ export function WorkspacePushShell(props: Props) {
       runOnJS(revealStart)();
     })
     .onUpdate((event) => {
-      if (!reduced)
-        offset.value = clampSidebarOffset(
-          dragOrigin.value + event.translationX,
-          openWidth,
-        );
+      if (!edgeBack) {
+        if (!reduced)
+          offset.value = clampSidebarOffset(
+            dragOrigin.value + event.translationX,
+            openWidth,
+          );
+      }
     })
     .onEnd((event) => {
+      if (edgeBack) {
+        runOnJS(finishBack)(event.translationX, event.velocityX);
+        return;
+      }
       const end = reduced
         ? clampSidebarOffset(dragOrigin.value + event.translationX, openWidth)
         : offset.value;
       runOnJS(settle)(settleSidebarOpen(end, event.velocityX, openWidth));
     })
     .onFinalize((_event, success) => {
-      if (!success) runOnJS(settle)(visible);
+      if (!success) {
+        if (edgeBack) runOnJS(finishBack)(0, 0);
+        else runOnJS(settle)(visible);
+      }
     });
   const slabStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: offset.value }],

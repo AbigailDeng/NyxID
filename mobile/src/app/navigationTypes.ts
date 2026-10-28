@@ -4,10 +4,6 @@ import type {
   NavigatorScreenParams,
 } from "@react-navigation/native";
 import type {
-  BottomTabNavigationProp,
-  BottomTabScreenProps,
-} from "@react-navigation/bottom-tabs";
-import type {
   NativeStackNavigationProp,
   NativeStackScreenProps,
 } from "@react-navigation/native-stack";
@@ -25,7 +21,6 @@ export type AssistantParams = {
   openLatest?: boolean;
 };
 
-/** Convenience union for existing workspace consumers; only Assistant is a chat. */
 export type WorkspaceParamList = {
   Assistant: AssistantParams | undefined;
   Automations: { agentId?: string; setup?: string } | undefined;
@@ -39,9 +34,6 @@ export type WorkspaceParamList = {
     | undefined;
 };
 
-export type WorkspaceChatParamList = Pick<WorkspaceParamList, "Assistant">;
-export type WorkspacePanelParamList = Omit<WorkspaceParamList, "Assistant">;
-
 type SharedEntryParamList = {
   TermsOfService: undefined;
   PrivacyPolicy: undefined;
@@ -51,9 +43,15 @@ type SharedEntryParamList = {
     | undefined;
 };
 
-/** All management flows live inside one dismissible drawer above the chat. */
-export type WorkspaceSheetParamList = SharedEntryParamList & {
-  Pages: NavigatorScreenParams<WorkspacePanelParamList>;
+/** Every workspace destination pushes horizontally inside the content slab. */
+export type WorkspaceContentParamList = Omit<
+  WorkspaceParamList,
+  "AccountSettings"
+> & {
+  AssistantContext: AssistantParams | undefined;
+  GroupChat: { groupId: string };
+  WorkspaceSearch: undefined;
+  WorkspaceRecents: undefined;
   AgentCreate: undefined;
   AgentDetail: { agentId: string };
   GroupEditor: { groupId?: string } | undefined;
@@ -69,17 +67,18 @@ export type WorkspaceSheetParamList = SharedEntryParamList & {
   AutomationRuns: { id: string };
   AutomationPreferences: undefined;
   ActivityDetail: { challengeId: string };
+};
+
+/** Only Settings and its account/quick-action pages use the pull-up surface. */
+export type WorkspaceSheetParamList = SharedEntryParamList & {
+  AccountSettings: WorkspaceParamList["AccountSettings"];
   AccountSecurity: undefined;
   UsageCredits: UsageCreditsRouteParams | undefined;
 };
 
 export type RootStackParamList = SharedEntryParamList & {
   Auth: undefined;
-  WorkspaceSearch: undefined;
-  WorkspaceRecents: undefined;
-  Workspace: NavigatorScreenParams<WorkspaceChatParamList> | undefined;
-  AssistantContext: AssistantParams | undefined;
-  GroupChat: { groupId: string };
+  Workspace: NavigatorScreenParams<WorkspaceContentParamList> | undefined;
   MachineDesktop: MachineDesktopRouteParams;
   WorkspaceSheet: NavigatorScreenParams<WorkspaceSheetParamList> | undefined;
 };
@@ -89,28 +88,56 @@ export type SheetScreenProps<Name extends keyof WorkspaceSheetParamList> =
     NativeStackScreenProps<WorkspaceSheetParamList, Name>,
     NativeStackScreenProps<RootStackParamList>
   >;
-
+export type ContentScreenProps<Name extends keyof WorkspaceContentParamList> =
+  CompositeScreenProps<
+    NativeStackScreenProps<WorkspaceContentParamList, Name>,
+    NativeStackScreenProps<RootStackParamList>
+  >;
 export type SheetNavigationProp = CompositeNavigationProp<
   NativeStackNavigationProp<WorkspaceSheetParamList>,
   NativeStackNavigationProp<RootStackParamList>
 >;
-
 export type WorkspaceScreenProps<Name extends keyof WorkspaceParamList> =
-  Name extends keyof WorkspacePanelParamList
-    ? CompositeScreenProps<
-        BottomTabScreenProps<WorkspacePanelParamList, Name>,
-        SheetScreenProps<"Pages">
-      >
-    : CompositeScreenProps<
-        BottomTabScreenProps<
-          WorkspaceChatParamList,
-          Extract<Name, "Assistant">
-        >,
-        NativeStackScreenProps<RootStackParamList>
-      >;
-
-/** Screens shared between chat and drawer may target either parent navigator. */
+  Name extends "AccountSettings"
+    ? SheetScreenProps<"AccountSettings">
+    : ContentScreenProps<Extract<Name, keyof WorkspaceContentParamList>>;
 export type WorkspaceNavigationProp = CompositeNavigationProp<
-  BottomTabNavigationProp<WorkspaceParamList>,
+  NativeStackNavigationProp<WorkspaceContentParamList>,
   SheetNavigationProp
 >;
+
+export const workspaceContentRouteNames: (keyof WorkspaceContentParamList)[] = [
+  "Assistant",
+  "AssistantContext",
+  "GroupChat",
+  "Automations",
+  "Agents",
+  "Plugins",
+  "Services",
+  "Machines",
+  "Activity",
+  "WorkspaceSearch",
+  "WorkspaceRecents",
+  "AgentCreate",
+  "AgentDetail",
+  "GroupEditor",
+  "ServiceSetup",
+  "AgentSkills",
+  "AgentMachines",
+  "MachinePolicy",
+  "MachineActivity",
+  "AutomationDetail",
+  "AutomationEditor",
+  "AutomationRuns",
+  "AutomationPreferences",
+  "ActivityDetail",
+];
+export const workspaceSettingsRouteNames: (keyof WorkspaceSheetParamList)[] = [
+  "AccountSettings",
+  "AccountSecurity",
+  "UsageCredits",
+  "DeviceLogin",
+  "AgentKeyLogin",
+  "TermsOfService",
+  "PrivacyPolicy",
+];

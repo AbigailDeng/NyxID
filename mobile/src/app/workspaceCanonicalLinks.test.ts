@@ -30,7 +30,7 @@ test("web billing panel deep links open the read-only drawer over the addressed 
     openLatest: false,
   });
   const sheet = state.routes[1]!.state!;
-  assert.equal(sheet.routes[0]!.state!.routes[0]!.name, "AccountSettings");
+  assert.equal(sheet.routes[0]!.name, "AccountSettings");
   assert.equal(sheet.routes.at(-1)!.name, "UsageCredits");
   assert.deepEqual(sheet.routes.at(-1)!.params, { period: "7d" });
   const router = hydratedTestRouter(
@@ -57,9 +57,9 @@ test("billing cold entry retains a crew, selected-agent draft or latest thread",
   const crew = parse(`assistant?g=${G}&panel=billing`)!;
   assert.deepEqual(
     crew.routes.map((route) => route.name),
-    ["Workspace", "GroupChat", "WorkspaceSheet"],
+    ["Workspace", "WorkspaceSheet"],
   );
-  assert.deepEqual(crew.routes[1]!.params, { groupId: G });
+  assert.deepEqual(crew.routes[0]!.state!.routes[1]!.params, { groupId: G });
   for (const draft of [true, false]) {
     const state = parse(
       `assistant?agent=agent-one&draft=${draft}&panel=billing`,
@@ -89,8 +89,8 @@ test("internal billing links validate period, preserve owner, and unrelated link
   assert.equal(parse("assistant?panel=settings"), undefined);
   assert.equal(parse("assistant?panel=billing&panel=billing"), undefined);
   assert.equal(
-    parse("assistant/machines?tab=logins")!.routes.at(-1)!.state!.routes[0]!
-      .state!.routes[0]!.name,
+    parse("assistant/machines?tab=logins")!.routes.at(-1)!.state!.routes.at(-1)!
+      .name,
     "Machines",
   );
 });

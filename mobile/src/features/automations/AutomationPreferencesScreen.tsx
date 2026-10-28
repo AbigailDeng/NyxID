@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { WorkspaceSheetParamList } from "../../app/navigationTypes";
+import type { WorkspaceContentParamList } from "../../app/navigationTypes";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import {
   ActionButton,
@@ -28,7 +28,7 @@ import {
 
 export function AutomationPreferencesScreen({
   navigation,
-}: NativeStackScreenProps<WorkspaceSheetParamList, "AutomationPreferences">) {
+}: NativeStackScreenProps<WorkspaceContentParamList, "AutomationPreferences">) {
   const runtime = useAutomationRuntime();
   const settings = useQuery({
     queryKey: AUTOMATION_SETTINGS,
