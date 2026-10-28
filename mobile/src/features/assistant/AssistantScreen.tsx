@@ -1,5 +1,9 @@
 import { WorkspaceChatList } from "../../components/workspace/WorkspaceChatList";
-import { AgentAvatar } from "../../components/AgentAvatar";
+import {
+  ChatHeaderFrame,
+  ChatIdentity,
+  chatThreadInfo,
+} from "./ChatIdentityHeader";
 import { useChatColumn } from "../display/ChatLayoutContext";
 import { MachineToolCard } from "../machines/MachineToolCard";
 import {
@@ -27,13 +31,7 @@ import Markdown, {
   MarkdownIt,
   type RenderRules,
 } from "react-native-markdown-display";
-import {
-  ChevronDown,
-  Check,
-  MoreHorizontal,
-  SquarePen,
-  X,
-} from "lucide-react-native";
+import { Check, MoreHorizontal, SquarePen, X } from "lucide-react-native";
 import type {
   AssistantParams,
   WorkspaceNavigationProp,
@@ -210,6 +208,19 @@ export function AssistantScreen({
   const currentModelLabel =
     assistant.models.find((item) => item.id === currentModelId)?.label ??
     currentModelId.replace(/^nyxagent\//, "");
+  const pendingCount =
+    (assistant.history?.acknowledgements.filter((a) => a.status === "pending")
+      .length ?? 0) + (assistant.history?.approvals.length ?? 0);
+  const headerStatus = pendingCount
+    ? ("Needs you" as const)
+    : conversation?.active_turn || assistant.sending
+      ? ("Running" as const)
+      : undefined;
+  const headerDetail = chatThreadInfo(
+    assistant.conversationId ? conversation?.title : "New chat",
+    currentAgent?.name,
+    assistant.conversationId ? conversation?.last_message_at : undefined,
+  );
   const running = assistant.sending || !!conversation?.active_turn;
   const liveText = sanitizeAssistantMessageContent(
     assistant.live
@@ -520,37 +531,23 @@ export function AssistantScreen({
       </WorkspaceHeaderVisibility>
     );
     return {
+      header: ChatHeaderFrame,
       headerTitle: () => (
         <WorkspaceHeaderVisibility>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Chatting with ${agentName}. Choose agent`}
-            accessibilityState={{ disabled: headerDisabled }}
+          <ChatIdentity
+            name={agentName}
+            detail={headerDetail}
+            status={headerStatus}
+            agent={
+              currentAgent ?? {
+                id: assistant.agentId ?? "nyxbot",
+                name: agentName,
+                kind: isNyxBotChat ? "nyxbot" : "specialist",
+              }
+            }
             disabled={headerDisabled}
             onPress={() => setSheet("agents")}
-            style={styles.headerIdentity}
-          >
-            {currentAgent ? (
-              <AgentAvatar agent={currentAgent} size="lg" />
-            ) : null}
-            <View style={styles.fill}>
-              <View style={styles.headerName}>
-                <Text
-                  numberOfLines={1}
-                  style={[styles.agentName, { color: colors.textPrimary }]}
-                >
-                  {agentName}
-                </Text>
-                <ChevronDown size={14} color={colors.textSecondary} />
-              </View>
-              <Text
-                numberOfLines={1}
-                style={[styles.headerSubtitle, { color: colors.textSecondary }]}
-              >
-                {chatTitle}
-              </Text>
-            </View>
-          </Pressable>
+          />
         </WorkspaceHeaderVisibility>
       ),
       headerRight: actions,
@@ -560,6 +557,10 @@ export function AssistantScreen({
     };
   }, [
     agentName,
+    headerDetail,
+    headerStatus,
+    assistant.agentId,
+    isNyxBotChat,
     currentAgent,
     chatTitle,
     conversation?.title,
@@ -1842,21 +1843,6 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   row: { flexDirection: "row", alignItems: "center", gap: 8 },
   headerActions: { flexDirection: "row", alignItems: "center" },
-  headerIdentity: {
-    maxWidth: 210,
-    flexDirection: "row",
-    gap: 8,
-    minHeight: 44,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  headerName: { flexDirection: "row", alignItems: "center", gap: 4 },
-  agentName: { flexShrink: 1, fontSize: 16, fontFamily: fonts.bodySemi },
-  headerSubtitle: {
-    maxWidth: 170,
-    fontSize: 10,
-    fontFamily: fonts.bodyRegular,
-  },
   actionLabel: { fontSize: 11, fontFamily: fonts.bodySemi },
   currentChatBadge: { flexDirection: "row", alignItems: "center", gap: 4 },
   detailActions: { gap: 14 },

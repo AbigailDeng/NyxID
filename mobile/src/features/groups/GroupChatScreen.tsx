@@ -1,3 +1,4 @@
+import { ChatHeaderFrame, ChatIdentity } from "../assistant/ChatIdentityHeader";
 import { AgentAvatar, AgentAvatarStack } from "../../components/AgentAvatar";
 import type { NativeStackNavigationOptions } from "@react-navigation/native-stack";
 import { useChatColumn } from "../display/ChatLayoutContext";
@@ -141,7 +142,9 @@ function GroupChat({
   const revision = useRef(0);
   const [selection, setSelection] =
     useState<RecipientSelection>(NO_RECIPIENT_EDITS);
-  const [pickingRecipients, setPickingRecipients] = useState(false);
+  const [pickingRecipients, setPickingRecipients] = useState<
+    false | "add" | "header"
+  >(false);
   const [localError, setLocalError] = useState<string>();
   const group = chat.isError ? undefined : chat.data?.group;
   const names = useQuery({
@@ -249,22 +252,27 @@ function GroupChat({
       </WorkspaceHeaderVisibility>
     );
     return {
+      header: ChatHeaderFrame,
       headerTitle: () => (
         <WorkspaceHeaderVisibility>
-          <View style={styles.headerIdentity}>
-            <Text
-              numberOfLines={1}
-              style={[styles.headerTitle, { color: colors.textPrimary }]}
-            >
-              {group?.name ?? "Crew"}
-            </Text>
-            <Text
-              numberOfLines={1}
-              style={[styles.headerSubtitle, { color: colors.textSecondary }]}
-            >
-              {group?.owner?.name ?? "Personal"} · Crew
-            </Text>
-          </View>
+          <ChatIdentity
+            name={group?.name ?? "Crew"}
+            detail={
+              group?.members
+                .map((member) => title(member.id, member.name))
+                .join(", ") || "Crew members"
+            }
+            members={group?.members ?? []}
+            status={
+              chat.data?.pending_actions.length
+                ? "Needs you"
+                : group?.working_agent_ids.length
+                  ? "Running"
+                  : undefined
+            }
+            disabled={!group || chat.sending || uploads.session.sending}
+            onPress={() => setPickingRecipients("header")}
+          />
         </WorkspaceHeaderVisibility>
       ),
       headerRight: settings,
@@ -273,8 +281,9 @@ function GroupChat({
       ],
     };
   }, [
-    group?.name,
-    group?.owner?.name,
+    group,
+    chat.data?.pending_actions.length,
+    names.data,
     Boolean(group),
     chat.sending,
     uploads.session.sending,
@@ -742,7 +751,7 @@ function GroupChat({
                   accessibilityRole="button"
                   accessibilityLabel="Add recipient"
                   disabled={blocked}
-                  onPress={() => setPickingRecipients(true)}
+                  onPress={() => setPickingRecipients("add")}
                   style={styles.addRecipient}
                 >
                   <Plus size={14} color={colors.primaryOnTint} />
@@ -810,7 +819,7 @@ function GroupChat({
         </View>
       )}
       <Modal
-        visible={pickingRecipients}
+        visible={!!pickingRecipients}
         transparent
         animationType="slide"
         onRequestClose={() => setPickingRecipients(false)}
@@ -823,7 +832,11 @@ function GroupChat({
             ]}
           >
             <View style={styles.header}>
-              <Label style={styles.heading}>Add recipient</Label>
+              <Label style={styles.heading}>
+                {pickingRecipients === "header"
+                  ? "Choose agent"
+                  : "Add recipient"}
+              </Label>
               <Icon
                 label="Close recipients"
                 onPress={() => setPickingRecipients(false)}
@@ -833,20 +846,42 @@ function GroupChat({
             </View>
             <ScrollView>
               {liveMembers
-                .filter((member) => !recipients.ids.includes(member.id))
+                .filter(
+                  (member) =>
+                    pickingRecipients === "header" ||
+                    !recipients.ids.includes(member.id),
+                )
                 .map((member) => (
                   <Pressable
                     key={member.id}
                     accessibilityRole="button"
-                    accessibilityLabel={`Add recipient ${title(member.id, member.name)}`}
+                    accessibilityLabel={`${pickingRecipients === "header" ? "Message" : "Add recipient"} ${title(member.id, member.name)}`}
+                    accessibilityState={{
+                      selected: recipients.ids.includes(member.id),
+                      disabled: blocked,
+                    }}
+                    disabled={blocked}
                     style={styles.pickerRow}
                     onPress={() => {
                       if (blocked || !chat.available()) return;
-                      editRecipients((old) => withAdded(old, member.id));
+                      editRecipients((old) =>
+                        pickingRecipients === "header"
+                          ? liveMembers.reduce(
+                              (selection, candidate) =>
+                                candidate.id === member.id
+                                  ? withAdded(selection, candidate.id)
+                                  : withRemoved(selection, candidate.id),
+                              old,
+                            )
+                          : withAdded(old, member.id),
+                      );
                       setPickingRecipients(false);
                     }}
                   >
-                    <Label>{title(member.id, member.name)}</Label>
+                    <AgentAvatar agent={member} size="lg" />
+                    <Label numberOfLines={1}>
+                      {title(member.id, member.name)}
+                    </Label>
                     <Check size={18} color={colors.primaryOnTint} />
                   </Pressable>
                 ))}
@@ -1069,14 +1104,6 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
   fill: { flex: 1, minWidth: 0 },
-  headerIdentity: {
-    maxWidth: 220,
-    minHeight: 44,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  headerTitle: { fontFamily: fonts.bodySemi, fontSize: 16 },
-  headerSubtitle: { fontFamily: fonts.bodyRegular, fontSize: 10 },
   header: { flexDirection: "row", alignItems: "center", gap: 8 },
   heading: { fontFamily: fonts.displaySemi, fontSize: 18 },
   small: { fontSize: 11, lineHeight: 17 },

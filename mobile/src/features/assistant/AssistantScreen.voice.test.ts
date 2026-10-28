@@ -69,6 +69,7 @@ function composerButton(props: {
 // Exercise enabled and unavailable server/runtime admission separately.
 function setup(conversationId?: string, enableVoiceForTest = true) {
   let headerOptions: Record<string, any> = {};
+  const headerModule = {};
   const draft = deferred<string>();
   const events: unknown[][] = [];
   const drafts: { agentId: string; signal: AbortSignal }[] = [];
@@ -163,6 +164,8 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     },
   };
   const harness = hookHarness<Element>({
+    "./ChatIdentityHeader": headerModule,
+    "react-native-safe-area-context": { SafeAreaView: "SafeAreaView" },
     "../display/ChatLayoutContext": {
       useComposerHeight: () => 120,
       useChatColumn: () => ({
@@ -261,7 +264,9 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
         (name) => [name, name],
       ),
     ),
-    "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
+    "../../theme/ThemeContext": {
+      useTheme: () => ({ colors: { warningTone: {} } }),
+    },
     "../../components/workspace/WorkspaceChatList": {
       WorkspaceChatList: (props: Record<string, any>) => ({
         type: "WorkspaceChatList",
@@ -379,6 +384,12 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     },
     "../../lib/auth/authEpoch": { getAuthEpoch: () => epoch },
   });
+  Object.assign(
+    headerModule,
+    harness.load(
+      fileURLToPath(new URL("./ChatIdentityHeader.tsx", import.meta.url)),
+    ),
+  );
   const Screen = harness.load(
     fileURLToPath(new URL("./AssistantScreen.tsx", import.meta.url)),
   ).AssistantScreen as (input: typeof props) => Element;
@@ -399,6 +410,7 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     draft,
     all,
     button,
+    header: () => expand(headerOptions.headerTitle()),
     chooseAgent: () => {
       const header = expand(headerOptions.headerTitle());
       elements(header)
@@ -1223,6 +1235,81 @@ test("settled decisions fold into their exact recorded turn and CMA operations f
     footer.find((node) => node.type === "AssistantAcknowledgements")?.props
       .acknowledgements.length,
     0,
+  );
+  x.harness.unmount();
+});
+
+test("private, specialist and contextual header identities open the picker without changing the draft", () => {
+  for (const mode of ["nyxbot", "specialist", "contextual"] as const) {
+    const x = setup(A, false);
+    if (mode !== "nyxbot") {
+      x.assistant.agent.kind = "specialist";
+      x.assistant.agent.name = "researcher";
+      x.assistant.agent.display_name = "Research team agent";
+      x.props.contextual = mode === "contextual";
+    }
+    x.input().props.onChangeText("Unsent draft");
+    x.harness.flush();
+    const identity = elements(x.header()).find((n) => n.type === "Pressable")!;
+    assert.match(
+      identity.props.accessibilityLabel,
+      /Chatting with .*Saved chat.*Choose agent/,
+    );
+    assert.ok(
+      elements(x.header()).some(
+        (n) => n.type === "AgentAvatar" && n.props.size === "xl",
+      ),
+    );
+    identity.props.onPress();
+    x.harness.flush();
+    assert.equal(x.input().props.value, "Unsent draft");
+    assert.ok(
+      x
+        .all()
+        .some((n) =>
+          [n.props.children].flat(Infinity).includes("Choose agent"),
+        ),
+    );
+    assert.equal(x.events.filter((e) => e[0] === "open").length, 0);
+    x.harness.unmount();
+  }
+  const draft = setup(undefined, false);
+  assert.match(
+    elements(draft.header()).find((n) => n.type === "Pressable")!.props
+      .accessibilityLabel,
+    /NyxBot, New chat\. Choose agent/,
+  );
+  draft.harness.unmount();
+});
+
+test("header needs-you status takes precedence over active-turn running status", () => {
+  const x = setup(A, false);
+  const conversation = x.assistant.history!.conversation;
+  conversation.active_turn = { id: "turn", tools: [] };
+  x.harness.render();
+  assert.match(
+    elements(x.header()).find((n) => n.type === "Pressable")!.props
+      .accessibilityLabel,
+    /Running/,
+  );
+  x.assistant.history!.acknowledgements = [
+    acknowledgementSchema.parse({
+      id: "d9428888-122b-41e1-85c5-61cd3cbb3210",
+      kind: "action",
+      status: "pending",
+      summary: "Needs a decision",
+      service_slug: null,
+      service_name: null,
+      tool_name: null,
+      created_at: "2026-10-28T00:00:00Z",
+      expires_at: "2099-10-28T01:00:00Z",
+    }),
+  ];
+  x.harness.render();
+  assert.match(
+    elements(x.header()).find((n) => n.type === "Pressable")!.props
+      .accessibilityLabel,
+    /Needs you/,
   );
   x.harness.unmount();
 });
