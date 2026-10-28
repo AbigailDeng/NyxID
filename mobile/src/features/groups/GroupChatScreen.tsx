@@ -24,15 +24,7 @@ import Markdown, {
   type RenderRules,
 } from "react-native-markdown-display";
 import * as WebBrowser from "expo-web-browser";
-import {
-  Check,
-  Plus,
-  Settings2,
-  MessageSquare,
-  ThumbsDown,
-  ThumbsUp,
-  X,
-} from "lucide-react-native";
+import { Check, Plus, Settings2, X } from "lucide-react-native";
 import {
   ActionButton,
   Card,
@@ -68,6 +60,7 @@ import {
 } from "../assistant/assistantMentions";
 import { AssistantAttachmentView } from "../assistant/AssistantAttachmentView";
 import { AssistantActivityDisclosure } from "../assistant/AssistantActivityDisclosure";
+import { AssistantReplyFeedback } from "../assistant/AssistantReplyFeedback";
 import { AssistantCopyButton } from "../assistant/AssistantCopyButton";
 import { assistantSelectableMarkdown } from "../assistant/assistantSelectableMarkdown";
 import { useAssistantUploads } from "../assistant/useAssistantUploads";
@@ -143,11 +136,6 @@ function GroupChat({
     useState<RecipientSelection>(NO_RECIPIENT_EDITS);
   const [pickingRecipients, setPickingRecipients] = useState(false);
   const [localError, setLocalError] = useState<string>();
-  const [feedbackDraft, setFeedbackDraft] = useState<{
-    messageId: string;
-    vote?: "up" | "down";
-    comment: string;
-  }>();
   const group = chat.isError ? undefined : chat.data?.group;
   const names = useQuery({
     queryKey: ["workspace", "agents", "group-labels", chat.epoch],
@@ -297,7 +285,6 @@ function GroupChat({
   useEffect(() => {
     if (!chat.active) {
       setPickingRecipients(false);
-      setFeedbackDraft(undefined);
     }
   }, [chat.active]);
   const blocked =
@@ -613,16 +600,7 @@ function GroupChat({
                   : onOpenAgent
               }
               feedbackEnabled={feedbackEnabled}
-              onFeedback={(vote) => void feedback(item.id, vote)}
-              onComment={() => {
-                if (!feedbackEnabled || !chat.available()) return;
-                transcriptScroll.pause();
-                setFeedbackDraft({
-                  messageId: item.id,
-                  vote: item.feedback?.vote,
-                  comment: item.feedback?.comment ?? "",
-                });
-              }}
+              onFeedback={(vote, comment) => feedback(item.id, vote, comment)}
               onDisclosure={() => {
                 transcriptScroll.pause();
               }}
@@ -894,98 +872,6 @@ function GroupChat({
         </View>
       )}
       <Modal
-        visible={!!feedbackDraft}
-        transparent
-        animationType="slide"
-        onRequestClose={() => {
-          if (!chat.sending) setFeedbackDraft(undefined);
-        }}
-      >
-        <View style={styles.modalBackdrop}>
-          <View
-            style={[
-              styles.picker,
-              { backgroundColor: colors.bg, borderColor: colors.border },
-            ]}
-          >
-            <View style={styles.header}>
-              <Label style={[styles.heading, styles.fill]}>
-                Message feedback
-              </Label>
-              <Icon
-                label="Close feedback"
-                disabled={chat.sending}
-                onPress={() => setFeedbackDraft(undefined)}
-              >
-                <X size={22} color={colors.textPrimary} />
-              </Icon>
-            </View>
-            <View style={styles.actions}>
-              {(["up", "down"] as const).map((vote) => (
-                <View key={vote} style={styles.fill}>
-                  <ActionButton
-                    label={vote === "up" ? "Helpful" : "Not helpful"}
-                    variant={
-                      feedbackDraft?.vote === vote ? "primary" : "secondary"
-                    }
-                    disabled={chat.sending}
-                    onPress={() =>
-                      setFeedbackDraft((old) => old && { ...old, vote })
-                    }
-                  />
-                </View>
-              ))}
-            </View>
-            <TextInput
-              accessibilityLabel="Optional feedback comment"
-              placeholder="Optional comment"
-              placeholderTextColor={colors.textMuted}
-              value={feedbackDraft?.comment ?? ""}
-              multiline
-              editable={!chat.sending}
-              onChangeText={(comment) =>
-                setFeedbackDraft((old) => old && { ...old, comment })
-              }
-              style={[
-                styles.feedbackInput,
-                {
-                  color: colors.textPrimary,
-                  borderColor: colors.border,
-                  backgroundColor: colors.card,
-                },
-              ]}
-            />
-            <Label muted style={styles.small}>
-              {[...(feedbackDraft?.comment ?? "")].length} / 1000
-            </Label>
-            {chat.actionError && (
-              <Notice tone="error" message={chat.actionError} />
-            )}
-            <ActionButton
-              label="Save feedback"
-              loading={chat.sending}
-              disabled={
-                !feedbackEnabled ||
-                !feedbackDraft?.vote ||
-                [...(feedbackDraft?.comment ?? "")].length > 1000
-              }
-              onPress={() => {
-                const current = feedbackDraft;
-                if (!current?.vote) return;
-                void feedback(
-                  current.messageId,
-                  current.vote,
-                  current.comment,
-                ).then((saved) => {
-                  if (saved && mounted.current && chat.available())
-                    setFeedbackDraft(undefined);
-                });
-              }}
-            />
-          </View>
-        </View>
-      </Modal>
-      <Modal
         visible={pickingRecipients}
         transparent
         animationType="slide"
@@ -1042,7 +928,6 @@ function GroupMessage({
   onDisclosure,
   feedbackEnabled,
   onFeedback,
-  onComment,
 }: {
   group?: Group;
   message: GroupMessage;
@@ -1050,8 +935,7 @@ function GroupMessage({
   onOpenAgent?: (id: string) => void;
   onDisclosure: () => void;
   feedbackEnabled: boolean;
-  onFeedback: (vote?: "up" | "down") => void;
-  onComment: () => void;
+  onFeedback: (vote?: "up" | "down", comment?: string) => Promise<boolean>;
 }) {
   const { colors } = useTheme();
   const user = message.role === "user";
@@ -1182,49 +1066,11 @@ function GroupMessage({
       {message.role === "agent" && !!message.text.trim() && (
         <View style={styles.feedbackActions}>
           <AssistantCopyButton text={message.text} />
-          {(["up", "down"] as const).map((vote) => (
-            <Pressable
-              key={vote}
-              accessibilityRole="button"
-              accessibilityLabel={vote === "up" ? "Helpful" : "Not helpful"}
-              accessibilityState={{
-                selected: message.feedback?.vote === vote,
-                disabled: !feedbackEnabled,
-              }}
-              disabled={!feedbackEnabled}
-              style={[styles.icon, { opacity: feedbackEnabled ? 1 : 0.4 }]}
-              onPress={() =>
-                onFeedback(message.feedback?.vote === vote ? undefined : vote)
-              }
-            >
-              {vote === "up" ? (
-                <ThumbsUp
-                  size={17}
-                  color={
-                    message.feedback?.vote === vote
-                      ? colors.primaryOnTint
-                      : colors.textMuted
-                  }
-                />
-              ) : (
-                <ThumbsDown
-                  size={17}
-                  color={
-                    message.feedback?.vote === vote
-                      ? colors.primaryOnTint
-                      : colors.textMuted
-                  }
-                />
-              )}
-            </Pressable>
-          ))}
-          <Icon
-            label="Add feedback comment"
+          <AssistantReplyFeedback
+            feedback={message.feedback}
             disabled={!feedbackEnabled}
-            onPress={onComment}
-          >
-            <MessageSquare size={17} color={colors.textMuted} />
-          </Icon>
+            onSave={onFeedback}
+          />
         </View>
       )}
       {user && <AssistantCopyButton text={message.text} />}

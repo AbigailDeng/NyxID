@@ -315,6 +315,12 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     "./AssistantAcknowledgements": {
       AssistantAcknowledgements: "AssistantAcknowledgements",
     },
+    "./AssistantReplyFeedback": {
+      AssistantReplyFeedback: "AssistantReplyFeedback",
+    },
+    "./AssistantWorkingContext": {
+      AssistantWorkingContext: "AssistantWorkingContext",
+    },
     "./AssistantCopyButton": { AssistantCopyButton: "AssistantCopyButton" },
     "./AssistantAttachmentView": {
       AssistantAttachmentView: "AssistantAttachmentView",

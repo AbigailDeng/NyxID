@@ -1,6 +1,8 @@
 import { requestAuthenticatedResponse, requestJson } from "./http";
 import {
   recoverySchema,
+  feedbackSchema,
+  assistantContextSchema,
   acknowledgementSchema,
   conversationIdSchema,
   conversationSchema,
@@ -54,6 +56,37 @@ export const assistantApi = {
         `${path(id)}/messages/${encodeURIComponent(messageId)}/recovery`,
       ),
     );
+  },
+  async feedback(
+    id: string,
+    messageId: string,
+    vote?: "up" | "down",
+    comment?: string,
+  ) {
+    const result = await requestJson(
+      `${path(id)}/messages/${encodeURIComponent(messageId)}/feedback`,
+      {
+        method: vote ? "PUT" : "DELETE",
+        ...(vote ? { body: { vote, comment } } : {}),
+      },
+    );
+    return vote ? feedbackSchema.parse(result) : undefined;
+  },
+  async context(id: string, signal?: AbortSignal) {
+    const value = assistantContextSchema.parse(
+      await requestJson(`${path(id)}/context`, { signal }),
+    );
+    if (value.conversation_id !== id)
+      throw new Error("Assistant context mismatch.");
+    return value;
+  },
+  async resetContext(id: string) {
+    const value = assistantContextSchema.parse(
+      await requestJson(`${path(id)}/context/reset`, { method: "POST" }),
+    );
+    if (value.conversation_id !== id)
+      throw new Error("Assistant context mismatch.");
+    return value;
   },
   async rename(id: string, title: string) {
     const clean = title.trim();

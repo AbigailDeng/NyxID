@@ -128,7 +128,13 @@ const turnMetadataSchema = z.object({
     })
     .nullish(),
 });
+export const feedbackSchema = z.object({
+  vote: z.enum(["up", "down"]),
+  comment: z.string().nullish(),
+  updated_at: z.string().optional(),
+});
 export const messageSchema = z.object({
+  feedback: feedbackSchema.nullish(),
   id: z.string(),
   seq: z.number().int().positive(),
   turn_id: z.string(),
@@ -362,3 +368,31 @@ export type AssistantMessage = z.infer<typeof messageSchema>;
 export type AssistantAcknowledgement = z.infer<typeof acknowledgementSchema>;
 export type AssistantModel = z.infer<typeof modelListSchema>[number];
 export type AssistantTurnEvent = z.infer<typeof turnEventSchema>;
+
+export const assistantContextSchema = z.object({
+  conversation_id: conversationIdSchema,
+  agent_id: z.string().nullish(),
+  binding_state: z.string(),
+  reset_reason: z.string().nullish(),
+  reset_at: z.string().nullish(),
+  active_turn_id: z.string().nullish(),
+  pending_actions: z.array(z.string()).default([]),
+  checkpoint: z
+    .object({
+      turn_id: z.string(),
+      status: z.string(),
+      error_code: z.string().nullish(),
+      goal: z.string().nullish(),
+      completed_actions: z
+        .array(z.object({ label: z.string(), turn_id: z.string() }))
+        .default([]),
+      failed_actions: z
+        .array(z.object({ label: z.string(), turn_id: z.string() }))
+        .default([]),
+      output: z.string().nullish(),
+      last_successful_turn_id: z.string().nullish(),
+      last_successful_at: z.string().nullish(),
+      updated_at: z.string(),
+    })
+    .nullish(),
+});

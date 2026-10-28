@@ -68,6 +68,8 @@ import {
 import { submitAssistantDraft } from "./assistantComposerDraft";
 import { AssistantActivityDisclosure } from "./AssistantActivityDisclosure";
 import { AssistantAcknowledgements } from "./AssistantAcknowledgements";
+import { AssistantWorkingContext } from "./AssistantWorkingContext";
+import { AssistantReplyFeedback } from "./AssistantReplyFeedback";
 import { AssistantCopyButton } from "./AssistantCopyButton";
 import { assistantSelectableMarkdown } from "./assistantSelectableMarkdown";
 import { AssistantAttachmentView } from "./AssistantAttachmentView";
@@ -158,7 +160,7 @@ export function AssistantScreen({
     setDraft(value);
   }
   const [sheet, setSheet] = useState<
-    "agents" | "history" | "model" | "details"
+    "agents" | "history" | "model" | "details" | "context"
   >();
   const [title, setTitle] = useState("");
   const [localError, setLocalError] = useState<string>();
@@ -823,6 +825,21 @@ export function AssistantScreen({
           {formatDate(item.created_at)}
         </Label>
         <AssistantCopyButton text={item.text} />
+        {item.role === "assistant" &&
+        item.status === "completed" &&
+        !!item.text.trim() &&
+        !item.error_code ? (
+          <AssistantReplyFeedback
+            key={`${assistant.conversationId}:${item.id}`}
+            feedback={item.feedback}
+            disabled={
+              !assistant.online || assistant.loadingOlder || assistant.loading
+            }
+            onSave={(vote, comment) =>
+              assistant.feedback(item.id, vote, comment)
+            }
+          />
+        ) : null}
       </View>
     );
   }
@@ -1337,7 +1354,9 @@ export function AssistantScreen({
               ? `${agentName} · Chat history`
               : sheet === "model"
                 ? "Choose a model"
-                : "Chat details"
+                : sheet === "context"
+                  ? "Working context"
+                  : "Chat details"
         }
         onClose={() => setSheet(undefined)}
       >
@@ -1560,6 +1579,20 @@ export function AssistantScreen({
             )}
           </>
         ) : null}
+        {sheet === "context" && assistant.conversationId ? (
+          <AssistantWorkingContext
+            key={assistant.conversationId}
+            conversationId={assistant.conversationId}
+            active={assistant.active}
+            onReset={() => void assistant.recover()}
+            onManageMemory={(agentId) => {
+              setSheet(undefined);
+              navigation.dispatch(
+                openWorkspaceSheetAction("AgentDetail", { agentId }),
+              );
+            }}
+          />
+        ) : null}
         {sheet === "details" ? (
           <>
             <ActionButton
@@ -1567,6 +1600,13 @@ export function AssistantScreen({
               variant="secondary"
               onPress={() => setSheet("history")}
             />
+            {assistant.conversationId ? (
+              <ActionButton
+                label="Working context"
+                variant="secondary"
+                onPress={() => setSheet("context")}
+              />
+            ) : null}
             <Card>
               <Label style={styles.cardTitle}>Agent</Label>
               <Label>{agentName}</Label>

@@ -190,3 +190,11 @@ creation turn and tool activity; legacy or unloaded anchors stay in confirmation
 history. Pending cards reuse the guarded native decision callback with web risk,
 routing and scope copy. Proxy approvals retain scope metadata and open the
 existing approval detail flow for its decision and verification requirements.
+
+Private and crew replies share Helpful/Not helpful votes, immediate save and
+withdrawal, ordered reason chips and optional details. Failed saves roll back
+the vote; private feedback is fenced to the active thread/account and crew
+feedback keeps its existing guarded runtime. Details now opens Working context,
+which reads real checkpoint/pending-action state on demand, polls only active
+turns, links agent memory management and confirms reset through the existing
+context endpoint. Reset preserves the transcript and refreshes it afterward.
