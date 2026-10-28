@@ -297,6 +297,11 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
         pause: () => {},
       }),
     },
+    "./AssistantTurnStatus": { AssistantTurnStatus: "AssistantTurnStatus" },
+    "./AssistantMessageNotices": {
+      AssistantMessageNotices: "AssistantMessageNotices",
+      QuietButton: "QuietButton",
+    },
     "./AssistantActivityDisclosure": {
       AssistantActivityDisclosure: "AssistantActivityDisclosure",
     },
@@ -823,16 +828,22 @@ test("private user attribution joins only real via and steering context", () => 
     created_at: "2026-10-27T00:00:00Z",
   };
   for (const [extra, expected] of [
-    [{}, undefined],
-    [{ steering: true }, "guidance"],
-    [{ via: "Slack", steering: true }, "Slack · guidance"],
-    [{ via: "Slack" }, "Slack"],
+    [{}, []],
+    [
+      { steering: { outcome: "applied" } },
+      ["Steering · Guidance applied to this reply."],
+    ],
+    [
+      { via: "Slack", steering: { outcome: "applied" } },
+      ["Slack", "Steering · Guidance applied to this reply."],
+    ],
+    [{ via: "Slack" }, ["Slack"]],
   ] as const) {
     const row = expand(render({ item: { ...base, ...extra }, index: 0 }));
     const labels = elements(row)
       .filter((node) => node.type === "Label" && !node.props.mono)
       .map((node) => node.props.children.join(""));
-    assert.deepEqual(labels, expected ? [expected] : []);
+    assert.deepEqual(labels, expected);
   }
   x.harness.unmount();
 });
@@ -1065,5 +1076,63 @@ test("picker keeps the current thread draft and follows existing clearing rules 
       openLatest: false,
     },
   ]);
+  x.harness.unmount();
+});
+
+test("the real transcript inserts a context-reset note at its boundary and renders continuations as system lines", () => {
+  const x = setup(A, false);
+  const messages = [
+    {
+      id: "before",
+      seq: 1,
+      turn_id: "t1",
+      role: "assistant",
+      text: "Earlier",
+      status: "completed",
+      error_code: null,
+      created_at: "2026-10-27T00:00:00Z",
+      activities: [],
+      attachments: [],
+    },
+    {
+      id: "after",
+      seq: 2,
+      turn_id: "t2",
+      role: "assistant",
+      text: "Later",
+      status: "completed",
+      error_code: null,
+      created_at: "2026-10-28T00:00:00Z",
+      activities: [],
+      attachments: [],
+    },
+  ];
+  Object.assign(x.assistant.history!, { messages });
+  Object.assign(x.assistant.history!.conversation, {
+    context_reset_at: "2026-10-27T12:00:00Z",
+    context_reset_reason: "model_changed",
+  });
+  x.harness.render();
+  const render = x.all().find((node) => node.type === "FlatList")!.props
+    .renderItem;
+  const earlier = elements(expand(render({ item: messages[0], index: 0 })));
+  assert.ok(
+    !earlier.some(
+      (node) => node.props.accessibilityLabel === "Conversation context reset",
+    ),
+  );
+  const later = elements(expand(render({ item: messages[1], index: 1 })));
+  assert.ok(
+    later.some(
+      (node) => node.props.accessibilityLabel === "Conversation context reset",
+    ),
+  );
+  const continuation = expand(
+    render({ item: { ...messages[1], continuation_of: "ack" }, index: 1 }),
+  );
+  assert.equal(
+    continuation.props.children.join(""),
+    "Continuing after your decision",
+  );
   x.harness.unmount();
 });

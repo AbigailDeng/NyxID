@@ -1,5 +1,6 @@
 import { requestAuthenticatedResponse, requestJson } from "./http";
 import {
+  recoverySchema,
   acknowledgementSchema,
   conversationIdSchema,
   conversationSchema,
@@ -46,6 +47,13 @@ export const assistantApi = {
   },
   async models() {
     return modelListSchema.parse(await requestJson(`${ROOT}/models`));
+  },
+  async recovery(id: string, messageId: string) {
+    return recoverySchema.parse(
+      await requestJson(
+        `${path(id)}/messages/${encodeURIComponent(messageId)}/recovery`,
+      ),
+    );
   },
   async rename(id: string, title: string) {
     const clean = title.trim();

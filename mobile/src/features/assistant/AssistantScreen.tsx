@@ -85,7 +85,12 @@ import {
   ComposerDictationButton,
   ComposerDictationReview,
 } from "./ComposerDictation";
-import { describeToolActivity } from "./assistantActivityText";
+import { AssistantTurnStatus } from "./AssistantTurnStatus";
+import {
+  AssistantMessageNotices,
+  QuietButton,
+} from "./AssistantMessageNotices";
+import { contextResetCopy, steeringNotice } from "./assistantTurnPresentation";
 import { NativeAuthoredSkillReview } from "../plugins/NativeAuthoredSkillReview";
 import { parseAutomationLink } from "../automations/automationLinks";
 import { NYXID_FRONTEND_URL } from "../../lib/env";
@@ -102,11 +107,7 @@ import {
   assistantMarkdownOptions,
   safeAssistantLinkUrl,
 } from "./assistantMarkdown";
-import {
-  acknowledgementTitle,
-  retryInput,
-  storedAssistantError,
-} from "./assistantState";
+import { acknowledgementTitle, retryInput } from "./assistantState";
 import type {
   AssistantAcknowledgement,
   AssistantMessage,
@@ -199,12 +200,12 @@ export function AssistantScreen({
     assistant.models.find((item) => item.id === currentModelId)?.label ??
     currentModelId.replace(/^nyxagent\//, "");
   const running = assistant.sending || !!conversation?.active_turn;
-  const liveText = assistant.live ? liveReplyText(assistant.live) : "";
+  const liveText = assistant.live
+    ? liveReplyText(assistant.live) ||
+      conversation?.active_turn?.reply?.text ||
+      ""
+    : (conversation?.active_turn?.reply?.text ?? "");
   const liveActivities = conversation?.active_turn?.activities ?? [];
-  const runningActivity = liveActivities
-    .filter((activity) => activity.status === "running")
-    .at(-1);
-  const waitingActivity = runningActivity ?? liveActivities.at(-1);
   const destroyed = conversation?.agent?.destroyed;
   const streamPersisted =
     assistant.live?.turnId &&
@@ -663,6 +664,17 @@ export function AssistantScreen({
     index: number;
   }) {
     const isUser = item.role === "user";
+    const resetAt = Date.parse(conversation?.context_reset_at ?? "");
+    const resetHere =
+      Number.isFinite(resetAt) &&
+      Date.parse(item.created_at) > resetAt &&
+      (index === 0 || Date.parse(messages[index - 1]!.created_at) <= resetAt);
+    if (item.continuation_of)
+      return (
+        <Label muted accessibilityLiveRegion="polite" style={styles.message}>
+          Continuing after your decision
+        </Label>
+      );
     const input = retryInput(assistant.history, item);
     const attribution = [
       isUser
@@ -675,7 +687,6 @@ export function AssistantScreen({
             ? "NyxBot · instruction"
             : "Update",
       item.via,
-      item.steering ? "guidance" : "",
     ]
       .filter(Boolean)
       .join(" · ");
@@ -693,6 +704,11 @@ export function AssistantScreen({
         {index > 0 && item.seq > (messages[index - 1]?.seq ?? item.seq) + 1 ? (
           <Notice message="Messages between these pages haven't loaded yet. Load missing messages to restore them." />
         ) : null}
+        {resetHere ? (
+          <Label muted accessibilityLabel="Conversation context reset">
+            {contextResetCopy(conversation?.context_reset_reason)}
+          </Label>
+        ) : null}
         {attribution ? (
           <Label muted style={styles.messageLabel}>
             {attribution}
@@ -701,6 +717,15 @@ export function AssistantScreen({
         <AssistantActivityDisclosure
           key={item.id}
           activities={item.activities}
+          activityTotal={item.activity_total}
+          turnLabel={
+            item.error_code === "cancelled"
+              ? "Stopped"
+              : item.status === "failed"
+                ? "Turn failed"
+                : "Completed"
+          }
+          metadata={item.turn_metadata}
           onToggle={() => {
             // Opening details is an explicit reading action. Keep the header
             // in view instead of following the newly expanded list to its end.
@@ -720,6 +745,12 @@ export function AssistantScreen({
                 }
               />
             ))}
+        {isUser && item.steering ? (
+          <Label muted>
+            Steering ·{" "}
+            {steeringNotice(item.steering.code, item.steering.outcome)}
+          </Label>
+        ) : null}
         {isUser ? (
           item.text ? (
             <Text
@@ -736,7 +767,7 @@ export function AssistantScreen({
             rules={markdownRules}
             onLinkPress={openSafeLink}
           >
-            {item.text || (item.status === "failed" ? "" : "No text response.")}
+            {item.text}
           </Markdown>
         )}
         {item.attachments.map((attachment) => (
@@ -746,15 +777,17 @@ export function AssistantScreen({
             conversationId={assistant.conversationId}
           />
         ))}
-        {item.status === "failed" ? (
-          <Notice
-            message={storedAssistantError(item.error_code)}
-            tone={item.error_code === "cancelled" ? "info" : "error"}
+        {!isUser ? (
+          <AssistantMessageNotices
+            message={item}
+            onOpenBilling={() =>
+              navigation.dispatch(openWorkspaceSheetAction("UsageCredits"))
+            }
           />
         ) : null}
         {input !== undefined ? (
           <ActionButton
-            label="Retry unfinished work"
+            label="Retry"
             variant="secondary"
             disabled={
               running ||
@@ -762,9 +795,14 @@ export function AssistantScreen({
               assistant.recoveryRequired ||
               assistant.loadingOlder
             }
-            onPress={() =>
-              void perform(() => assistant.send(input, item.turn_id))
-            }
+            onPress={() => void perform(() => assistant.retry(item.id))}
+          />
+        ) : null}
+        {item.status === "failed" && item.error_code !== "cancelled" ? (
+          <QuietButton
+            label="Check retry availability"
+            disabled={running || !assistant.online || assistant.loadingOlder}
+            onPress={() => void perform(() => assistant.checkRecovery(item.id))}
           />
         ) : null}
         <Label muted mono style={styles.timestamp}>
@@ -1065,6 +1103,14 @@ export function AssistantScreen({
             }
             ListFooterComponent={
               <View style={styles.footer}>
+                {conversation?.context_reset_at &&
+                (!messages.length ||
+                  Date.parse(messages.at(-1)!.created_at) <=
+                    Date.parse(conversation.context_reset_at)) ? (
+                  <Label muted accessibilityLabel="Conversation context reset">
+                    {contextResetCopy(conversation.context_reset_reason)}
+                  </Label>
+                ) : null}
                 {(assistant.inputText ||
                   assistant.inputAttachments.length > 0) &&
                 !optimisticUserPersisted ? (
@@ -1107,13 +1153,7 @@ export function AssistantScreen({
                 {running && !streamPersisted ? (
                   <View style={styles.message}>
                     <Label muted style={styles.messageLabel}>
-                      {conversation?.agent?.display_name ??
-                        conversation?.agent?.name ??
-                        "NyxBot"}{" "}
-                      ·{" "}
-                      {conversation?.active_turn?.stop_requested
-                        ? "Stopping"
-                        : "Working"}
+                      {agentName}
                     </Label>
                     <AssistantActivityDisclosure
                       key={
@@ -1122,6 +1162,8 @@ export function AssistantScreen({
                         "pending-turn"
                       }
                       activities={liveActivities}
+                      activityTotal={conversation?.active_turn?.activity_total}
+                      turnLabel="Working…"
                       onToggle={() => {
                         transcriptScroll.pause();
                       }}
@@ -1148,32 +1190,18 @@ export function AssistantScreen({
                       >
                         {liveText}
                       </Markdown>
-                    ) : (
-                      <View style={[styles.row, styles.thinking]}>
-                        <ActivityIndicator
-                          size="small"
-                          color={colors.primary}
-                        />
-                        {waitingActivity ? (
-                          <Label
-                            muted
-                            numberOfLines={1}
-                            style={styles.runningActivity}
-                          >
-                            {describeToolActivity(
-                              waitingActivity.label,
-                              waitingActivity.status === "completed"
-                                ? "done"
-                                : waitingActivity.status,
-                            )}
-                            {waitingActivity.status === "running" ? "…" : ""}
-                          </Label>
-                        ) : null}
-                      </View>
-                    )}
-                    {assistant.live?.notice ? (
-                      <Label muted>{assistant.live.notice}</Label>
                     ) : null}
+                    <AssistantTurnStatus
+                      turn={conversation?.active_turn}
+                      live={assistant.live}
+                      pendingApproval={
+                        !!assistant.history?.approvals.length ||
+                        !!assistant.history?.acknowledgements.some(
+                          (row) => row.status === "pending",
+                        )
+                      }
+                      interrupted={assistant.interrupted}
+                    />
                     <AssistantCopyButton text={liveText} partial />
                   </View>
                 ) : null}

@@ -169,3 +169,15 @@ accepts period/ownerId; the screen verifies owner eligibility. Web purchase,
 service and tab parameters are not forwarded as native actions. This navigation
 adds no wallet/provisioning/checkout request. Wallet availability and API support
 remain the read-only screen's responsibility.
+
+Native NyxAgent turns retain tool failures, activity bounds, saved live-reply
+checkpoints, queued/capacity timing, continuation and retry notices, delivery
+metadata and error diagnostics. The transcript shows web turn phases, per-tool
+elapsed time, safe failure copy, context-reset and decision-continuation lines,
+and expandable diagnostics with copyable correlation IDs. Retry checks the
+existing message recovery endpoint before sending; review-only outcomes expose
+the original request without replaying uncertain effects. This covers the shared
+private, specialist and contextual screen. Actor-projection action/input/task
+cards belong to a different web protocol and are not present in NyxAgent's
+text-only history/SSE payloads; the local CHAT_PARITY.md tracks that limitation
+and remaining rendering work without claiming complete parity.

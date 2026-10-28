@@ -1,12 +1,18 @@
 import { z } from "zod";
 
 export const conversationIdSchema = z.string().regex(/^nyxa-[a-f0-9]{32}$/);
-const activitySchema = z.object({
+export const activitySchema = z.object({
   id: z.string(),
   label: z.string(),
   status: z.enum(["running", "completed", "error"]),
   started_at: z.string(),
   ended_at: z.string().nullish(),
+  failure: z
+    .object({
+      kind: z.enum(["service_status", "tool_error", "refused", "internal"]),
+      status: z.number().int().nullish(),
+    })
+    .nullish(),
   machine: z
     .object({
       node_id: z.string(),
@@ -15,6 +21,15 @@ const activitySchema = z.object({
       action: z.string(),
       status: z.string(),
       error_code: z.number().nullish(),
+      operation_id: z.string().optional(),
+      agent_id: z.string().optional(),
+      job_id: z.string().nullish(),
+      exit_code: z.number().nullish(),
+      bytes: z.number().nonnegative().nullish(),
+      duration_ms: z.number().nonnegative().nullish(),
+      screenshot_id: z.string().nullish(),
+      preview_id: z.string().nullish(),
+      preview_enabled: z.boolean().optional(),
     })
     .nullish(),
 });
@@ -43,6 +58,21 @@ export const conversationSchema = z.object({
       started_at: z.string(),
       stop_requested: z.boolean().optional(),
       continuations: z.number().optional(),
+      reply: z
+        .object({
+          message_id: z.string(),
+          block_id: z.string(),
+          cursor: z.number().int().nonnegative(),
+          text: z.string(),
+        })
+        .nullish(),
+      queued: z.boolean().optional(),
+      waiting_for_capacity: z.boolean().optional(),
+      capacity_wait_note_origin: z.string().nullish(),
+      engine_request_started_at: z.string().nullish(),
+      capacity_wait_started_at: z.string().nullish(),
+      capacity_wait_deadline: z.string().nullish(),
+      activity_total: z.number().int().nonnegative().nullish(),
       activities: z.array(activitySchema).default([]),
       attachments: z.array(attachmentSchema).default([]),
     })
@@ -73,6 +103,31 @@ export const conversationSchema = z.object({
     })
     .nullish(),
 });
+export const recoverySchema = z.object({
+  status: z.enum(["available", "review"]),
+  reason: z.string(),
+  text: z.string().nullable(),
+  attachments: z.array(z.string()),
+});
+const failureReasonSchema = z.object({
+  source: z.string(),
+  stage: z.string(),
+  code: z.string(),
+  http_status: z.number().int().nullish(),
+  nyxid_error_code: z.number().int().nullish(),
+});
+const turnMetadataSchema = z.object({
+  attempts: z.number().int().nonnegative().nullish(),
+  capacity_wait_ms: z.number().nonnegative().nullish(),
+  failure_reason: failureReasonSchema.nullish(),
+  channel_delivery: z
+    .object({
+      status: z.string(),
+      heard_prefix_chars: z.number().int().nonnegative().nullish(),
+      heard_prefix_matches_sent: z.boolean(),
+    })
+    .nullish(),
+});
 export const messageSchema = z.object({
   id: z.string(),
   seq: z.number().int().positive(),
@@ -85,7 +140,31 @@ export const messageSchema = z.object({
   activities: z.array(activitySchema).default([]),
   attachments: z.array(attachmentSchema).default([]),
   via: z.string().nullish(),
-  steering: z.object({ outcome: z.string() }).nullish(),
+  steering: z
+    .object({
+      outcome: z.string(),
+      code: z.string().nullish(),
+      client_request_id: z.string().optional(),
+    })
+    .nullish(),
+  continuation_of: z.string().nullish(),
+  recovery: recoverySchema.nullish(),
+  upstream_error_code: z.string().nullish(),
+  activity_total: z.number().int().nonnegative().nullish(),
+  turn_metadata: turnMetadataSchema.nullish(),
+  error_detail: z
+    .object({
+      attempts: z.number().int().nonnegative().nullish(),
+      capacity_wait_ms: z.number().nonnegative().nullish(),
+      stage: z.string(),
+      http_status: z.number().int().nullable(),
+      upstream_request_id: z.string().nullable(),
+      response_id: z.string().nullable(),
+      continuations: z.number().int().nonnegative(),
+      turn_id: z.string(),
+      occurred_at: z.string(),
+    })
+    .nullish(),
 });
 export const acknowledgementSchema = z.object({
   id: z.string().uuid(),
@@ -162,6 +241,14 @@ export const turnEventSchema = z.discriminatedUnion("event", [
     conversation_id: conversationIdSchema,
     turn_id: z.string(),
     status: z.enum(["running", "waiting"]),
+    started_at: z.string().optional(),
+    queued: z.boolean().optional(),
+    waiting_for_capacity: z.boolean().optional(),
+    engine_accepted: z.boolean().optional(),
+    capacity_wait_note_origin: z.string().nullish(),
+    engine_request_started_at: z.string().nullish(),
+    capacity_wait_started_at: z.string().nullish(),
+    capacity_wait_deadline: z.string().nullish(),
   }),
   z.object({
     ...cursor,
@@ -211,7 +298,20 @@ export const turnEventSchema = z.discriminatedUnion("event", [
     event: z.literal("turn.completed"),
     turn_id: z.string(),
     status: z.enum(["completed", "failed", "cancelled"]),
-    error: z.object({ code: z.string(), message: z.string() }).nullable(),
+    turn_metadata: turnMetadataSchema.nullish(),
+    error: z
+      .object({
+        code: z.string(),
+        message: z.string(),
+        attempts: z.number().int().nonnegative().nullish(),
+        capacity_wait_ms: z.number().nonnegative().nullish(),
+        upstream_error_code: z.string().nullish(),
+        stage: z.string().optional(),
+        http_status: z.number().nullish(),
+        upstream_request_id: z.string().nullish(),
+        response_id: z.string().nullish(),
+      })
+      .nullable(),
   }),
 ]);
 export type AssistantConversation = z.infer<typeof conversationSchema>;

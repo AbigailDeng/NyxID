@@ -65,6 +65,10 @@ export type AssistantLiveReply = {
   blocks: { id: string; index: number; text: string }[];
   terminal?: "completed" | "failed" | "cancelled";
   notice?: string;
+  noticeCode?: string;
+  continuations?: number;
+  status?: Extract<AssistantTurnEvent, { event: "turn.status" }>;
+  result?: Extract<AssistantTurnEvent, { event: "turn.completed" }>;
 };
 export const emptyLiveReply = (): AssistantLiveReply => ({
   cursor: 0,
@@ -94,9 +98,12 @@ export function applyAssistantEvent(
         ...next,
         conversationId: event.conversation_id,
         turnId: event.turn_id,
+        status: event,
       };
     case "turn.notice":
-      return { ...next, notice: event.message };
+      return { ...next, notice: event.message, noticeCode: event.code };
+    case "turn.continuing":
+      return { ...next, continuations: event.continuation };
     case "message.started":
       if (state.messageId && state.messageId !== event.message_id)
         throw new Error("Assistant message mismatch.");
@@ -142,7 +149,7 @@ export function applyAssistantEvent(
       };
     }
     case "turn.completed":
-      return { ...next, terminal: event.status };
+      return { ...next, terminal: event.status, result: event };
     case "message.completed":
       if (event.message_id !== state.messageId)
         throw new Error("Assistant message mismatch.");

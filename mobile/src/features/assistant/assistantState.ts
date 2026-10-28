@@ -79,6 +79,10 @@ export function retryInput(
     reply.error_code === "outcome_unknown"
   )
     return undefined;
+  if (reply.recovery)
+    return reply.recovery.status === "available"
+      ? (reply.recovery.text ?? undefined)
+      : undefined;
   return history?.messages.find(
     (message) =>
       message.turn_id === reply.turn_id &&

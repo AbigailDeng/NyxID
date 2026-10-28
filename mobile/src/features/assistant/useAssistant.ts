@@ -7,6 +7,7 @@ import { assistantApi, streamAssistantTurn } from "../../lib/api/assistantApi";
 import { agentsApi } from "../../lib/api/agentsApi";
 import { ApiError } from "../../lib/api/ApiError";
 import { resolveChatAgentId } from "./assistantAgentContext";
+import { recoveryReason } from "./assistantTurnPresentation";
 import {
   assistantTurnBody,
   restoreRefusedAssistantSend,
@@ -32,6 +33,7 @@ import type {
   AssistantConversation,
   AssistantHistory,
   AssistantModel,
+  AssistantMessage,
 } from "./assistantTypes";
 
 export function useAssistant(
@@ -62,6 +64,7 @@ export function useAssistant(
   const [deciding, setDeciding] = useState<string>();
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string>();
+  const [interrupted, setInterrupted] = useState(false);
   const [recoveryRequired, setRecoveryRequired] = useState(false);
   const [online, setOnline] = useState(true);
   const [foreground, setForeground] = useState(
@@ -87,6 +90,7 @@ export function useAssistant(
   const sendOperation = useRef<object | undefined>(undefined);
   const decisionLock = useRef(false);
   const lastDecision = useRef(0);
+  const consumedRetries = useRef(new Set<string>());
   const previousAgent = useRef(routeAgentId);
   const previousAcknowledgement = useRef(initialAcknowledgementId);
   const adopt = useRef(onConversationAdopted);
@@ -231,6 +235,7 @@ export function useAssistant(
       setConversationId(id);
       updateHistory(undefined);
       setLive(undefined);
+      setInterrupted(false);
       setInputText(undefined);
       setInputAttachments([]);
       setError(undefined);
@@ -417,6 +422,7 @@ export function useAssistant(
       sendOperation.current = operation;
       sendLock.current = true;
       setSending(true);
+      setInterrupted(false);
       setError(undefined);
       setInputText(text);
       setInputAttachments(uploads?.attachments ?? []);
@@ -471,6 +477,7 @@ export function useAssistant(
           keepDraft = refused;
           if (!refused) adoptKnownDraft();
           setRecoveryRequired(!refused);
+          setInterrupted(!refused);
           setError(
             refused
               ? errorMessage(cause)
@@ -558,6 +565,69 @@ export function useAssistant(
     } finally {
       decisionLock.current = false;
       if (mounted.current) setDeciding(undefined);
+    }
+  }
+
+  async function checkRecovery(messageId: string) {
+    const id = selected.current;
+    const generation = epoch.current;
+    if (!id || !activeRef.current)
+      throw new Error("Reconnect to check retry availability.");
+    let recovery: NonNullable<AssistantMessage["recovery"]>;
+    try {
+      recovery = await assistantApi.recovery(id, messageId);
+    } catch {
+      const previous = latestHistory.current?.messages.find(
+        (row) => row.id === messageId,
+      )?.recovery;
+      recovery = {
+        status: "review" as const,
+        reason: "status_unavailable",
+        text: previous?.text ?? null,
+        attachments: previous?.attachments ?? [],
+      };
+    }
+    if (
+      !mounted.current ||
+      selected.current !== id ||
+      epoch.current !== generation
+    )
+      return undefined;
+    if (consumedRetries.current.has(`${id}:${messageId}`))
+      recovery = { ...recovery, status: "review", reason: "already_retried" };
+    const current = latestHistory.current;
+    if (current)
+      updateHistory({
+        ...current,
+        messages: current.messages.map((row) =>
+          row.id === messageId ? { ...row, recovery } : row,
+        ),
+      });
+    return recovery;
+  }
+
+  async function retry(messageId: string) {
+    const id = selected.current;
+    const recovery = await checkRecovery(messageId);
+    if (!recovery || selected.current !== id) return;
+    if (recovery.status !== "available" || recovery.text === null)
+      throw new Error(recoveryReason(recovery.reason));
+    const message = latestHistory.current?.messages.find(
+      (row) => row.id === messageId,
+    );
+    if (!message || consumedRetries.current.has(`${id}:${messageId}`)) return;
+    // Claim before the send; an interrupted admission cannot replay effects.
+    consumedRetries.current.add(`${id}:${messageId}`);
+    try {
+      const accepted = await send(recovery.text, message.turn_id);
+      if (!accepted) consumedRetries.current.delete(`${id}:${messageId}`);
+    } catch (cause) {
+      if (
+        cause instanceof ApiError &&
+        restoreRefusedAssistantSend(cause, false)
+      )
+        consumedRetries.current.delete(`${id}:${messageId}`);
+      throw cause;
     }
   }
 
@@ -674,9 +744,12 @@ export function useAssistant(
     error,
     online,
     recoveryRequired,
+    interrupted: interrupted && !!history?.conversation.active_turn,
     openConversation,
     recover,
     send,
+    checkRecovery,
+    retry,
     decide,
     stop,
     rename,

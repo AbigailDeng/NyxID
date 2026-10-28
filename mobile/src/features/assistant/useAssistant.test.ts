@@ -190,3 +190,86 @@ test("unmount during final refresh cannot publish terminal UI into the released 
   await send;
   assert.equal(x.streams.length, 1);
 });
+
+test("server recovery is checked before retry; concurrent taps cannot replay it", async () => {
+  const request = deferred<{
+    status: "available";
+    reason: string;
+    text: string;
+    attachments: string[];
+  }>();
+  let sends = 0;
+  const page = history(A);
+  page.messages = [
+    {
+      id: "reply",
+      seq: 2,
+      turn_id: "failed-turn",
+      role: "assistant",
+      text: "",
+      status: "failed",
+      error_code: "model_interrupted",
+      created_at: "2026-10-28T00:00:00Z",
+      activities: [],
+      attachments: [],
+    },
+  ];
+  const h = hookHarness<ReturnType<typeof useAssistant>>({
+    "react-native": {
+      AppState: {
+        currentState: "active",
+        addEventListener: () => ({ remove() {} }),
+      },
+    },
+    "@react-navigation/native": { useIsFocused: () => true },
+    "@react-native-community/netinfo": { addEventListener: () => () => {} },
+    "@tanstack/react-query": {
+      useQuery: () => ({
+        data: {
+          agents: [
+            { id: "nyxbot", kind: "nyxbot", status: "idle", can_use: true },
+          ],
+        },
+      }),
+    },
+    "../../lib/api/agentsApi": { agentsApi: {} },
+    "../../lib/api/assistantApi": {
+      assistantApi: {
+        history: async () => page,
+        list: async () => ({ conversations: [], next_cursor: null }),
+        models: async () => [],
+        recovery: async () => request.promise,
+      },
+      streamAssistantTurn: async (input: any) => {
+        sends++;
+        assert.equal(input.text, "Verified original");
+        assert.equal(input.retryOf, "failed-turn");
+      },
+    },
+  });
+  const hook = h.load(
+    fileURLToPath(new URL("./useAssistant.ts", import.meta.url)),
+  ).useAssistant as typeof useAssistant;
+  h.mount(() => hook(A));
+  await h.settle();
+  const one = h.value().retry("reply");
+  const two = h.value().retry("reply");
+  assert.equal(sends, 0);
+  request.resolve({
+    status: "available",
+    reason: "available",
+    text: "Verified original",
+    attachments: [],
+  });
+  await Promise.allSettled([one, two]);
+  await h.settle();
+  assert.equal(sends, 1);
+  h.value().openConversation();
+  h.flush();
+  await h
+    .value()
+    .retry("reply")
+    .catch(() => undefined);
+  assert.equal(sends, 1);
+  h.unmount();
+});

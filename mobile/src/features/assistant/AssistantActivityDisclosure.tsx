@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import { Check, ChevronDown, ChevronRight, X } from "lucide-react-native";
 import { Label } from "../../components/workspace/WorkspaceUI";
@@ -6,19 +6,41 @@ import { useTheme } from "../../theme/ThemeContext";
 import { radius, TOUCH_TARGET } from "../../theme/designTokens";
 import type { AssistantMessage } from "./assistantTypes";
 import { describeToolActivity } from "./assistantActivityText";
+import {
+  deliveryText,
+  elapsedLabel,
+  formatCapacityWait,
+  toolFailureCopy,
+} from "./assistantTurnPresentation";
 
 type Activity = Omit<AssistantMessage["activities"][number], "machine">;
 
 export function AssistantActivityDisclosure({
   activities,
   onToggle,
+  activityTotal,
+  turnLabel,
+  metadata,
 }: {
   activities: Activity[];
   onToggle: () => void;
+  activityTotal?: number | null;
+  turnLabel?: string;
+  metadata?: AssistantMessage["turn_metadata"];
 }) {
   const { colors } = useTheme();
   const [open, setOpen] = useState(false);
-  if (!activities.length) return null;
+  const [now, setNow] = useState(Date.now);
+  const ticking = activities.some((activity) => activity.status === "running");
+  useEffect(() => {
+    if (!ticking) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [ticking]);
+  const delivery = metadata?.channel_delivery;
+  const waited =
+    (metadata?.capacity_wait_ms ?? 0) > 0 || (metadata?.attempts ?? 0) > 1;
+  if (!activities.length && !waited && !delivery) return null;
   const failed = activities.filter(
     (activity) => activity.status === "error",
   ).length;
@@ -27,7 +49,20 @@ export function AssistantActivityDisclosure({
     : failed
       ? "error"
       : "completed";
-  const count = `${activities.length} ${activities.length === 1 ? "action" : "actions"}`;
+  const total = Math.max(activities.length, activityTotal ?? 0);
+  const count = `${total} ${total === 1 ? "action" : "actions"}`;
+  const label = turnLabel ?? (status === "running" ? "Working…" : "Completed");
+  const summary = [
+    label,
+    total ? count : "",
+    waited && metadata?.capacity_wait_ms
+      ? `waited ${formatCapacityWait(metadata.capacity_wait_ms)}`
+      : "",
+    failed ? `${failed} failed` : "",
+    delivery?.status === "failed" ? "delivery failed" : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const Chevron = open ? ChevronDown : ChevronRight;
 
   return (
@@ -39,7 +74,7 @@ export function AssistantActivityDisclosure({
     >
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${count}, ${status}${failed ? `, ${failed} failed` : ""}`}
+        accessibilityLabel={`Turn details: ${summary}`}
         accessibilityHint={open ? "Hide action details" : "Show action details"}
         accessibilityState={{ expanded: open }}
         onPress={() => {
@@ -59,13 +94,11 @@ export function AssistantActivityDisclosure({
         </View>
         <ActivityStatusIcon status={status} />
         <Label muted style={styles.count}>
-          {count}
+          {summary}
+          {total > activities.length
+            ? ` · latest ${activities.length} of ${total} shown`
+            : ""}
         </Label>
-        {failed ? (
-          <Label style={[styles.count, { color: colors.danger }]}>
-            · {failed} failed
-          </Label>
-        ) : null}
       </Pressable>
       {open ? (
         <View style={[styles.details, { borderColor: colors.border }]}>
@@ -74,12 +107,19 @@ export function AssistantActivityDisclosure({
               activity.label,
               activity.status === "completed" ? "done" : activity.status,
             );
+            const elapsed = elapsedLabel(
+              activity.started_at,
+              activity.status === "running"
+                ? undefined
+                : (activity.ended_at ?? activity.started_at),
+              now,
+            );
             return (
               <View
                 key={activity.id}
                 accessible
                 accessibilityRole="text"
-                accessibilityLabel={`${description}, ${activity.label}, ${activity.status}`}
+                accessibilityLabel={`${description}, ${activity.label}, ${activity.status === "error" ? "Failed" : activity.status === "completed" ? "Succeeded" : "Running"}${elapsed ? `, ${elapsed}` : ""}`}
                 style={styles.activity}
               >
                 <ActivityStatusIcon status={activity.status} />
@@ -92,14 +132,34 @@ export function AssistantActivityDisclosure({
                     ]}
                   >
                     {description}
+                    {elapsed ? ` · ${elapsed}` : ""}
                   </Label>
                   <Label muted mono style={styles.name}>
                     {activity.label}
                   </Label>
+                  {activity.status === "error" ? (
+                    <Label
+                      style={[styles.description, { color: colors.danger }]}
+                    >
+                      {toolFailureCopy(activity.failure)} The assistant can
+                      continue after a failed step.
+                    </Label>
+                  ) : null}
                 </View>
               </View>
             );
           })}
+          {waited ? (
+            <Label muted style={styles.description}>
+              {metadata?.attempts != null
+                ? `${metadata.attempts} attempts`
+                : ""}
+              {metadata?.capacity_wait_ms
+                ? ` · waited ${formatCapacityWait(metadata.capacity_wait_ms)} for capacity`
+                : ""}
+            </Label>
+          ) : null}
+          {delivery ? <DeliveryNotice delivery={delivery} /> : null}
         </View>
       ) : null}
     </View>
@@ -122,6 +182,20 @@ function ActivityStatusIcon({ status }: { status: Activity["status"] }) {
         <Check size={14} color={colors.success} />
       )}
     </View>
+  );
+}
+
+function DeliveryNotice({
+  delivery,
+}: {
+  delivery: NonNullable<
+    NonNullable<AssistantMessage["turn_metadata"]>["channel_delivery"]
+  >;
+}) {
+  return (
+    <Label muted style={styles.description}>
+      {deliveryText(delivery)}
+    </Label>
   );
 }
 
