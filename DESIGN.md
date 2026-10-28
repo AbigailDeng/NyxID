@@ -532,3 +532,127 @@ Tooltips use at least 1000 and stay above their parent. Embedded raw Radix modal
 must provide their content layer to descendants. Avoid per-instance z-index
 classes on these primitives; date pickers and comboboxes inherit through their
 Popover/Select surface.
+
+### Native assistant workspace
+
+The React Native workspace has a base sidebar and an opaque content slab. Home,
+chats and workspace pages push horizontally inside that slab. Only Settings,
+account pages and QR/terminal quick actions use the retained pull-up surface. See
+[the complete native route inventory](mobile/docs/NATIVE_WORKSPACE_ROUTES.md).
+
+- The sidebar uses sentence-case headings and Quick actions above Workspace.
+  Workspace contains Automations, Machines, Plugins, Activity (live pending count)
+  and Create new agent; no coming-soon destinations. Activity shows Incoming
+  followed by date-grouped History, with Active grants as a secondary page.
+  Logo and the pinned Chat pill open Home. The Settings gear and Quick actions
+  present above the current sidebar/slab without changing its offset or scroll.
+  Their dismissal restores that exact state. Root selection fades the old content
+  out over 120ms, swaps with no inner stack animation, and waits for the new page's
+  layout and paint. It then fades the new content in over 180ms while closing the
+  opaque slab in a single 300ms ease-out. Only the 24pt root edge reveals it;
+  only the exposed slab sliver closes it. Finger releases spring; reduced motion
+  has no travel. The pinned controls have a measured bottom content spacer.
+- Drawer top is the window's safe-area top plus 10pt. Top corners are 24pt; the
+  centered 36×4pt handle has a 44pt drag region. A dedicated translucent scrim
+  stays fixed over retained chat and fades independently while the panel slides.
+  Sidebar and content headers share a 60pt row below the same safe-area inset.
+  Page and Settings titles are centered across the full header, with equal control
+  columns, 18pt type, one line and a 1.25 scaling cap. Chat identity keeps its avatar
+  and name alignment. Close is a circular 44pt target. Only pages pushed within a
+  sheet add Back; directly opened QR, Terminal or account pages are local roots.
+  Sidebar accessibility follows the settled UI endpoint; cancelled or zero-distance
+  gestures release its focus ownership and restore the content at offset zero.
+  Forms retain async dirty/pending guards across every dismissal path. Reduced
+  motion removes stack travel and springs. No fake home indicator or native rail.
+- Home is an explicit primary-chat state, reached from the navigation logo/Chats,
+  bare `/assistant`, or app start without a restored chat. New chat with NyxBot
+  shows the same normal empty chat as a specialist: identity header, intro and
+  composer. Compose actions preserve the viewed agent and start empty. Each
+  thread keeps its own in-memory text/attachment draft when visiting Home or
+  another thread; Home has a separate NyxBot composer.
+- Native private-user messages have neutral card fill, a 1pt border, 38pt leading
+  inset and corners 12/12/3/12. Private chat omits redundant “You”; group speakers,
+  real specialist attribution, orchestration, updates, via and guidance remain.
+  Native reply footers show only an icon Copy action and a local day/month date,
+  8pt apart and 8pt below the body. Reply feedback votes are omitted on native by
+  user decision (2026-10-28); full timestamps remain accessible on long press.
+  Assistant prose stays unboxed. All chat composers share a filled 26pt pill:
+  full-width text sits above a toolbar with Attach, optional mentions, dictation
+  and a trailing Send/Stop circle inside a 44pt target. Attach offers Camera,
+  Photos and Files through their native pickers. Dictation requires review before text is
+  inserted into the draft and never sends a message automatically. Chat pages
+  use an edge-to-edge transcript viewport within the system safe area, so its
+  scroll indicator sits at the window edge. The centered transcript content
+  retains 12pt horizontal padding and the configured column maximum; composers
+  retain their own 12pt margins and pages keep 4pt bottom padding. The navigation account footer absorbs its bottom clearance into
+  the safe-area inset rather than adding a second padded strip. The one-row
+  private header stays compact; group name, ownership context and settings
+  share one header, with member details retained.
+- Chat Details, History and Working context are nested pages in the content slab.
+  History shares the cursor-paged Recents browser, filtered to the current agent.
+  Title edits, deletion and context reset retain dirty/critical-write guards.
+  The agent/permissions/options and recipients/connections pickers remain task-local
+  transient choices, alongside media preview and voice conversation.
+- Native permissions controls contain Full access, Auto and Ask every time only,
+  with the effective agent override shown read-only. Chat and agent settings use
+  the server default without a native selector or per-turn override. Voice automatically uses an available server default, without a source selector. This is the user's deliberate native scope (2026-10-28).
+- Native Automations is display-only: configured tasks, source/schedule, target,
+  confirmation policy, read-only status and paged run history with exact thread
+  links. It issues GET requests only. Creation, changes and execution belong to
+  NyxBot; no native editor, preferences, toggle, invoke, delete or webhook setup.
+- Reply activity/receipts and prose have a 16pt gap. Ordinary Markdown blocks have
+  12pt sibling spacing; headings have 20pt (h1) or 16pt above and 8pt below, without
+  start/end margins. Horizontally scrolling tables include the transcript's 12pt
+  trailing inset. Private, live and crew replies share the same layout.
+- Native skills are read-only except explicit version pinning and “Remove from
+  agent”. “Use latest (version)” resolves the newest supported package and pins
+  its exact version/hash; no floating latest contract exists. Editing belongs to
+  NyxBot (“To change this skill, ask NyxBot.”). Owner publication decision cards
+  retain their reviewed files and guarded approve/decline actions, without an editor.
+- Settings → Display stores chat layout on this device with AsyncStorage. Column
+  maximum defaults to 758pt, clamps to actual space, and is adjustable only on
+  windows at least 600pt wide (360–1200pt range). Composer maximum defaults to the
+  existing native 120pt (80–320pt preference range) and caps against available
+  keyboard/window space, reserving transcript space down to a 44pt input. It
+  grows with content; the setting never forces blank height. Reset changes only
+  these layout values. Web storage and width/index behavior are unchanged.
+- Settings preserves system text scaling. At narrow effective widths, identity,
+  status, label/value and switch rows stack so long text can wrap within cards.
+  Live system text-size changes refresh Settings and Display label measurements
+  while retaining the page, scroll position and control state.
+  Avatar initials retain enough space at the selected text size. Display step
+  controls use fixed-size icons in labelled 44pt targets while labels and values
+  continue to scale; the controls can wrap onto another line.
+- Navigation, transcript, multiline input and horizontal attachment, recipient
+  and member strips show fades only at measured overflowing edges. Top/start cues are gentler.
+  Fades ignore pointer/accessibility input and disappear at revealed edges.
+  Transcript measurement calls the existing follow handlers first and retains
+  their drag/momentum behavior and anchors.
+- Mobile muted/tertiary tokens were corrected across their shared consumers:
+  dark `#8b839f`/`#827a96`, light `#746981` for both. Light status and tinted-brand
+  text were darkened. These affect timestamps, metadata, placeholders, section
+  labels and icon affordances throughout native management/chat; they no longer
+  rely on faint text to express secondary hierarchy. Primary branding and web
+  tokens are unchanged. Text colors have at least 4.5:1 against the native
+  base/card/cardSoft surfaces; essential drawer/composer controls meet 3:1.
+
+Native support remains portrait iPhone on iOS and Android phone, with wide
+Android windows as a secondary layout. Eligible private chats expose a
+voice-conversation mode in the trailing composer button when the server enables
+`assistant:voice`: an empty composer shows the waveform, text or attachments
+show Send, and an active reply shows Stop. Dictation streams microphone audio to
+the server for review before insertion, matching the web’s private-chat scope.
+Crew chats retain the keyboard’s own dictation.
+
+The native Machines drawer supports personal machines and organization machines
+the signed-in person administers. It includes inventory, read-only local
+capability and isolation details, guarded owner policy and update actions,
+saved-login metadata and removal, activity, and revisioned per-agent machine
+access. Context changes open the exact owner action card for review. Managed
+and hosted setup, saved-login creation, and external API-key/OAuth grants use
+web handoffs. Desktop entries from machine detail and private-chat tool cards
+open a full-screen route with machine, conversation, context and display
+selectors preserved. The viewer requires native privacy protection and a
+compatible server; live-frame, performance and app-switcher verification remain
+release gates. This describes mobile behavior only. iPad, additional
+orientations and RN-web remain outside native support.

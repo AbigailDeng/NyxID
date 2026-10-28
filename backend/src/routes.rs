@@ -1911,6 +1911,7 @@ fn build_router_internal(router_state: Option<AppState>) -> (Router<AppState>, R
             "/wallet",
             get(handlers::billing::get_wallet).post(handlers::billing::provision_wallet),
         )
+        .route("/wallet/view", get(handlers::billing::view_wallet))
         .route("/topup", post(handlers::billing::create_topup))
         .route("/topups", get(handlers::billing::list_topups))
         .route("/bill", get(handlers::billing::get_bill))

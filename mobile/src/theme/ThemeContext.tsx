@@ -1,7 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useColorScheme } from "react-native";
 import * as SecureStore from "expo-secure-store";
-import { darkColors, lightColors, type ThemeColors } from "./mobileTheme";
+import {
+  darkColors,
+  darkSheetColors,
+  lightColors,
+  lightSheetColors,
+  type ThemeColors,
+} from "./mobileTheme";
 
 export type ThemePreference = "system" | "light" | "dark";
 export type ThemeMode = "light" | "dark";
@@ -62,4 +68,17 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
 export function useTheme(): ThemeContextValue {
   return useContext(ThemeContext);
+}
+
+/** Everything rendered inside a pull-up drawer uses the drawer's elevated palette. */
+export function SheetThemeProvider({ children }: { children: React.ReactNode }) {
+  const parent = useTheme();
+  const value = useMemo<ThemeContextValue>(
+    () => ({
+      ...parent,
+      colors: parent.mode === "light" ? lightSheetColors : darkSheetColors,
+    }),
+    [parent],
+  );
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

@@ -1,7 +1,11 @@
 import type { ExpoConfig, ConfigContext } from "expo/config";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { loadEnv, resolveProfile, appIdentity } = require("./scripts/lib/load-env");
+const {
+  loadEnv,
+  resolveProfile,
+  appIdentity,
+} = require("./scripts/lib/load-env");
 
 function safeHost(url: string): string | null {
   try {
@@ -27,9 +31,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const apiHost = safeHost(r.apiBaseUrl);
   const associatedDomains: string[] = [];
   if (apiHost) associatedDomains.push(`applinks:${apiHost}`);
-  if (r.universalLinkHost) associatedDomains.push(`applinks:${r.universalLinkHost}`);
+  if (r.universalLinkHost)
+    associatedDomains.push(`applinks:${r.universalLinkHost}`);
 
-  const androidIntentFilters: NonNullable<ExpoConfig["android"]>["intentFilters"] = [
+  const androidIntentFilters: NonNullable<
+    ExpoConfig["android"]
+  >["intentFilters"] = [
     {
       action: "VIEW",
       data: [{ scheme: ident.scheme }],
@@ -67,14 +74,25 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       associatedDomains,
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
-        NSCameraUsageDescription: "Allow NyxID to scan login approval QR codes.",
+        UISupportedInterfaceOrientations: [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationLandscapeLeft",
+          "UIInterfaceOrientationLandscapeRight",
+        ],
+        NSCameraUsageDescription:
+          "Allow NyxID to scan login approval QR codes and take photos to attach in chats.",
+        NSMicrophoneUsageDescription:
+          "Allow NyxID to use your microphone for dictation and voice conversations.",
       },
     },
     android: {
       package: r.androidPackage,
       versionCode: Number(r.androidVersionCode),
       googleServicesFile: "./google-services.json",
-      permissions: ["android.permission.CAMERA"],
+      permissions: [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+      ],
       blockedPermissions: [
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
@@ -86,6 +104,16 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       intentFilters: androidIntentFilters,
     },
     plugins: [
+      ["expo-screen-orientation", { initialOrientation: "PORTRAIT_UP" }],
+      [
+        "expo-image-picker",
+        {
+          photosPermission: false,
+          cameraPermission: "Allow NyxID to scan login approval QR codes and take photos to attach in chats.",
+          microphonePermission:
+            "Allow NyxID to use your microphone for dictation and voice conversations.",
+        },
+      ],
       "expo-secure-store",
       [
         "expo-splash-screen",
@@ -108,12 +136,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ],
       "expo-font",
       "expo-web-browser",
+      "expo-sharing",
       [
         "expo-camera",
         {
-          cameraPermission: "Allow NyxID to scan login approval QR codes.",
-          microphonePermission: false,
-          recordAudioAndroid: false,
+          cameraPermission: "Allow NyxID to scan login approval QR codes and take photos to attach in chats.",
+          microphonePermission:
+            "Allow NyxID to use your microphone for dictation and voice conversations.",
+          recordAudioAndroid: true,
         },
       ],
     ],

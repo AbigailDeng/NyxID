@@ -141,7 +141,7 @@ function appIdentity(env) {
     name: env.APP_NAME || "NyxID Mobile",
     slug: env.APP_SLUG || "nyxid-mobile",
     scheme: env.APP_SCHEME || "nyxid",
-    version: env.APP_VERSION || "1.0.1",
+    version: env.APP_VERSION || "1.0.4",
   };
 }
 
