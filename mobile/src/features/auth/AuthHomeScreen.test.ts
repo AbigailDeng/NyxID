@@ -3,6 +3,7 @@ import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { MfaChallengeError } from "../../lib/auth/mfaChallenge";
 import { ApiError } from "../../lib/api/ApiError";
+import { resolveErrorMessage } from "../../lib/api/errorMessages";
 import { deferred, hookHarness } from "../assistant/assistantHookTestHarness";
 import type { PublicAuthConfig } from "./publicAuthConfig";
 import * as emailLogin from "./emailLogin";
@@ -60,6 +61,7 @@ function setup({
   const calls: LoginInput[] = [];
   const sessions: Session[] = [];
   const socialUrls: string[] = [];
+  const registrationUrls: string[] = [];
   const navigations: string[] = [];
   const urlListeners: Array<(event: { url: string }) => void> = [];
   let login = async (_input: LoginInput) => signedIn;
@@ -77,6 +79,10 @@ function setup({
   const harness = hookHarness<Element>({
     "react/jsx-runtime": { jsx, jsxs: jsx, Fragment: "Fragment" },
     "expo-web-browser": {
+      openBrowserAsync: async (url: string) => {
+        registrationUrls.push(url);
+        return { type: "dismiss" };
+      },
       openAuthSessionAsync: async (url: string) => {
         socialUrls.push(url);
         return { type: "cancel" };
@@ -150,7 +156,7 @@ function setup({
       },
     },
     "../../lib/api/errorMessages": {
-      resolveErrorMessage: (error: Error) => error.message,
+      resolveErrorMessage,
     },
     "./AuthSessionContext": {
       useAuthSession: () => ({
@@ -164,6 +170,7 @@ function setup({
     "./publicAuthConfig": publicAuthConfig,
     "./socialCallback": socialCallback,
     "../../lib/telemetry": { capture: () => {} },
+    "../../lib/env": { NYXID_FRONTEND_URL: "https://nyxid.example" },
     "../../theme/ThemeContext": { useTheme: () => ({ colors }) },
     "../../theme/flowStyles": { createFlowStyles: () => ({}) },
   });
@@ -209,6 +216,7 @@ function setup({
     calls,
     sessions,
     socialUrls,
+    registrationUrls,
     navigations,
     configRefetches: () => configRefetches,
     setLogin: (handler: typeof login) => {
@@ -232,8 +240,9 @@ function setup({
   };
 }
 
-test("server-enabled email login adopts the session without changing credentials", async (t) => {
-  const screen = setup();
+for (const emailEnabled of [false, true]) {
+test(`email login adopts the session when registration is ${emailEnabled ? "enabled" : "disabled"}`, async (t) => {
+  const screen = setup({ emailEnabled });
   t.after(screen.harness.unmount);
   assert.equal(screen.input("Password").props.secureTextEntry, true);
   assert.equal(screen.social().length, 0);
@@ -271,6 +280,7 @@ test("server-enabled email login adopts the session without changing credentials
     "Email does not start another config request",
   );
 });
+}
 
 for (const emailEnabled of [false, true]) {
   for (let subset = 0; subset < 8; subset++) {
@@ -286,11 +296,12 @@ for (const emailEnabled of [false, true]) {
       );
       const tree = elements(screen.harness.value());
       for (const label of ["Email", "Password"]) {
-        assert.equal(tree.some((element) => element.props.accessibilityLabel === label), emailEnabled);
+        assert.equal(tree.some((element) => element.props.accessibilityLabel === label), true);
       }
-      assert.equal(tree.some((element) => element.type === "Pressable" && textContent(element) === "Sign In"), emailEnabled);
-      assert.equal(tree.some((element) => element.type === "Text" && textContent(element) === "or"), emailEnabled && providers.length > 0);
-      if (emailEnabled && providers.length > 0) {
+      assert.equal(tree.some((element) => element.type === "Pressable" && textContent(element) === "Sign In"), true);
+      assert.equal(tree.some((element) => element.type === "Text" && textContent(element) === "or"), providers.length > 0);
+      assert.equal(tree.some((element) => element.props.accessibilityLabel === "Create account"), emailEnabled);
+      if (providers.length > 0) {
         assert.ok(tree.indexOf(screen.social().at(-1)!) < tree.indexOf(screen.input("Email")), "provider rows precede email, matching the web");
       }
     });
@@ -298,11 +309,13 @@ for (const emailEnabled of [false, true]) {
 }
 
 for (const state of ["loading", "error"] as const) {
-  test(`unavailable ${state} config does not offer undiscovered login methods`, async (t) => {
+  test(`unavailable ${state} config keeps email login and provider retry without offering undiscovered providers`, async (t) => {
     const screen = setup({ state, providers: ["google", "github", "apple"], emailEnabled: true });
     t.after(screen.harness.unmount);
     assert.deepEqual(screen.social(), []);
-    assert.equal(elements(screen.harness.value()).some((element) => element.type === "TextInput"), false);
+    screen.input("Email");
+    screen.input("Password");
+    assert.equal(elements(screen.harness.value()).some((element) => element.props.accessibilityLabel === "Create account"), false);
     if (state === "error") {
       const retry = elements(screen.harness.value()).find((element) => element.type === "Pressable" && textContent(element) === "Retry sign-in options");
       assert.ok(retry);
@@ -316,16 +329,39 @@ for (const state of ["loading", "error"] as const) {
   });
 }
 
-test("email form disappears when refreshed configuration disables it", (t) => {
-  const screen = setup();
+test("disabling registration keeps email credentials and social providers while hiding Create account", (t) => {
+  const screen = setup({ providers: ["google", "github", "apple"] });
   t.after(screen.harness.unmount);
   screen.change("Email", "reviewer@example.test");
   screen.change("Password", "password");
   screen.setEmailEnabled(false);
-  assert.equal(elements(screen.harness.value()).some((element) => element.type === "TextInput"), false);
+  assert.equal(screen.input("Email").props.value, "reviewer@example.test");
+  assert.equal(screen.input("Password").props.value, "password");
+  assert.equal(screen.submit().props.disabled, false);
+  assert.deepEqual(screen.social().map((element) => element.props.provider), ["google", "github", "apple"]);
+  assert.equal(elements(screen.harness.value()).some((element) => element.props.accessibilityLabel === "Create account"), false);
 });
 
-test("social-only sign-in still verifies MFA, supports recovery and keeps legal links", async (t) => {
+test("Create account opens the configured registration page only when registration is enabled", async (t) => {
+  const screen = setup({ emailEnabled: false });
+  t.after(screen.harness.unmount);
+  assert.deepEqual(screen.registrationUrls, []);
+  screen.setEmailEnabled(true);
+  const registration = elements(screen.harness.value()).find((element) => element.props.accessibilityLabel === "Create account");
+  assert.ok(registration);
+  assert.equal(registration.props.accessibilityRole, "link");
+  assert.equal(registration.props.style.minHeight, 44);
+  registration.props.onPress();
+  await screen.harness.settle();
+  assert.deepEqual(screen.registrationUrls, ["https://nyxid.example/register"]);
+  assert.deepEqual(screen.calls, []);
+  screen.setEmailEnabled(false);
+  registration.props.onPress();
+  await screen.harness.settle();
+  assert.equal(screen.registrationUrls.length, 1, "a stale registration action cannot bypass the config gate");
+});
+
+test("registration-disabled social sign-in still verifies MFA, supports recovery and keeps legal links", async (t) => {
   const screen = setup({ emailEnabled: false, providers: ["google"] });
   t.after(screen.harness.unmount);
   screen.openUrl("nyxid://auth/social/callback#status=mfa_required&provider=google&mfa_token=synthetic-challenge");
@@ -341,7 +377,8 @@ test("social-only sign-in still verifies MFA, supports recovery and keeps legal 
   await screen.harness.settle();
   assert.deepEqual(screen.calls, [{ mfaCode: "abcdef12" }]);
   assert.equal(screen.sessions.length, 1);
-  assert.equal(elements(screen.harness.value()).some((element) => element.type === "TextInput"), false);
+  assert.equal(screen.input("Password").props.value, "");
+  assert.equal(elements(screen.harness.value()).some((element) => element.props.accessibilityLabel === "Recovery code"), false);
   for (const label of ["Terms", "Privacy"]) {
     const link = elements(screen.harness.value()).find((element) => element.type === "Text" && textContent(element) === label);
     assert.ok(link);
@@ -350,17 +387,18 @@ test("social-only sign-in still verifies MFA, supports recovery and keeps legal 
   assert.deepEqual(screen.navigations, ["TermsOfService", "PrivacyPolicy"]);
 });
 
-test("social-only configuration preserves provider error mapping", (t) => {
+test("registration-disabled configuration preserves provider error mapping and email login", (t) => {
   const screen = setup({ emailEnabled: false, providers: ["github"] });
   t.after(screen.harness.unmount);
   screen.openUrl("nyxid://auth/social/callback?status=error&provider=github&error=social_auth_conflict");
   assert.match(textContent(screen.harness.value()), /This email is linked to another login method\./);
   assert.equal(screen.sessions.length, 0);
-  assert.equal(elements(screen.harness.value()).some((element) => element.type === "TextInput"), false);
+  screen.input("Email");
+  screen.input("Password");
 });
 
-test("email authentication handles the actual MFA challenge before adopting a session", async (t) => {
-  const screen = setup();
+test("registration-disabled email authentication handles the actual MFA challenge before adopting a session", async (t) => {
+  const screen = setup({ emailEnabled: false });
   t.after(screen.harness.unmount);
   screen.setLogin(async () => { throw new MfaChallengeError("synthetic-challenge"); });
   screen.change("Email", "reviewer@example.test");
@@ -384,12 +422,12 @@ test("email authentication handles the actual MFA challenge before adopting a se
 });
 
 test("failed credentials show feedback and permit retry without a false MFA prompt", async (t) => {
-  const screen = setup();
+  const screen = setup({ emailEnabled: false });
   t.after(screen.harness.unmount);
   screen.setLogin(async () => {
     throw new ApiError({
       errorKey: "authentication_failed",
-      errorCode: 2001,
+      errorCode: 2000,
       statusCode: 401,
       message: "Invalid email or password",
     });
@@ -415,6 +453,23 @@ test("failed credentials show feedback and permit retry without a false MFA prom
   await screen.harness.settle();
   assert.equal(screen.calls.length, 2);
   assert.equal(screen.sessions.length, 1);
+});
+
+test("registration-disabled email login preserves the server's inactive-account error", async (t) => {
+  const screen = setup({ emailEnabled: false, providers: ["google", "github", "apple"] });
+  t.after(screen.harness.unmount);
+  screen.setLogin(async () => {
+    throw new ApiError({ errorKey: "forbidden", errorCode: 1002, statusCode: 403, message: "Account is deactivated" });
+  });
+  screen.change("Email", "inactive@example.test");
+  screen.change("Password", "password");
+  screen.submit().props.onPress();
+  await screen.harness.settle();
+  assert.match(textContent(screen.harness.value()), /Account is deactivated/);
+  assert.equal(screen.sessions.length, 0);
+  assert.equal(screen.submit().props.disabled, false);
+  assert.equal(elements(screen.harness.value()).some((element) => element.props.accessibilityLabel === "Authenticator code"), false);
+  assert.deepEqual(screen.social().map((element) => element.props.provider), ["google", "github", "apple"]);
 });
 
 test("a pending email attempt blocks duplicate presses and concurrent social login", async (t) => {

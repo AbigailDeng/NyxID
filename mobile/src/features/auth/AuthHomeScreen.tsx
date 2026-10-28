@@ -36,6 +36,7 @@ import {
   type SocialProvider,
 } from "./socialCallback";
 import { capture } from "../../lib/telemetry";
+import { NYXID_FRONTEND_URL } from "../../lib/env";
 import { useTheme } from "../../theme/ThemeContext";
 import type { ThemeColors } from "../../theme/mobileTheme";
 import { createFlowStyles } from "../../theme/flowStyles";
@@ -438,6 +439,17 @@ export function AuthHomeScreen({ navigation }: Props) {
   const prompt = mfaPrompt(mfaProvider, recoveryMode);
   const isAnyPending = isSocialAuthPending || isEmailAuthPending;
 
+  const openRegistration = async () => {
+    if (!loginConfig?.emailAuthEnabled || isAnyPending || mfaChallenge) return;
+    try {
+      await WebBrowser.openBrowserAsync(
+        new URL("/register", NYXID_FRONTEND_URL).href,
+      );
+    } catch (error) {
+      setLoginError(resolveAuthError(error));
+    }
+  };
+
   return (
     <ScreenContainer>
       <ScrollView
@@ -459,7 +471,7 @@ export function AuthHomeScreen({ navigation }: Props) {
           </Text>
         </View>
 
-        {/* Sign-in methods follow this server's public configuration. */}
+        {/* Social providers follow server config; existing accounts can always sign in. */}
         <View style={flowStyles.card}>
           {/* Social login */}
           {publicConfig.isPending ? (
@@ -524,7 +536,6 @@ export function AuthHomeScreen({ navigation }: Props) {
             />
           ) : null}
 
-          {loginConfig?.emailAuthEnabled || mfaChallenge ? (
             <>
               {loginConfig && loginConfig.socialProviders.length > 0 ? (
                 <View style={styles.dividerRow}>
@@ -533,7 +544,7 @@ export function AuthHomeScreen({ navigation }: Props) {
                   <View style={styles.dividerLine} />
                 </View>
               ) : null}
-              {loginConfig?.emailAuthEnabled && prompt.showPasswordFields && (
+              {prompt.showPasswordFields && (
                 <>
                   <TextInput
                     style={styles.input}
@@ -596,6 +607,17 @@ export function AuthHomeScreen({ navigation }: Props) {
                 </ExpoLinearGradient>
               </Pressable>
             </>
+
+          {loginConfig?.emailAuthEnabled && !mfaChallenge ? (
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel="Create account"
+              disabled={isAnyPending}
+              onPress={() => void openRegistration()}
+              style={styles.createAccountLink}
+            >
+              <Text style={styles.legalLink}>Create account</Text>
+            </Pressable>
           ) : null}
 
           {/* Legal */}
@@ -718,6 +740,11 @@ const createStyles = (c: ThemeColors) =>
     },
     buttonDisabled: {
       opacity: 0.5,
+    },
+    createAccountLink: {
+      minHeight: 44,
+      alignItems: "center",
+      justifyContent: "center",
     },
     // DESIGN.md §Banners & callouts: rounded-xl with theme-aware destructive tint.
     errorBanner: {
