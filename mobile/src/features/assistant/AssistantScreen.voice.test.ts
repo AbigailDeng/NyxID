@@ -321,6 +321,12 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     "./AssistantWorkingContext": {
       AssistantWorkingContext: "AssistantWorkingContext",
     },
+    "./AssistantBanner": {
+      AssistantBanner: "AssistantBanner",
+      AssistantConnectionBanner: "AssistantConnectionBanner",
+      AssistantErrorNotice: "AssistantErrorNotice",
+      JumpToLatest: "JumpToLatest",
+    },
     "./AssistantCopyButton": { AssistantCopyButton: "AssistantCopyButton" },
     "./AssistantAttachmentView": {
       AssistantAttachmentView: "AssistantAttachmentView",

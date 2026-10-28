@@ -64,6 +64,7 @@ async function harness() {
     await done.promise;
   };
   const h = hookHarness<ReturnType<typeof useAssistant>>({
+    "./useAssistantLiveRefresh": { useAssistantLiveRefresh: () => {} },
     "react-native": {
       AppState: {
         currentState: "active",
@@ -215,6 +216,7 @@ test("server recovery is checked before retry; concurrent taps cannot replay it"
     },
   ];
   const h = hookHarness<ReturnType<typeof useAssistant>>({
+    "./useAssistantLiveRefresh": { useAssistantLiveRefresh: () => {} },
     "react-native": {
       AppState: {
         currentState: "active",
@@ -293,6 +295,7 @@ test("private feedback fences concurrent taps and never applies an old thread's 
     },
   ];
   const h = hookHarness<ReturnType<typeof useAssistant>>({
+    "./useAssistantLiveRefresh": { useAssistantLiveRefresh: () => {} },
     "react-native": {
       AppState: {
         currentState: "active",

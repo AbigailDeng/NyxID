@@ -7,6 +7,7 @@ import { assistantApi, streamAssistantTurn } from "../../lib/api/assistantApi";
 import { agentsApi } from "../../lib/api/agentsApi";
 import { ApiError } from "../../lib/api/ApiError";
 import { resolveChatAgentId } from "./assistantAgentContext";
+import { useAssistantLiveRefresh } from "./useAssistantLiveRefresh";
 import { recoveryReason } from "./assistantTurnPresentation";
 import {
   assistantTurnBody,
@@ -371,6 +372,13 @@ export function useAssistant(
     }, 2000);
     return () => clearInterval(interval);
   }, [active, conversationId, needsPolling, loadingOlder, refreshHistory]);
+
+  useAssistantLiveRefresh(
+    active,
+    conversationId,
+    loadingOlder || needsPolling,
+    refreshHistory,
+  );
 
   const send = useCallback(
     async (

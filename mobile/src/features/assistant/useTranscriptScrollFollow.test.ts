@@ -163,3 +163,21 @@ test("a live footer disappearing during a history drag does not pull the reader 
   assert.equal(x.offsets.length, previous);
   assert.equal(x.h.flush().following, false);
 });
+
+test("jump only appears away from latest, and resumes follow after explicit activation", () => {
+  const x = harness();
+  let p = x.h.value().listProps;
+  p.onLayout(layout(400));
+  p.onContentSizeChange(300, 1200);
+  p.onScroll(scroll(1200, 400, 800));
+  x.h.value().pause();
+  assert.equal(x.h.flush().showJump, false);
+  p.onScrollBeginDrag();
+  p.onScrollEndDrag(scroll(1200, 400, 100));
+  p.onScroll(scroll(1200, 400, 100));
+  assert.equal(x.h.flush().showJump, true);
+  x.h.value().follow();
+  assert.equal(x.h.flush().showJump, false);
+  assert.equal(x.offsets.at(-1), 800);
+  x.h.unmount();
+});

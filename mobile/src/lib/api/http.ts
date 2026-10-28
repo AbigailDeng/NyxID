@@ -1,3 +1,4 @@
+import { assistantConnection } from "./connectionState";
 import { createSessionRefresh } from "../auth/sessionRefresh";
 import Constants from "expo-constants";
 import { fetch as expoFetch } from "expo/fetch";
@@ -396,7 +397,7 @@ async function invalidateSession() {
 export async function requestAuthenticatedResponse(path: string, options: RequestOptions = {}) {
   const { response } = await executeAuthenticatedRequest({
     url: buildUrl(path), options, clientHeaders: clientHeaders(),
-    transport: expoFetch, loadSession: loadStoredAuthSession,
+    transport: (url, init) => assistantConnection.observe(() => expoFetch(url, init), init.signal ?? undefined), loadSession: loadStoredAuthSession,
     refresh: refreshAccessTokenWithSingleFlight, invalidate: invalidateSession,
     toError: buildApiError, getAuthEpoch,
   });
@@ -452,12 +453,12 @@ export async function requestJson<T>(path: string, options: RequestOptions = {})
 
   const send = () => {
     guard();
-    return fetch(buildUrl(path), {
+    return assistantConnection.observe(() => fetch(buildUrl(path), {
       method,
       headers,
       signal: options.signal,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    });
+    }), options.signal);
 
   };
 
@@ -576,7 +577,7 @@ export async function requestAuthenticatedBytes(
     url: buildUrl(path),
     options: { signal },
     clientHeaders: clientHeaders(),
-    transport: expoFetch,
+    transport: (url, init) => assistantConnection.observe(() => expoFetch(url, init), init.signal ?? undefined),
     loadSession: loadStoredAuthSession,
     refresh: refreshAccessTokenWithSingleFlight,
     invalidate: invalidateSession,

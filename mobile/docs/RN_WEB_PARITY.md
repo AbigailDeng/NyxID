@@ -206,3 +206,14 @@ saved excerpts and the real per-conversation future-excerpt preference. Inline
 tool/upload images use authenticated bytes in a private cache; blur, background,
 account changes and unmount abort reads and remove cached files. Documents keep
 native save/share. No Markdown image URL is fetched automatically.
+
+Private idle chats now subscribe to the existing shared metadata stream and
+refresh authoritative history, with a 15-second fallback when that stream is
+unavailable. They retain active-turn/pending-action polls and thread/account /
+foreground guards. Crew pending cards share the web Confirm/Cancel, person
+Allow/Deny and authored-review language while keeping native ownership checks.
+Both transcripts offer Jump to latest only when the reader is away from the end,
+dismiss each request error independently, and show the web offline/unreachable /
+three-second reconnected copy. Transport observations ignore aborted, stale
+account and superseded failures. Assistant output uses the exact web XML/DSML
+function-call sanitizer before display/copy; user input is left intact.

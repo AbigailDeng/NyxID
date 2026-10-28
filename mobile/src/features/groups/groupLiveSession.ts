@@ -42,6 +42,11 @@ export function createGroupLiveSession({
 }) {
   let active: Session | undefined;
   const listeners = new Set<() => void>();
+  const eventListeners = new Set<{
+    client: QueryClient;
+    epoch: number;
+    receive: (event: AssistantLiveEvent) => void;
+  }>();
   const notify = () => {
     for (const listener of [...listeners]) listener();
   };
@@ -125,6 +130,13 @@ export function createGroupLiveSession({
         onStatus: (status) => setStatus(session, status),
         onEvent: (event) => {
           if (!usable(session)) return;
+          for (const listener of eventListeners) {
+            if (
+              listener.client === session.client &&
+              listener.epoch === session.epoch
+            )
+              listener.receive(event);
+          }
           const refresh = groupLiveRefresh(session.epoch, event, session.seen);
           queue(session, "now", refresh.now);
           queue(session, "lists", refresh.lists);
@@ -165,6 +177,17 @@ export function createGroupLiveSession({
         released = true;
         session.consumers.delete(consumer);
         if (active === session && !session.consumers.size) stop(session);
+      };
+    },
+    subscribeEvents(
+      client: QueryClient,
+      epoch: number,
+      receive: (event: AssistantLiveEvent) => void,
+    ) {
+      const listener = { client, epoch, receive };
+      eventListeners.add(listener);
+      return () => {
+        eventListeners.delete(listener);
       };
     },
     subscribe(listener: () => void) {

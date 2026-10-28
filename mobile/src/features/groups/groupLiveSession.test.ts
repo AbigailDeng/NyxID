@@ -366,3 +366,30 @@ test("private and channel event bursts share the throttled drawer refresh and re
   h.advance(2000);
   assert.equal(h.invalidations.length, 2);
 });
+
+test("private transcript listeners share one stream and reject stale epoch/released callbacks", () => {
+  const h = harness();
+  const events: string[] = [];
+  const release = h.session.acquire(h.client, 1, () => true);
+  const unsubscribe = h.session.subscribeEvents(h.client, 1, (event) =>
+    events.push(event.type),
+  );
+  const other = h.session.subscribeEvents(h.client, 2, () =>
+    events.push("wrong epoch"),
+  );
+  h.runs[0]!.onEvent({
+    type: "conversation",
+    id: "private",
+    group_id: null,
+    turn_id: null,
+    messages: 1,
+  });
+  assert.deepEqual(events, ["conversation"]);
+  unsubscribe();
+  h.runs[0]!.onEvent({ type: "ready" });
+  assert.equal(events.length, 1);
+  release();
+  h.runs[0]!.onEvent({ type: "resync" });
+  assert.equal(events.length, 1);
+  other();
+});

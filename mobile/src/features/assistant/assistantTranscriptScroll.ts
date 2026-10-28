@@ -21,6 +21,7 @@ export type TranscriptScrollSample = {
 export function createTranscriptScrollFollower(bottomThreshold = 80) {
   let following = true;
   let contentHeight = 0;
+  let offset = 0;
   let viewportHeight = 0;
   let gesture: "idle" | "drag" | "momentum" = "idle";
   let userMomentumAllowed = false;
@@ -49,9 +50,15 @@ export function createTranscriptScrollFollower(bottomThreshold = 80) {
 
   return {
     isFollowing: () => following,
+    isAwayFromEnd: () =>
+      !following &&
+      viewportHeight > 0 &&
+      transcriptEndOffset(contentHeight, viewportHeight) - offset >
+        bottomThreshold,
     reset() {
       following = true;
       contentHeight = 0;
+      offset = 0;
       viewportHeight = 0;
       gesture = "idle";
       userMomentumAllowed = false;
@@ -82,6 +89,7 @@ export function createTranscriptScrollFollower(bottomThreshold = 80) {
         : null;
     },
     scroll(sample: TranscriptScrollSample) {
+      offset = sample.offset;
       // Passive events must neither pause following nor pull history readers
       // back to the end when content shrinks underneath their current offset.
       if (gesture !== "idle") {

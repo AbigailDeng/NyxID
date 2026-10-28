@@ -59,6 +59,13 @@ import {
   type AttachmentMention,
 } from "../assistant/assistantMentions";
 import { AssistantActivityDisclosure } from "../assistant/AssistantActivityDisclosure";
+import {
+  AssistantConnectionBanner,
+  AssistantErrorNotice,
+  JumpToLatest,
+} from "../assistant/AssistantBanner";
+import { sanitizeAssistantMessageContent } from "../assistant/assistantChatContent";
+import { GroupPendingCard } from "./GroupPendingCard";
 import { GroupMachineReceipts } from "./GroupMachineReceipts";
 import { AssistantReplyFeedback } from "../assistant/AssistantReplyFeedback";
 import { AssistantCopyButton } from "../assistant/AssistantCopyButton";
@@ -462,16 +469,13 @@ function GroupChat({
       scroll={false}
       contentStyle={styles.chatPage}
     >
-      {!chat.online && (
-        <Notice message="You're offline. Reconnect to read new messages and send." />
-      )}
+      <AssistantConnectionBanner onRetry={() => void chat.recoverDelivery()} />
       {(chat.recoveryRequired ||
         chat.error ||
         chat.actionError ||
         localError) && (
         <View style={styles.error}>
-          <Notice
-            tone="error"
+          <AssistantErrorNotice
             message={
               chat.recoveryRequired
                 ? "This message may have been delivered. Refresh the crew and check its history before sending again."
@@ -622,8 +626,13 @@ function GroupChat({
         />
         <ScrollEdgeFades edges={transcriptEdges.edges} color={colors.bg} />
       </View>
+      <JumpToLatest
+        visible={transcriptScroll.showJump}
+        onPress={transcriptScroll.follow}
+      />
       {!!group && !!chat.data?.pending_actions.length && (
         <ScrollView
+          accessibilityLabel="Actions waiting for you"
           style={styles.pending}
           contentContainerStyle={{ gap: 8 }}
           keyboardShouldPersistTaps="handled"
@@ -632,110 +641,39 @@ function GroupChat({
             const member = group?.members.find(
               (row) => row.id === action.agent_id,
             );
-            const expired = Date.parse(action.expires_at) <= Date.now();
-            const review = groupPendingReview(
-              action,
-              identity.data?.id,
-              group?.owner?.type === "org",
-            );
-            const canDecide = groupCanDecide(
-              action,
-              identity.data?.id,
-              group?.owner?.type === "org",
-            );
             return (
-              <Card
+              <GroupPendingCard
                 key={
                   action.acknowledgement_id ??
                   action.approval_request_id ??
                   `${action.conversation_id}:${index}`
                 }
-                style={styles.pendingCard}
-              >
-                <Label numberOfLines={3}>
-                  {member ? title(member.id, member.name) : "An agent"} wants
-                  to: {action.summary}
-                </Label>
-                {expired ? (
-                  <Label muted>
-                    This request expired. Refresh the crew for its latest state.
-                  </Label>
-                ) : action.authored_skill ? (
-                  review && onOpenConversation ? (
-                    <ActionButton
-                      label="Review draft"
-                      variant="secondary"
-                      disabled={blocked}
-                      onPress={() => {
+                action={action}
+                name={member ? title(member.id, member.name) : "An agent"}
+                actorId={identity.data?.id}
+                organization={group?.owner?.type === "org"}
+                blocked={blocked}
+                onReview={
+                  onOpenConversation
+                    ? () => {
                         if (blocked || !chat.available()) return;
-                        const currentReview = groupPendingReview(
+                        const review = groupPendingReview(
                           action,
                           identity.data?.id,
                           group?.owner?.type === "org",
                         );
-                        if (!currentReview) return;
-                        onOpenConversation({
-                          conversationId: currentReview.conversationId,
-                          agentId: action.agent_id ?? undefined,
-                          acknowledgementId: currentReview.acknowledgementId,
-                        });
-                      }}
-                    />
-                  ) : (
-                    <Label muted>
-                      Awaiting{" "}
-                      {action.triggering_person?.display_name ?? "owner"} review
-                    </Label>
-                  )
-                ) : action.triggering_person ? (
-                  <>
-                    <Label muted>
-                      Awaiting {action.triggering_person.display_name}
-                    </Label>
-                    {canDecide && (
-                      <View style={styles.actions}>
-                        <View style={styles.fill}>
-                          <ActionButton
-                            label="Deny"
-                            variant="secondary"
-                            disabled={blocked}
-                            onPress={() => void decide(action, "deny")}
-                          />
-                        </View>
-                        <View style={styles.fill}>
-                          <ActionButton
-                            label="Allow"
-                            disabled={blocked}
-                            onPress={() => void decide(action, "allow")}
-                          />
-                        </View>
-                      </View>
-                    )}
-                  </>
-                ) : action.confirm_phrase && group?.owner?.type !== "org" ? (
-                  <View style={styles.actions}>
-                    <View style={styles.fill}>
-                      <ActionButton
-                        label="Cancel action"
-                        variant="secondary"
-                        disabled={blocked}
-                        onPress={() => void answer(action, false)}
-                      />
-                    </View>
-                    <View style={styles.fill}>
-                      <ActionButton
-                        label="Confirm action"
-                        disabled={blocked}
-                        onPress={() => void answer(action, true)}
-                      />
-                    </View>
-                  </View>
-                ) : (
-                  <Label muted>
-                    Awaiting the owner in the agent's conversation.
-                  </Label>
-                )}
-              </Card>
+                        if (review)
+                          onOpenConversation({
+                            conversationId: review.conversationId,
+                            agentId: action.agent_id ?? undefined,
+                            acknowledgementId: review.acknowledgementId,
+                          });
+                      }
+                    : undefined
+                }
+                onDecision={(choice) => void decide(action, choice)}
+                onAnswer={(yes) => void answer(action, yes)}
+              />
             );
           })}
         </ScrollView>
@@ -1055,7 +993,7 @@ function GroupMessage({
           rules={rules}
           onLinkPress={link}
         >
-          {message.text}
+          {sanitizeAssistantMessageContent(message.text)}
         </Markdown>
       )}
       {!!message.activities?.length && (
@@ -1067,7 +1005,9 @@ function GroupMessage({
       <GroupMachineReceipts groupId={group?.id} message={message} />
       {message.role === "agent" && !!message.text.trim() && (
         <View style={styles.feedbackActions}>
-          <AssistantCopyButton text={message.text} />
+          <AssistantCopyButton
+            text={sanitizeAssistantMessageContent(message.text)}
+          />
           <AssistantReplyFeedback
             feedback={message.feedback}
             disabled={!feedbackEnabled}

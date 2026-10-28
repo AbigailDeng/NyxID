@@ -68,6 +68,13 @@ import {
 import { submitAssistantDraft } from "./assistantComposerDraft";
 import { AssistantActivityDisclosure } from "./AssistantActivityDisclosure";
 import { AssistantAcknowledgements } from "./AssistantAcknowledgements";
+import {
+  AssistantBanner,
+  AssistantConnectionBanner,
+  AssistantErrorNotice,
+  JumpToLatest,
+} from "./AssistantBanner";
+import { sanitizeAssistantMessageContent } from "./assistantChatContent";
 import { AssistantWorkingContext } from "./AssistantWorkingContext";
 import { AssistantReplyFeedback } from "./AssistantReplyFeedback";
 import { AssistantCopyButton } from "./AssistantCopyButton";
@@ -204,11 +211,13 @@ export function AssistantScreen({
     assistant.models.find((item) => item.id === currentModelId)?.label ??
     currentModelId.replace(/^nyxagent\//, "");
   const running = assistant.sending || !!conversation?.active_turn;
-  const liveText = assistant.live
-    ? liveReplyText(assistant.live) ||
-      conversation?.active_turn?.reply?.text ||
-      ""
-    : (conversation?.active_turn?.reply?.text ?? "");
+  const liveText = sanitizeAssistantMessageContent(
+    assistant.live
+      ? liveReplyText(assistant.live) ||
+          conversation?.active_turn?.reply?.text ||
+          ""
+      : (conversation?.active_turn?.reply?.text ?? ""),
+  );
   const liveAttachments = conversation?.active_turn?.attachments ?? [];
   const liveActivities = conversation?.active_turn?.activities ?? [];
   const destroyed = conversation?.agent?.destroyed;
@@ -680,6 +689,8 @@ export function AssistantScreen({
           Continuing after your decision
         </Label>
       );
+    if (item.role === "event" || item.role === "orchestrator")
+      return <AssistantBanner>{item.text}</AssistantBanner>;
     const input = retryInput(assistant.history, item);
     const attribution = [
       isUser
@@ -688,9 +699,7 @@ export function AssistantScreen({
           ? (conversation?.agent?.display_name ??
             conversation?.agent?.name ??
             "NyxBot")
-          : item.role === "orchestrator"
-            ? "NyxBot · instruction"
-            : "Update",
+          : "Update",
       item.via,
     ]
       .filter(Boolean)
@@ -785,7 +794,7 @@ export function AssistantScreen({
             rules={markdownRules}
             onLinkPress={openSafeLink}
           >
-            {item.text}
+            {sanitizeAssistantMessageContent(item.text)}
           </Markdown>
         )}
         {item.attachments
@@ -833,7 +842,9 @@ export function AssistantScreen({
         <Label muted mono style={styles.timestamp}>
           {formatDate(item.created_at)}
         </Label>
-        <AssistantCopyButton text={item.text} />
+        <AssistantCopyButton
+          text={isUser ? item.text : sanitizeAssistantMessageContent(item.text)}
+        />
         {item.role === "assistant" &&
         item.status === "completed" &&
         !!item.text.trim() &&
@@ -897,9 +908,7 @@ export function AssistantScreen({
       scroll={false}
       contentStyle={styles.chatPage}
     >
-      {!assistant.online ? (
-        <Notice message="You're offline. Reconnect to refresh this chat and send messages." />
-      ) : null}
+      <AssistantConnectionBanner onRetry={() => void assistant.recover()} />
       {assistant.agentsError ? (
         <View style={styles.errorRow}>
           <Notice message={assistant.agentsError} tone="error" />
@@ -912,7 +921,7 @@ export function AssistantScreen({
       ) : null}
       {assistant.error || localError ? (
         <View style={styles.errorRow}>
-          <Notice message={localError ?? assistant.error ?? ""} tone="error" />
+          <AssistantErrorNotice message={localError ?? assistant.error} />
           <ActionButton
             label="Refresh history"
             variant="secondary"
@@ -1190,10 +1199,9 @@ export function AssistantScreen({
                   </View>
                 ) : null}
                 {assistant.history?.waiting.map((waiting, index) => (
-                  <Notice
+                  <AssistantBanner
                     key={`${waiting.title}:${index}`}
-                    message={`${waiting.title}${waiting.detail ? ` · ${waiting.detail}` : ""}`}
-                  />
+                  >{`${waiting.title}${waiting.detail ? ` · ${waiting.detail}` : ""}`}</AssistantBanner>
                 ))}
                 <AssistantAcknowledgements
                   key={conversation?.id ?? "draft"}
@@ -1270,6 +1278,10 @@ export function AssistantScreen({
           }}
         />
       ) : null}
+      <JumpToLatest
+        visible={!homeVisible && transcriptScroll.showJump}
+        onPress={transcriptScroll.follow}
+      />
       <ChatComposerFrame style={[styles.composer, chatColumn]}>
         <ComposerDictationReview dictation={dictation} />
         <AssistantPendingUploads

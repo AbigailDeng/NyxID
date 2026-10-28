@@ -37,6 +37,7 @@ export function useTranscriptScrollFollow(
 ) {
   const follower = useRef(createTranscriptScrollFollower()).current;
   const [following, setFollowing] = useState(true);
+  const [showJump, setShowJump] = useState(false);
   const currentScope = useRef({ key: scopeKey, generation: 0 });
   if (currentScope.current.key !== scopeKey) {
     currentScope.current = {
@@ -48,7 +49,10 @@ export function useTranscriptScrollFollow(
   const mounted = useRef(true);
   const available = () =>
     mounted.current && currentScope.current.generation === generation;
-  const sync = () => setFollowing(follower.isFollowing());
+  const sync = () => {
+    setFollowing(follower.isFollowing());
+    setShowJump(follower.isAwayFromEnd());
+  };
   const scrollToFollowedEnd = () => {
     if (!available()) return;
     const offset = follower.targetOffset();
@@ -65,10 +69,12 @@ export function useTranscriptScrollFollow(
   useLayoutEffect(() => {
     follower.reset();
     setFollowing(true);
+    setShowJump(false);
   }, [follower, scopeKey]);
 
   return {
     following,
+    showJump,
     pause: () => {
       if (!available()) return;
       follower.pause();
@@ -85,14 +91,19 @@ export function useTranscriptScrollFollow(
         if (!available()) return;
         follower.layout(event.nativeEvent.layout.height);
         scrollToFollowedEnd();
+        sync();
       },
       onContentSizeChange: (_width: number, height: number) => {
         if (!available()) return;
         follower.contentSize(height);
         scrollToFollowedEnd();
+        sync();
       },
       onScroll: (event: ScrollEvent) => {
-        if (available()) follower.scroll(sample(event));
+        if (available()) {
+          follower.scroll(sample(event));
+          sync();
+        }
       },
       onScrollBeginDrag: () => {
         if (!available()) return;

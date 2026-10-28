@@ -3,6 +3,7 @@ import { AppState } from "react-native";
 import { onlineManager, useQueryClient } from "@tanstack/react-query";
 import { getAuthEpoch } from "../../lib/auth/authEpoch";
 import { requestAuthenticatedResponse } from "../../lib/api/http";
+import type { AssistantLiveEvent } from "../../lib/api/assistantLiveTransport";
 import { runAssistantLive } from "../../lib/api/assistantLiveTransport";
 import { createGroupLiveSession } from "./groupLiveSession";
 
@@ -44,6 +45,7 @@ export function useGroupsLive(
   epoch: number,
   active: boolean,
   available: () => boolean,
+  onEvent?: (event: AssistantLiveEvent) => void,
 ) {
   const client = useQueryClient();
   // NetInfo's initially unknown state may differ from useNetworkStatus. Observe
@@ -54,8 +56,8 @@ export function useGroupsLive(
     () => false,
   );
   const enabled = active && online;
-  const current = useRef({ enabled, available });
-  current.current = { enabled, available };
+  const current = useRef({ enabled, available, onEvent });
+  current.current = { enabled, available, onEvent };
   const participating = useCallback(
     () => current.current.enabled && current.current.available(),
     [],
@@ -64,6 +66,13 @@ export function useGroupsLive(
     if (!enabled) return;
     return session.acquire(client, epoch, participating);
   }, [client, epoch, enabled, participating]);
+  useEffect(() => {
+    if (!enabled || !onEvent) return;
+    return session.subscribeEvents(client, epoch, (event) => {
+      if (participating() && epoch === getAuthEpoch())
+        current.current.onEvent?.(event);
+    });
+  }, [client, epoch, enabled, !!onEvent, participating]);
   const subscribe = useCallback(
     (listener: () => void) => session.subscribe(listener),
     [],
