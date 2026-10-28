@@ -1354,6 +1354,8 @@ test("private, specialist and contextual header identities open the picker witho
     x.harness.unmount();
   }
   const draft = setup(undefined, false);
+  draft.props.route.params = { home: false, draft: true };
+  draft.harness.render();
   assert.match(
     elements(draft.header()).find((n) => n.type === "Pressable")!.props
       .accessibilityLabel,
@@ -1756,5 +1758,29 @@ test("capable running replies expose bounded text guidance beside Stop without u
     false,
   );
   assert.equal(x.input().props.value, "");
+  x.harness.unmount();
+});
+
+test("Home header names the dashboard without calling it a new chat", () => {
+  const x = setup(undefined, false);
+  x.props.route.params = { home: true, openLatest: false };
+  x.harness.render();
+  assert.match(
+    elements(x.header()).find((node) => node.type === "Pressable")!.props
+      .accessibilityLabel,
+    /NyxBot, Home\. Choose agent/,
+  );
+  assert.ok(x.all().some((node) => node.type === "NyxBotHome"));
+  x.compose();
+  x.harness.flush();
+  assert.match(
+    elements(x.header()).find((node) => node.type === "Pressable")!.props
+      .accessibilityLabel,
+    /NyxBot, New chat\. Choose agent/,
+  );
+  assert.equal(
+    x.all().some((node) => node.type === "NyxBotHome"),
+    false,
+  );
   x.harness.unmount();
 });

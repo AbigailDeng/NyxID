@@ -4,6 +4,7 @@ import {
   workspaceAccessibilityState,
   type WorkspaceAccessibility,
 } from "../lib/accessibility/workspaceAccessibility";
+import { WorkspacePushShell } from "../components/workspace/WorkspacePushShell";
 import { workspaceFocus } from "../lib/accessibility/workspaceFocus";
 import { StatusBar } from "expo-status-bar";
 import * as Notifications from "expo-notifications";
@@ -20,6 +21,7 @@ SplashScreen.preventAutoHideAsync().catch(() => {
 import {
   ActivityIndicator,
   AppState,
+  findNodeHandle,
   StyleSheet,
   Text,
   View,
@@ -445,6 +447,7 @@ export default function App() {
                         flushPendingChallengeTapNavigation
                       }
                       onNavigationGuardChange={onNavigationGuardChange}
+                      navigationBlocked={navigationGuardsRef.current.size > 0}
                       pushToast={pushToast}
                     />
                   </AuthSessionProvider>
@@ -464,6 +467,7 @@ function ThemedAppShell({
   setCurrentRouteName,
   flushPendingChallengeTapNavigation,
   onNavigationGuardChange,
+  navigationBlocked = false,
   pushToast,
 }: {
   navigationRef: ReturnType<
@@ -473,6 +477,7 @@ function ThemedAppShell({
   setCurrentRouteName: (name: string | undefined) => void;
   flushPendingChallengeTapNavigation: () => void;
   onNavigationGuardChange: WorkspaceNavigationGuardChange;
+  navigationBlocked?: boolean;
   pushToast: ToastState | null;
 }) {
   const { mode } = useTheme();
@@ -480,6 +485,7 @@ function ThemedAppShell({
   const { isAuthenticated } = useAuthSession();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerPresented, setDrawerPresented] = useState(false);
+  const sidebarFocus = useRef<View>(null);
   const drawerOrigin =
     useRef<ReturnType<typeof workspaceFocus.capture>>(undefined);
   const pendingMenuFocus =
@@ -512,7 +518,7 @@ function ThemedAppShell({
     pendingMenuFocus.current = undefined;
     if (isAuthenticated) workspaceFocus.restore(origin);
   }, [drawerPresented, isAuthenticated]);
-  // Remove the menu's native host before presenting the next destination.
+  // Finish the slab's closing transition before dispatching a destination.
   const closeDrawerThen = (navigate: () => void) => {
     pendingDrawerNavigation.current = navigate;
     setDrawerOpen(false);
@@ -548,8 +554,90 @@ function ThemedAppShell({
     });
   };
 
+  function revealSidebar() {
+    if (!isAuthenticated || accessibility.sheetOpen || navigationBlocked)
+      return;
+    pendingMenuFocus.current = undefined;
+    if (!drawerPresented)
+      drawerOrigin.current = workspaceFocus.capture(accessibility.primaryKey);
+    setDrawerPresented(true);
+  }
+  function changeSidebar(open: boolean) {
+    if (open) {
+      if (!isAuthenticated || accessibility.sheetOpen || navigationBlocked)
+        return;
+      revealSidebar();
+    }
+    setDrawerOpen(open);
+  }
+
   return (
-    <>
+    <WorkspacePushShell
+      enabled={isAuthenticated}
+      visible={drawerOpen}
+      presented={drawerPresented}
+      gestureEnabled={
+        !navigationBlocked &&
+        !accessibility.sheetOpen &&
+        currentRouteName === "Assistant"
+      }
+      onOpenChange={changeSidebar}
+      onRevealStart={revealSidebar}
+      onDismiss={onDrawerDismiss}
+      initialFocusTarget={() => findNodeHandle(sidebarFocus.current)}
+      sidebar={
+        isAuthenticated ? (
+          <WorkspaceDrawer
+            visible={drawerPresented}
+            initialFocusRef={sidebarFocus}
+            currentRoute={currentRouteName}
+            currentChat={currentChat}
+            onOpenChat={openChatFromDrawer}
+            onCreateAgent={() => {
+              closeDrawerThen(() => {
+                if (!navigationRef.isReady()) return;
+                navigationRef.dispatch(openWorkspaceSheetAction("AgentCreate"));
+              });
+            }}
+            onCreateGroup={() => {
+              closeDrawerThen(() => {
+                if (!navigationRef.isReady()) return;
+                navigationRef.dispatch(openWorkspaceSheetAction("GroupEditor"));
+              });
+            }}
+            onClose={() => setDrawerOpen(false)}
+            onNavigate={navigateFromDrawer}
+            onHome={() => navigateFromDrawer("Assistant")}
+            onScan={() => {
+              closeDrawerThen(() => {
+                if (!navigationRef.isReady()) return;
+                navigationRef.dispatch(
+                  openWorkspaceSheetAction("DeviceLogin", {
+                    start_scanner: true,
+                  }),
+                );
+              });
+            }}
+            onUsageCredits={() => {
+              closeDrawerThen(() => {
+                if (!navigationRef.isReady()) return;
+                navigationRef.dispatch(
+                  openWorkspaceSheetAction("UsageCredits"),
+                );
+              });
+            }}
+            onLoginCode={() => {
+              closeDrawerThen(() => {
+                if (!navigationRef.isReady()) return;
+                navigationRef.dispatch(
+                  openWorkspaceSheetAction("AgentKeyLogin", { mint: true }),
+                );
+              });
+            }}
+          />
+        ) : null
+      }
+    >
       <View
         collapsable={false}
         accessible={false}
@@ -574,15 +662,7 @@ function ThemedAppShell({
           <StatusBar style={mode === "dark" ? "light" : "dark"} />
           <WorkspaceAccessibilityContext.Provider value={accessibility}>
             <AppNavigator
-              onOpenMenu={() => {
-                pendingMenuFocus.current = undefined;
-                if (!drawerPresented)
-                  drawerOrigin.current = workspaceFocus.capture(
-                    accessibility.primaryKey,
-                  );
-                setDrawerPresented(true);
-                setDrawerOpen(true);
-              }}
+              onOpenMenu={() => changeSidebar(true)}
               onNavigationGuardChange={onNavigationGuardChange}
             />
           </WorkspaceAccessibilityContext.Provider>
@@ -597,55 +677,7 @@ function ThemedAppShell({
           <ToastOverlay toast={pushToast} duration={6000} />
         </View>
       </View>
-      {isAuthenticated ? (
-        <WorkspaceDrawer
-          visible={drawerOpen}
-          currentRoute={currentRouteName}
-          currentChat={currentChat}
-          onOpenChat={openChatFromDrawer}
-          onCreateAgent={() => {
-            closeDrawerThen(() => {
-              if (!navigationRef.isReady()) return;
-              navigationRef.dispatch(openWorkspaceSheetAction("AgentCreate"));
-            });
-          }}
-          onCreateGroup={() => {
-            closeDrawerThen(() => {
-              if (!navigationRef.isReady()) return;
-              navigationRef.dispatch(openWorkspaceSheetAction("GroupEditor"));
-            });
-          }}
-          onClose={() => setDrawerOpen(false)}
-          onDismiss={onDrawerDismiss}
-          onNavigate={navigateFromDrawer}
-          onHome={() => navigateFromDrawer("Assistant")}
-          onScan={() => {
-            closeDrawerThen(() => {
-              if (!navigationRef.isReady()) return;
-              navigationRef.dispatch(
-                openWorkspaceSheetAction("DeviceLogin", {
-                  start_scanner: true,
-                }),
-              );
-            });
-          }}
-          onUsageCredits={() => {
-            closeDrawerThen(() => {
-              if (!navigationRef.isReady()) return;
-              navigationRef.dispatch(openWorkspaceSheetAction("UsageCredits"));
-            });
-          }}
-          onLoginCode={() => {
-            closeDrawerThen(() => {
-              if (!navigationRef.isReady()) return;
-              navigationRef.dispatch(
-                openWorkspaceSheetAction("AgentKeyLogin", { mint: true }),
-              );
-            });
-          }}
-        />
-      ) : null}
-    </>
+    </WorkspacePushShell>
   );
 }
 

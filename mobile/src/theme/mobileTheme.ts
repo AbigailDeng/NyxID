@@ -15,9 +15,10 @@
 export type ToneTriple = { bg: string; text: string; border: string };
 
 export type ThemeColors = {
+  sidebarBase: string;   // stationary sidebar behind the elevated content slab
   bg: string;            // main background (spec: base)
   card: string;          // elevated content (spec: surface/card)
-  cardSoft: string;      // neutral inset / sidebar layer
+  cardSoft: string;      // neutral inset surface
   border: string;        // default card borders + dividers
   controlBorder: string; // essential control boundaries, at least 3:1
   borderSoft: string;    // subtle dividers within cards
@@ -108,7 +109,8 @@ const DANGER_LIGHT = "#b91c1c";
 const INFO_LIGHT = "#205ab4";
 
 export const darkColors: ThemeColors = {
-  // 3-layer depth — sidebar / base / surface
+  // Stationary sidebar is darker than the elevated content slab.
+  sidebarBase: "#0C0C0E",
   bg: "#17171A",
   card: "#222225",
   cardSoft: "#1C1C1F",
@@ -169,7 +171,8 @@ export const darkColors: ThemeColors = {
 };
 
 export const lightColors: ThemeColors = {
-  bg: "#F4F4F5",
+  sidebarBase: "#F4F4F5",
+  bg: "#FFFFFF",
   card: "#FFFFFF",
   cardSoft: "#FFFFFF",
   border: "#C4C4CA",

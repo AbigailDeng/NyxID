@@ -236,7 +236,9 @@ export function AssistantScreen({
   });
   const chatTitle = assistant.conversationId
     ? (conversation?.title ?? "Loading chat…")
-    : "New chat";
+    : homeVisible
+      ? "Home"
+      : "New chat";
   const currentModelId = conversation?.model ?? assistant.model;
   const currentModelLabel =
     assistant.models.find((item) => item.id === currentModelId)?.label ??
@@ -250,7 +252,7 @@ export function AssistantScreen({
       ? ("Running" as const)
       : undefined;
   const headerDetail = chatThreadInfo(
-    assistant.conversationId ? conversation?.title : "New chat",
+    assistant.conversationId ? conversation?.title : homeVisible ? "Home" : "New chat",
     currentAgent?.name,
     assistant.conversationId ? conversation?.last_message_at : undefined,
   );

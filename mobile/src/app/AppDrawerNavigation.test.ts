@@ -34,7 +34,7 @@ const same = (a?: unknown[], b?: unknown[]) =>
 function elements(root: Element): Element[] {
   return [
     root,
-    ...[root.props.children]
+    ...[root.props.children, root.props.sidebar]
       .flat(Infinity)
       .flatMap((child) =>
         child && typeof child === "object" && "props" in child
@@ -191,6 +191,7 @@ function setup() {
         "View",
         "ToastOverlay",
         "WorkspaceDrawer",
+        "WorkspacePushShell",
       ].map((name) => [name, name]),
     ),
     WorkspaceAccessibilityContext: {
@@ -270,14 +271,15 @@ function setup() {
         props: {
           ...element.props,
           onDismiss: () => {
-            // The actual native host releases ownership before this shell callback.
+            // The actual push shell releases focus ownership before this shell callback.
             focus.setModalActive(nativeMenuOwner, false);
-            element.props.onDismiss();
+            find("WorkspacePushShell").props.onDismiss();
           },
         },
       };
     },
     background,
+    shell: () => find("WorkspacePushShell"),
     open: () => {
       find("AppNavigator").props.onOpenMenu();
       flush();
@@ -311,7 +313,7 @@ function setup() {
   };
 }
 
-test("management, chat, scanner and login selections wait for actual menu dismissal", () => {
+test("management, chat, scanner and login selections wait for actual slab settlement", () => {
   const target: WorkspaceChatTarget = {
     kind: "agent",
     agentId: "researcher",
@@ -370,15 +372,15 @@ test("management, chat, scanner and login selections wait for actual menu dismis
   ]) {
     const env = setup();
     env.open();
-    assert.equal(env.drawer().props.visible, true);
+    assert.equal(env.shell().props.visible, true);
     selection.choose(env.drawer());
     env.flush();
-    assert.equal(env.drawer().props.visible, false);
+    assert.equal(env.shell().props.visible, false);
     assert.deepEqual(env.dispatched, []);
     assert.equal(
       env.rootReads(),
       0,
-      "navigation state is resolved after native dismissal",
+      "navigation state is resolved after slab settlement",
     );
     env.drawer().props.onDismiss();
     // Scanner/login params are created inside the isolated component realm.
@@ -390,7 +392,7 @@ test("management, chat, scanner and login selections wait for actual menu dismis
   }
 });
 
-test("navigation accessibility stays excluded through menu exit and restores after host removal or auth change", () => {
+test("navigation accessibility stays excluded through menu exit and restores after slab settlement or auth change", () => {
   const env = setup();
   assert.equal(env.background().props.accessibilityElementsHidden, false);
   env.open();
@@ -402,7 +404,7 @@ test("navigation accessibility stays excluded through menu exit and restores aft
   assert.equal(env.background().props.collapsable, false);
   env.drawer().props.onClose();
   env.flush();
-  assert.equal(env.drawer().props.visible, false);
+  assert.equal(env.shell().props.visible, false);
   assert.equal(
     env.background().props.accessibilityElementsHidden,
     true,
@@ -573,7 +575,7 @@ test("signing out clears every queued selection before a stale dismissal callbac
     env.authenticate(true);
     env.drawer().props.onDismiss();
     assert.deepEqual(env.dispatched, []);
-    assert.equal(env.drawer().props.visible, false);
+    assert.equal(env.shell().props.visible, false);
   }
 });
 
@@ -582,7 +584,7 @@ test("manual Close dismisses the menu without scheduling navigation", () => {
   env.open();
   env.drawer().props.onClose();
   env.flush();
-  assert.equal(env.drawer().props.visible, false);
+  assert.equal(env.shell().props.visible, false);
   env.drawer().props.onDismiss();
   env.drawer().props.onDismiss();
   assert.deepEqual(env.dispatched, []);

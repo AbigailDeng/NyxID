@@ -45,7 +45,6 @@ function setup() {
     "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
     "../brand/NyxidLogo": { NyxidLogo: "Logo" },
     "./WorkspaceChatList": { WorkspaceChatList: "ChatList" },
-    "./WorkspaceDrawerModal": { WorkspaceDrawerModal: "Modal" },
     "./ScrollEdgeFades": {
       ScrollEdgeFades: "Fades",
       useScrollEdges: () => ({ edges: {} }),
@@ -71,7 +70,7 @@ function setup() {
   ];
   return { h, events, all };
 }
-test("side-menu logo is an accessible home target, independent from Close; Chats routes to Assistant", () => {
+test("side-menu logo opens Home, with no redundant Home or Chats workspace row", () => {
   const x = setup();
   const home = x
     .all()
@@ -79,12 +78,14 @@ test("side-menu logo is an accessible home target, independent from Close; Chats
   assert.equal(home.props.accessibilityRole, "button");
   assert.equal(home.props.style.minHeight, 44);
   home.props.onPress();
-  const chats = x.all().find((n) => n.props.accessibilityLabel === "Chats")!;
-  chats.props.onPress();
+  assert.equal(
+    x.all().some((n) => ["Chats", "Home"].includes(n.props.accessibilityLabel)),
+    false,
+  );
   x.all()
     .find((n) => n.props.accessibilityLabel === "Close navigation")!
     .props.onPress();
-  assert.deepEqual(x.events, ["home", "Assistant", "close"]);
+  assert.deepEqual(x.events, ["home", "close"]);
   x.h.unmount();
 });
 

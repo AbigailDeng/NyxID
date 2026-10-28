@@ -35,7 +35,12 @@ function composite(rgba: string, base: string): Rgb {
 }
 test("native body and secondary text meet AA on every shared surface in both themes", () => {
   for (const colors of [darkColors, lightColors])
-    for (const background of [colors.bg, colors.card, colors.cardSoft])
+    for (const background of [
+      colors.bg,
+      colors.card,
+      colors.cardSoft,
+      colors.sidebarBase,
+    ])
       for (const foreground of [
         colors.textPrimary,
         colors.textSecondary,
@@ -51,7 +56,12 @@ test("native body and secondary text meet AA on every shared surface in both the
 });
 test("native status labels meet AA on their tinted surfaces", () => {
   for (const colors of [darkColors, lightColors])
-    for (const base of [colors.bg, colors.card, colors.cardSoft])
+    for (const base of [
+      colors.bg,
+      colors.card,
+      colors.cardSoft,
+      colors.sidebarBase,
+    ])
       for (const tone of [
         colors.successTone,
         colors.warningTone,
@@ -109,20 +119,54 @@ test("composer text and placeholder meet AA on the filled composer", () => {
 });
 
 test("selected, interactive, error and disabled labels keep AA on zinc surfaces", () => {
-  for (const colors of [darkColors, lightColors, darkSheetColors, lightSheetColors]) {
-    for (const base of [colors.bg, colors.card, colors.cardSoft]) {
-      for (const surface of [composite(colors.navActive, base), composite(colors.ghostBg, base)]) {
-        for (const text of [colors.textPrimary, colors.textSecondary, colors.ghostText])
-          assert.ok(ratio(rgb(text), surface) >= 4.5, `${text} on selected/interactive ${base}`);
+  for (const colors of [
+    darkColors,
+    lightColors,
+    darkSheetColors,
+    lightSheetColors,
+  ]) {
+    for (const base of [
+      colors.bg,
+      colors.card,
+      colors.cardSoft,
+      colors.sidebarBase,
+    ]) {
+      for (const surface of [
+        composite(colors.navActive, base),
+        composite(colors.ghostBg, base),
+      ]) {
+        for (const text of [
+          colors.textPrimary,
+          colors.textSecondary,
+          colors.ghostText,
+        ])
+          assert.ok(
+            ratio(rgb(text), surface) >= 4.5,
+            `${text} on selected/interactive ${base}`,
+          );
       }
-      assert.ok(ratio(rgb(colors.primary), rgb(base)) >= 4.5, `accent text on ${base}`);
-      assert.ok(ratio(rgb(colors.danger), composite(colors.dangerSoftBg, base)) >= 4.5);
+      assert.ok(
+        ratio(rgb(colors.primary), rgb(base)) >= 4.5,
+        `accent text on ${base}`,
+      );
+      assert.ok(
+        ratio(rgb(colors.danger), composite(colors.dangerSoftBg, base)) >= 4.5,
+      );
       // Inactive controls are exempt in WCAG; native labels still remain readable.
       assert.ok(ratio(rgb(colors.textTertiary), rgb(colors.cardSoft)) >= 4.5);
-      assert.ok(ratio(rgb(colors.controlBorder), rgb(base)) >= 3, `control edge on ${base}`);
+      assert.ok(
+        ratio(rgb(colors.controlBorder), rgb(base)) >= 3,
+        `control edge on ${base}`,
+      );
     }
-    assert.ok(ratio(rgb(colors.bg), rgb(colors.textPrimary)) >= 3, "submit glyph");
-    assert.ok(ratio(rgb(colors.textPrimary), rgb(colors.composerBg)) >= 3, "submit circle");
+    assert.ok(
+      ratio(rgb(colors.bg), rgb(colors.textPrimary)) >= 3,
+      "submit glyph",
+    );
+    assert.ok(
+      ratio(rgb(colors.textPrimary), rgb(colors.composerBg)) >= 3,
+      "submit circle",
+    );
   }
 });
 
@@ -133,9 +177,35 @@ test("white CTA labels meet AA throughout normal and pressed native gradients", 
       [colors.gradientStartPressed, colors.gradientEndPressed],
     ]) {
       for (let step = 0; step <= 20; step++) {
-        const fill = rgb(start!).map((value, index) => value + (rgb(end!)[index]! - value) * step / 20) as Rgb;
+        const fill = rgb(start!).map(
+          (value, index) => value + ((rgb(end!)[index]! - value) * step) / 20,
+        ) as Rgb;
         assert.ok(ratio(rgb(colors.onPrimary), fill) >= 4.5);
       }
     }
+  }
+});
+
+test("sidebar is the darkest dark layer and gray beneath a white light content slab", () => {
+  assert.ok(
+    luminance(rgb(darkColors.sidebarBase)) < luminance(rgb(darkColors.bg)),
+  );
+  assert.equal(lightColors.bg, "#FFFFFF");
+  assert.equal(lightColors.sidebarBase, "#F4F4F5");
+  for (const colors of [darkColors, lightColors]) {
+    for (const foreground of [
+      colors.textPrimary,
+      colors.textSecondary,
+      colors.textMuted,
+      colors.primary,
+    ])
+      assert.ok(ratio(rgb(foreground), rgb(colors.sidebarBase)) >= 4.5);
+    assert.ok(
+      ratio(
+        rgb(colors.textPrimary),
+        composite(colors.navActive, colors.sidebarBase),
+      ) >= 4.5,
+    );
+    assert.ok(ratio(rgb(colors.controlBorder), rgb(colors.sidebarBase)) >= 3);
   }
 });
