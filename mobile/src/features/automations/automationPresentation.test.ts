@@ -132,7 +132,7 @@ test("schedule summaries distinguish webhook, cron, interval and one-time tasks"
         timezone: "Asia/Singapore",
       },
     }),
-    "0 8 * * 1-5 · Asia/Singapore",
+    "Weekdays at 8:00 AM (Asia/Singapore)",
   );
   assert.equal(
     automationScheduleSummary({
@@ -155,4 +155,21 @@ test("schedule summaries distinguish webhook, cron, interval and one-time tasks"
     }),
     "One time",
   );
+  for (const [expression, description] of [
+    ["15 0 * * *", "Every day at 12:15 AM"],
+    ["0 12 * * 5", "Fridays at 12:00 PM"],
+    ["30 21 * * 0,6", "Weekends at 9:30 PM"],
+    ["5 8 15 * *", "Monthly on day 15 at 8:05 AM"],
+    ["*/15 * * * *", "Custom calendar schedule"],
+    ["0 8 1 * 1-5", "Custom calendar schedule"],
+    ["0 24 * * *", "Custom calendar schedule"],
+  ])
+    assert.equal(
+      automationScheduleSummary({
+        ...row,
+        source: "schedule",
+        schedule: { kind: "cron", expression: expression!, timezone: "UTC" },
+      }),
+      `${description} (UTC)`,
+    );
 });

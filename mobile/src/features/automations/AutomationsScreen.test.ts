@@ -36,6 +36,8 @@ const trigger = automationSchema.parse({
     deliver_to: { type: "thread" },
   },
   last_run: run,
+  next_run_at: at,
+  next_runs: [at],
   inbound_url: null,
   created_at: at,
   updated_at: at,
@@ -47,6 +49,7 @@ function elements(root: Element): Element[] {
 }
 function setup(
   page: "AutomationsScreen" | "AutomationDetailScreen" | "AutomationRunsScreen",
+  zone = "UTC",
 ) {
   const routes: any[] = [];
   const chats: any[] = [];
@@ -119,7 +122,7 @@ function setup(
                   ],
                 }
               : options.queryKey.includes("settings")
-                ? { timezone: "UTC" }
+                ? { timezone: zone }
                 : trigger,
         );
       },
@@ -228,6 +231,24 @@ test("read-only details show task, target and confirmation policy and retain his
     ])
       assert.throws(() => env.control(label));
   } finally {
+    env.harness.unmount();
+  }
+});
+
+test("automation next, latest and history times use the owner timezone with one display-zone label", () => {
+  const zone = "Asia/Singapore";
+  for (const page of [
+    "AutomationsScreen",
+    "AutomationDetailScreen",
+    "AutomationRunsScreen",
+  ] as const) {
+    const env = setup(page, zone);
+    const text = env.text();
+    assert.equal(text.split(`Times shown in ${zone}`).length - 1, 1);
+    assert.ok(text.includes(time.formatAutomationTime(at, zone)));
+    if (page === "AutomationsScreen") assert.ok(text.includes(`Next: ${time.formatAutomationTime(at, zone)}`));
+    if (page !== "AutomationRunsScreen")
+      assert.match(text, /Weekdays at 8:00 AM \(UTC\)/);
     env.harness.unmount();
   }
 });

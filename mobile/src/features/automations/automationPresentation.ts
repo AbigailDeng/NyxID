@@ -46,8 +46,36 @@ export function automationScheduleSummary(row: Automation): string {
   if (!schedule || (row.source ?? "webhook") === "webhook")
     return "Webhook event";
   if (schedule.kind === "cron")
-    return `${schedule.expression} · ${schedule.timezone}`;
+    return `${cronSummary(schedule.expression)} (${schedule.timezone})`;
   if (schedule.kind === "every")
-    return `Every ${schedule.amount} ${schedule.unit}`;
+    return `Every ${schedule.amount} ${schedule.amount === 1 ? schedule.unit.replace(/s$/, "") : schedule.unit}`;
   return "One time";
+}
+
+/** Describe only calendar patterns we can explain exactly; never guess a run time. */
+function cronSummary(expression: string) {
+  const fields = expression.trim().split(/\s+/);
+  if (fields.length !== 5) return "Custom calendar schedule";
+  const [minute, hour, day, month, weekday] = fields;
+  if (!/^\d{1,2}$/.test(minute!) || !/^\d{1,2}$/.test(hour!))
+    return "Custom calendar schedule";
+  const h = Number(hour),
+    m = Number(minute);
+  if (h > 23 || m > 59 || month !== "*") return "Custom calendar schedule";
+  const at = `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+  if (
+    weekday === "*" &&
+    /^\d{1,2}$/.test(day!) &&
+    Number(day) >= 1 &&
+    Number(day) <= 31
+  )
+    return `Monthly on day ${Number(day)} at ${at}`;
+  if (day !== "*") return "Custom calendar schedule";
+  if (weekday === "*") return `Every day at ${at}`;
+  if (weekday === "1-5") return `Weekdays at ${at}`;
+  if (weekday === "0,6" || weekday === "6,0" || weekday === "6,7")
+    return `Weekends at ${at}`;
+  if (/^[0-7]$/.test(weekday!))
+    return `${["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"][Number(weekday) % 7]} at ${at}`;
+  return "Custom calendar schedule";
 }

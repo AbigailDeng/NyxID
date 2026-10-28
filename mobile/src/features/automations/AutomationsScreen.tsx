@@ -107,6 +107,9 @@ export function AutomationsScreen({
           </Label>
         </View>
       </View>
+      <Label muted style={s.small}>
+        Times shown in {zone}
+      </Label>
       <AutomationGuidance />
       <Field
         label="Search automations"
@@ -179,7 +182,7 @@ export function AutomationsScreen({
               <Label style={s.small}>
                 {row.status === "disabled"
                   ? "Paused · no new scheduled runs"
-                  : `Next: ${formatAutomationTime(row.next_run_at, zone)} · ${zone}`}
+                  : `Next: ${formatAutomationTime(row.next_run_at, zone)}`}
               </Label>
             )}
             {row.last_run && (
@@ -240,8 +243,6 @@ export function AutomationDetailScreen({
   });
   const row = detail.data;
   const zone = settings.data?.timezone ?? deviceTimezone();
-  const scheduleZone =
-    row?.schedule?.kind === "cron" ? row.schedule.timezone : zone;
   return (
     <WorkspacePage title="Automation" showHeading={false}>
       {detail.isPending && <AutomationLoading />}
@@ -257,6 +258,9 @@ export function AutomationDetailScreen({
       )}
       {row && (
         <>
+          <Label muted style={s.small}>
+            Times shown in {zone}
+          </Label>
           <AutomationStatus value={row.status} />
           <Label accessibilityRole="header" style={s.section}>
             {row.label}
@@ -274,10 +278,11 @@ export function AutomationDetailScreen({
           <Card>
             <Label style={s.title}>Schedule</Label>
             <Label>{automationScheduleSummary(row)}</Label>
-            <Label muted style={s.small}>
-              Timezone:{" "}
-              {row.schedule?.kind === "cron" ? row.schedule.timezone : zone}
-            </Label>
+            {row.schedule?.kind === "cron" && (
+              <Label muted mono style={s.small}>
+                Calendar expression: {row.schedule.expression}
+              </Label>
+            )}
             {row.status === "active" &&
               row.source === "schedule" &&
               (row.next_runs?.length
@@ -287,7 +292,7 @@ export function AutomationDetailScreen({
                   : []
               ).map((at) => (
                 <Label key={at} mono style={s.small}>
-                  {formatAutomationTime(at, scheduleZone)}
+                  {formatAutomationTime(at, zone)}
                 </Label>
               ))}
             <Label muted style={s.small}>
@@ -320,7 +325,7 @@ export function AutomationDetailScreen({
                 <AutomationStatus value={row.last_run.outcome} />
               </View>
               <Label muted>
-                {formatAutomationTime(row.last_run.scheduled_at, zone)} · {zone}
+                {formatAutomationTime(row.last_run.scheduled_at, zone)}
               </Label>
               {row.last_run.reason && (
                 <Label>{row.last_run.reason.replaceAll("_", " ")}</Label>
