@@ -41,6 +41,7 @@ function setup(connectedTelegram = false, pushDevices = 0) {
   let dimensions = { width: 402, height: 874, fontScale: 1, scale: 3 };
   let pending = false;
   const mutations: unknown[] = [];
+  const pushes: unknown[][] = [];
   const jsx = (type: unknown, props: Element["props"], key?: number) => ({
     type,
     props,
@@ -137,7 +138,7 @@ function setup(connectedTelegram = false, pushDevices = 0) {
     AccountSettingsScreen: (props: any) => Element;
     AccountSettingsTitle: (props: any) => Element;
   };
-  harness.mount(() => renderRows(AccountSettingsScreen({ navigation: {} })));
+  harness.mount(() => renderRows(AccountSettingsScreen({ navigation: { push: (...args: unknown[]) => pushes.push(args) } })));
   const all = () => elements(harness.value());
   const text = (value: string) => {
     const node = all().find(
@@ -155,6 +156,7 @@ function setup(connectedTelegram = false, pushDevices = 0) {
     text,
     parent,
     mutations,
+    pushes,
     harness,
     title: () =>
       renderRows(
@@ -302,4 +304,17 @@ test("large-text notification rows retain connected identity and live push/Teleg
     [{ push_enabled: true }, { telegram_enabled: true }],
   );
   env.harness.unmount();
+});
+
+
+test("Settings keeps identity and routes the sidebar quick actions and Usage within its sheet", () => {
+  const x = setup();
+  for (const label of ["Scan QR code", "Terminal login code", "Usage & credits"]) {
+    const action = x.all().find(node => node.props.label === label);
+    assert.ok(action, label);
+    action.props.onPress();
+  }
+  assert.deepEqual(structuredClone(x.pushes), [["DeviceLogin", { start_scanner: true }], ["AgentKeyLogin", { mint: true }], ["UsageCredits"]]);
+  assert.ok(x.text("Alex Example"));
+  x.harness.unmount();
 });

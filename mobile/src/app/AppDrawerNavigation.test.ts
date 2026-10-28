@@ -357,18 +357,13 @@ test("management, chat, scanner and login selections wait for actual slab settle
       expected: () => openWorkspaceSheetAction("GroupEditor"),
     },
     {
-      choose: (drawer: Element) => drawer.props.onScan(),
-      expected: () =>
-        openWorkspaceSheetAction("DeviceLogin", { start_scanner: true }),
+      choose: (drawer: Element) => drawer.props.onNavigate("AccountSettings"),
+      expected: () => workspaceNavigateAction("AccountSettings"),
     },
-    {
-      choose: (drawer: Element) => drawer.props.onUsageCredits(),
-      expected: () => openWorkspaceSheetAction("UsageCredits"),
-    },
-    {
-      choose: (drawer: Element) => drawer.props.onLoginCode(),
-      expected: () => openWorkspaceSheetAction("AgentKeyLogin", { mint: true }),
-    },
+    ...["WorkspaceSearch", "WorkspaceRecents"].map((name) => ({
+      choose: (drawer: Element) => drawer.props.onBrowse(name),
+      expected: () => ({ type: "NAVIGATE", payload: { name } }),
+    })),
   ]) {
     const env = setup();
     env.open();
@@ -402,7 +397,7 @@ test("navigation accessibility stays excluded through menu exit and restores aft
     "no-hide-descendants",
   );
   assert.equal(env.background().props.collapsable, false);
-  env.drawer().props.onClose();
+  env.shell().props.onOpenChange(false);
   env.flush();
   assert.equal(env.shell().props.visible, false);
   assert.equal(
@@ -429,7 +424,7 @@ test("plain menu Close restores a live primary owner only after the background v
   env.focus.register(original, () => tag, true, scope);
   env.focus.invoked(original);
   env.open();
-  env.drawer().props.onClose();
+  env.shell().props.onOpenChange(false);
   env.flush();
   env.flushFocus();
   assert.deepEqual(env.focused, [], "closing animation still owns focus");
@@ -473,7 +468,7 @@ test("menu return focus is skipped or cancelled for navigation, auth, scope repl
     env.focus.invoked(owner);
     env.open();
     if (cancel === "navigation") env.drawer().props.onNavigate("Agents");
-    else env.drawer().props.onClose();
+    else env.shell().props.onOpenChange(false);
     env.flush();
     const dismiss = env.drawer().props.onDismiss;
     if (cancel === "auth-before-dismiss") env.authenticate(false);
@@ -557,11 +552,11 @@ test("signing out clears every queued selection before a stale dismissal callbac
     (drawer: Element) => drawer.props.onNavigate("Services"),
     (drawer: Element) =>
       drawer.props.onOpenChat({ kind: "group", groupId: "group-1" }),
-    (drawer: Element) => drawer.props.onScan(),
+    (drawer: Element) => drawer.props.onBrowse("WorkspaceSearch"),
     (drawer: Element) => drawer.props.onCreateAgent(),
     (drawer: Element) => drawer.props.onCreateGroup(),
-    (drawer: Element) => drawer.props.onLoginCode(),
-    (drawer: Element) => drawer.props.onUsageCredits(),
+    (drawer: Element) => drawer.props.onBrowse("WorkspaceRecents"),
+    (drawer: Element) => drawer.props.onNavigate("AccountSettings"),
   ]) {
     const env = setup();
     env.open();
@@ -582,7 +577,7 @@ test("signing out clears every queued selection before a stale dismissal callbac
 test("manual Close dismisses the menu without scheduling navigation", () => {
   const env = setup();
   env.open();
-  env.drawer().props.onClose();
+  env.shell().props.onOpenChange(false);
   env.flush();
   assert.equal(env.shell().props.visible, false);
   env.drawer().props.onDismiss();
@@ -594,7 +589,7 @@ test("manual Close dismisses the menu without scheduling navigation", () => {
 test("navigation readiness is checked at dismissal and unavailable actions are consumed once", () => {
   const env = setup();
   env.open();
-  env.drawer().props.onScan();
+  env.drawer().props.onBrowse("WorkspaceSearch");
   env.flush();
   env.readiness(false);
   env.drawer().props.onDismiss();
@@ -604,12 +599,12 @@ test("navigation readiness is checked at dismissal and unavailable actions are c
   assert.deepEqual(env.dispatched, []);
   env.open();
   env.readiness(false);
-  env.drawer().props.onLoginCode();
+  env.drawer().props.onBrowse("WorkspaceRecents");
   env.flush();
   env.readiness(true);
   env.drawer().props.onDismiss();
   assert.deepEqual(structuredClone(env.dispatched), [
-    openWorkspaceSheetAction("AgentKeyLogin", { mint: true }),
+    { type: "NAVIGATE", payload: { name: "WorkspaceRecents" } },
   ]);
 });
 

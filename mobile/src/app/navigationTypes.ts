@@ -75,6 +75,8 @@ export type WorkspaceSheetParamList = SharedEntryParamList & {
 
 export type RootStackParamList = SharedEntryParamList & {
   Auth: undefined;
+  WorkspaceSearch: undefined;
+  WorkspaceRecents: undefined;
   Workspace: NavigatorScreenParams<WorkspaceChatParamList> | undefined;
   AssistantContext: AssistantParams | undefined;
   GroupChat: { groupId: string };

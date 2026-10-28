@@ -567,6 +567,14 @@ export function AccountSettingsScreen({ navigation, route }: Props) {
           </View>
         </View>
 
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Quick actions</Text>
+          <PrimaryButton refreshLabelOnFontScaleChange label="Scan QR code" kind="ghost"
+            onPress={() => navigation.push("DeviceLogin", { start_scanner: true })} />
+          <PrimaryButton refreshLabelOnFontScaleChange label="Terminal login code" kind="ghost" disabled={isOffline}
+            onPress={() => navigation.push("AgentKeyLogin", { mint: true })} />
+        </View>
+
         {/* Profile card */}
         <View style={[styles.card, { opacity: profileOpacity }]}>
           <Text style={styles.cardTitle}>Profile</Text>
@@ -789,8 +797,6 @@ export function AccountSettingsScreen({ navigation, route }: Props) {
             onPress={() => navigation.push("UsageCredits")} />
           <PrimaryButton refreshLabelOnFontScaleChange label="Profile & account security" kind="ghost"
             onPress={() => navigation.push("AccountSecurity")} />
-          <PrimaryButton refreshLabelOnFontScaleChange label="Generate terminal login code" kind="ghost" disabled={isOffline}
-            onPress={() => navigation.push("AgentKeyLogin", { mint: true })} />
           <PrimaryButton refreshLabelOnFontScaleChange
             label="Sign Out"
             kind="ghost"

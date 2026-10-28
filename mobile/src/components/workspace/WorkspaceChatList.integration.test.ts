@@ -352,13 +352,13 @@ test("agent and group previews stay at five rows and their sections collapse ind
   env.press("Expand crews");
   assert.equal(env.groupRows().length, 5);
   assert.equal(env.agentRows().length, 5);
-  env.press("Collapse agent chats");
+  env.press("Collapse agents");
   assert.equal(env.agentRows().length, 0);
   assert.equal(env.chatRows().length, 0);
   assert.equal(env.groupRows().length, 5);
   env.press("Collapse crews");
   assert.equal(env.groupRows().length, 0);
-  env.press("Expand agent chats");
+  env.press("Expand agents");
   assert.equal(env.agentRows().length, 5);
   env.harness.unmount();
 });
@@ -385,7 +385,7 @@ test("opening another agent collapses the first and queries only the expanded hi
       .chatRows()
       .every((row) => row.props.accessibilityLabel.endsWith("with Agent 2")),
   );
-  env.press("Collapse agent chats");
+  env.press("Collapse agents");
   assert.equal(env.chatRows().length, 0);
   assert.equal(env.historyQuery().enabled, false);
   env.harness.unmount();
@@ -964,5 +964,17 @@ test("agent picker reuses the thread hierarchy without crew or creation sections
     kind: "agent",
     agentId: "agent-2",
   });
+  env.harness.unmount();
+});
+
+test("sidebar owner sections and real channel badges keep personal agents before organizations", () => {
+  const env = setup({ kind: "agent", agentId: "agent-7" }, { agent: {
+    owner_kind: "org", owner_id: "team", owner_name: "Product team",
+    channels: [{ id: "bot", platform: "telegram", bot_label: "Release bot", status: "active" }],
+  } });
+  const texts = env.all().filter(row => row.type === "Text").map(content);
+  assert.ok(texts.indexOf("Personal") < texts.indexOf("Product team"));
+  assert.ok(texts.includes("Telegram"));
+  assert.ok(env.label("Collapse chats for Agent 7").props.accessibilityLabel.includes("Product team"));
   env.harness.unmount();
 });

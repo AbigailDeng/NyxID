@@ -1,35 +1,34 @@
-import {
-  WORKSPACE_CLOSE_ICON_SIZE,
-  workspaceCloseControlStyle,
-} from "./workspaceCloseControl";
-import { NyxidLogo } from "../brand/NyxidLogo";
-import type { Ref } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useEffect, useState, type Ref } from "react";
+import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
 import {
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import {
-  Bot,
   CalendarClock,
-  ChevronRight,
-  KeyRound,
-  MessageSquare,
+  ChartNoAxesCombined,
+  Folder,
   Monitor,
   Plug,
-  ScanQrCode,
+  Search,
+  Settings,
   ShieldCheck,
-  X,
-  WalletCards,
+  SquarePen,
+  UserPlus,
 } from "lucide-react-native";
 import { useQuery } from "@tanstack/react-query";
-import { getCurrentUserProfileRequest } from "../../lib/api/http";
+import { NyxidLogo } from "../brand/NyxidLogo";
 import { useTheme } from "../../theme/ThemeContext";
 import { fonts } from "../../theme/designTokens";
 import type { WorkspaceChatTarget } from "../../app/workspaceChatNavigation";
 import { getAuthEpoch } from "../../lib/auth/authEpoch";
+import { useNetworkStatus } from "../../hooks/useNetworkStatus";
+import { mobileApi } from "../../lib/api/mobileApi";
+import { subscribeToApprovalRefreshSignals } from "../../lib/notifications/approvalRefreshSignal";
 import { WorkspaceChatList } from "./WorkspaceChatList";
-import { ScrollEdgeFades, useScrollEdges } from "./ScrollEdgeFades";
+import { WorkspaceRecents } from "./WorkspaceRecents";
+import { sidebarBottomSpace, SIDEBAR_BAR_GAP } from "./workspaceSidebarModel";
+import { workspaceCloseControlStyle } from "./workspaceCloseControl";
 
 export type WorkspaceRoute =
   | "Assistant"
@@ -41,293 +40,290 @@ export type WorkspaceRoute =
   | "Agents"
   | "AccountSettings";
 const destinations = [
-  { route: "Agents", label: "Agents & Crews", Icon: Bot },
-  { route: "Plugins", label: "Plugins", Icon: Plug },
   { route: "Automations", label: "Automations", Icon: CalendarClock },
   { route: "Machines", label: "Machines", Icon: Monitor },
+  { route: "Plugins", label: "Plugins", Icon: Plug },
+  { label: "Artifacts", Icon: Folder },
   { route: "Activity", label: "Approvals", Icon: ShieldCheck },
+  { label: "Activity", Icon: ChartNoAxesCombined },
 ] as const;
 
-export function WorkspaceDrawer({
-  visible,
-  currentRoute,
-  onClose,
-  initialFocusRef,
-  onNavigate,
-  onHome,
-  onScan,
-  onLoginCode,
-  onUsageCredits,
-  currentChat,
-  onOpenChat,
-  onCreateAgent,
-  onCreateGroup,
-}: {
+type Props = {
   visible: boolean;
   currentRoute?: string;
-  onClose: () => void;
   initialFocusRef?: Ref<View>;
   onNavigate: (route: WorkspaceRoute) => void;
   onHome: () => void;
-  onScan: () => void;
-  onLoginCode: () => void;
-  onUsageCredits: () => void;
+  onBrowse: (route: "WorkspaceSearch" | "WorkspaceRecents") => void;
   currentChat?: WorkspaceChatTarget;
   onOpenChat: (target: WorkspaceChatTarget) => void;
   onCreateAgent: () => void;
   onCreateGroup: () => void;
-}) {
+};
+export function WorkspaceDrawer({
+  visible,
+  currentRoute,
+  initialFocusRef,
+  onNavigate,
+  onHome,
+  onBrowse,
+  currentChat,
+  onOpenChat,
+  onCreateAgent,
+  onCreateGroup,
+}: Props) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const scroll = useScrollEdges();
-  const profile = useQuery({
-    queryKey: ["account", "profile"],
-    queryFn: ({ signal }) => getCurrentUserProfileRequest(signal),
-    enabled: visible,
+  const [barHeight, setBarHeight] = useState(52);
+  const [foreground, setForeground] = useState(
+    AppState.currentState === "active",
+  );
+  const { isConnected } = useNetworkStatus();
+  const epoch = getAuthEpoch();
+  const active = visible && foreground && isConnected;
+  const pending = useQuery({
+    queryKey: ["challenges", "sidebar", epoch],
+    queryFn: () => mobileApi.getChallenges(1, 1),
+    enabled: active,
+    refetchInterval: active ? 30000 : false,
+    retry: false,
   });
-  const title =
-    profile.data?.display_name || profile.data?.email || "Your account";
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) =>
+      setForeground(state === "active"),
+    );
+    return () => subscription.remove();
+  }, []);
+  useEffect(() => {
+    if (!active) return;
+    return subscribeToApprovalRefreshSignals(() => {
+      if (epoch === getAuthEpoch()) void pending.refetch();
+    });
+  }, [active, epoch, pending.refetch]);
+  const count = pending.data?.total;
   return (
     <SafeAreaView
       edges={["top", "left", "right"]}
-      style={[
-        styles.panel,
-        { backgroundColor: colors.sidebarBase, borderColor: colors.border },
-      ]}
+      style={[styles.panel, { backgroundColor: colors.sidebarBase }]}
     >
       <View style={styles.brandRow}>
         <Pressable
-          accessibilityRole="button"
           ref={initialFocusRef}
+          accessibilityRole="button"
           accessibilityLabel="NyxID home"
           onPress={onHome}
-          style={{ minHeight: 44, justifyContent: "center", flex: 1 }}
+          style={styles.brand}
         >
-          <NyxidLogo />
+          <NyxidLogo height={28} />
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Close navigation"
-          onPress={onClose}
+          accessibilityLabel="Search"
+          onPress={() => onBrowse("WorkspaceSearch")}
           style={workspaceCloseControlStyle(colors.navActive)}
         >
-          <X color={colors.textPrimary} size={WORKSPACE_CLOSE_ICON_SIZE} />
+          <Search size={21} color={colors.textPrimary} />
         </Pressable>
       </View>
-      <View style={styles.scroll}>
-        <WorkspaceChatList
-          key={getAuthEpoch()}
-          visible={visible}
-          current={currentChat}
-          onSelect={onOpenChat}
-          onCreateAgent={onCreateAgent}
-          onCreateGroup={onCreateGroup}
-          scrollProps={{
-            style: styles.scroll,
-            contentContainerStyle: styles.body,
-            scrollEventThrottle: 32,
-            onLayout: (event) => scroll.layout(event.nativeEvent.layout.height),
-            onContentSizeChange: (_width, height) => scroll.content(height),
-            onScroll: (event) =>
-              scroll.scroll(event.nativeEvent.contentOffset.y),
-          }}
-          scrollHeader={
-            <>
-              <Text style={[styles.section, { color: colors.textMuted }]}>
-                QUICK ACTIONS
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                onPress={onScan}
-                style={styles.row}
-              >
-                <ScanQrCode color={colors.textSecondary} size={19} />
-                <Text style={[styles.rowText, { color: colors.textPrimary }]}>
-                  Scan QR code
-                </Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                onPress={onLoginCode}
-                style={styles.row}
-              >
-                <KeyRound color={colors.textSecondary} size={19} />
-                <Text style={[styles.rowText, { color: colors.textPrimary }]}>
-                  Terminal login code
-                </Text>
-              </Pressable>
-              <Text style={[styles.section, { color: colors.textMuted }]}>
-                YOUR WORKSPACE
-              </Text>
-              {destinations.map(({ route, label, Icon }) => (
+      <WorkspaceChatList
+        key={epoch}
+        visible={visible}
+        current={currentChat}
+        onSelect={onOpenChat}
+        onCreateAgent={onCreateAgent}
+        onCreateGroup={onCreateGroup}
+        scrollProps={{
+          style: styles.scroll,
+          contentContainerStyle: [
+            styles.body,
+            { paddingBottom: sidebarBottomSpace(barHeight, insets.bottom) },
+          ],
+          scrollEventThrottle: 32,
+        }}
+        scrollHeader={
+          <View>
+            <Text
+              accessibilityRole="header"
+              style={[styles.section, { color: colors.textPrimary }]}
+            >
+              Workspace
+            </Text>
+            {destinations.map((item) => {
+              const route = "route" in item ? item.route : undefined;
+              const selected = route === currentRoute;
+              const Icon = item.Icon;
+              return (
                 <Pressable
-                  key={route}
+                  key={item.label}
                   accessibilityRole="button"
-                  accessibilityLabel={label}
-                  accessibilityState={{ selected: currentRoute === route }}
-                  onPress={() => onNavigate(route)}
-                  style={[
+                  accessibilityLabel={`${item.label}${!route ? ", coming soon" : route === "Activity" && count ? `, ${count} pending` : ""}`}
+                  accessibilityState={{ selected, disabled: !route }}
+                  disabled={!route}
+                  onPress={() => {
+                    if (route) onNavigate(route);
+                  }}
+                  style={({ pressed }) => [
                     styles.row,
                     {
                       backgroundColor:
-                        currentRoute === route
-                          ? colors.navActive
-                          : "transparent",
+                        selected || pressed ? colors.navActive : "transparent",
                     },
                   ]}
                 >
                   <Icon
-                    color={
-                      currentRoute === route
-                        ? colors.primary
-                        : colors.textSecondary
-                    }
-                    size={19}
+                    size={20}
+                    color={route ? colors.textSecondary : colors.textMuted}
                   />
-                  <Text style={[styles.rowText, { color: colors.textPrimary }]}>
-                    {label}
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.rowText,
+                      { color: route ? colors.textPrimary : colors.textMuted },
+                    ]}
+                  >
+                    {item.label}
                   </Text>
+                  {!route ? (
+                    <Text style={[styles.meta, { color: colors.textMuted }]}>
+                      Soon
+                    </Text>
+                  ) : route === "Activity" && count ? (
+                    <Text
+                      style={[
+                        styles.count,
+                        {
+                          color: colors.textPrimary,
+                          backgroundColor: colors.navActive,
+                        },
+                      ]}
+                    >
+                      {count}
+                    </Text>
+                  ) : null}
                 </Pressable>
-              ))}
-            </>
-          }
-        />
-        <ScrollEdgeFades edges={scroll.edges} color={colors.sidebarBase} />
-      </View>
-      <View style={[styles.accountArea, { borderColor: colors.border }]}>
+              );
+            })}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Create new agent"
+              onPress={onCreateAgent}
+              style={styles.row}
+            >
+              <UserPlus size={20} color={colors.textSecondary} />
+              <Text style={[styles.rowText, { color: colors.textPrimary }]}>
+                Create new agent
+              </Text>
+            </Pressable>
+          </View>
+        }
+        scrollFooter={
+          <WorkspaceRecents
+            visible={visible}
+            onSelect={onOpenChat}
+            onSeeAll={() => onBrowse("WorkspaceRecents")}
+          />
+        }
+      />
+      <View
+        testID="sidebar-bottom-bar"
+        onLayout={(event) => {
+          const height = Math.ceil(event.nativeEvent.layout.height);
+          setBarHeight((old) => (old === height ? old : height));
+        }}
+        style={[styles.bottomBar, { bottom: insets.bottom + SIDEBAR_BAR_GAP }]}
+      >
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Open usage and credits"
-          accessibilityState={{ selected: currentRoute === "UsageCredits" }}
-          onPress={onUsageCredits}
+          accessibilityLabel="New chat"
+          accessibilityHint="Open NyxBot home"
+          onPress={onHome}
           style={({ pressed }) => [
-            styles.row,
-            styles.footerRow,
-            {
-              backgroundColor:
-                pressed || currentRoute === "UsageCredits"
-                  ? colors.navActive
-                  : "transparent",
-            },
+            styles.chatPill,
+            { opacity: pressed ? 0.85 : 1 },
           ]}
         >
-          <WalletCards size={19} color={colors.textSecondary} />
-          <Text
-            numberOfLines={1}
-            style={[
-              styles.rowText,
-              styles.footerLabel,
-              { color: colors.textPrimary },
-            ]}
-          >
-            Usage & credits
+          <SquarePen size={20} color="#18181B" />
+          <Text maxFontSizeMultiplier={1.3} style={styles.chatLabel}>
+            Chat
           </Text>
-          <ChevronRight size={18} color={colors.textSecondary} />
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Settings"
+          onPress={() => onNavigate("AccountSettings")}
+          style={[styles.gear, { backgroundColor: colors.navActive }]}
+        >
+          <Settings size={22} color={colors.textPrimary} />
         </Pressable>
       </View>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Open account settings"
-        accessibilityHint="Manage your account, security and app preferences"
-        accessibilityState={{
-          selected: currentRoute === "AccountSettings",
-        }}
-        onPress={() => onNavigate("AccountSettings")}
-        style={({ pressed }) => [
-          styles.account,
-          {
-            paddingBottom: Math.max(insets.bottom, 12),
-            borderColor: colors.border,
-            backgroundColor:
-              pressed || currentRoute === "AccountSettings"
-                ? colors.navActive
-                : "transparent",
-          },
-        ]}
-      >
-        <View style={[styles.avatar, { backgroundColor: colors.primaryGlow }]}>
-          <Text style={[styles.initial, { color: colors.primaryOnTint }]}>
-            {title.charAt(0).toUpperCase()}
-          </Text>
-        </View>
-        <View style={styles.accountText}>
-          <Text
-            numberOfLines={1}
-            style={[styles.rowText, { color: colors.textPrimary }]}
-          >
-            {title}
-          </Text>
-          <Text
-            numberOfLines={1}
-            style={[styles.email, { color: colors.textSecondary }]}
-          >
-            {profile.data?.email || "Account & security"}
-          </Text>
-        </View>
-        <ChevronRight
-          size={18}
-          color={
-            currentRoute === "AccountSettings"
-              ? colors.primary
-              : colors.textSecondary
-          }
-        />
-      </Pressable>
     </SafeAreaView>
   );
 }
-
 const styles = StyleSheet.create({
-  footerRow: { minHeight: 62 },
-  footerLabel: { flex: 1, minWidth: 0 },
-  accountArea: { borderTopWidth: 1, paddingHorizontal: 16, paddingTop: 6 },
   panel: { flex: 1 },
+  scroll: { flex: 1 },
   brandRow: {
-    flexShrink: 0,
-    paddingLeft: 24,
-    paddingRight: 12,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  brand: { flex: 1, minHeight: 44, justifyContent: "center" },
+  body: { paddingHorizontal: 12 },
+  section: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 16,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 10,
+  },
+  row: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    borderRadius: 8,
+  },
+  rowText: { flex: 1, fontFamily: fonts.bodySemi, fontSize: 15 },
+  meta: { fontFamily: fonts.bodyRegular, fontSize: 10 },
+  count: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 11,
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  bottomBar: {
+    position: "absolute",
+    left: 24,
+    right: 24,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 12,
+  },
+  chatPill: {
+    minHeight: 52,
+    borderRadius: 28,
+    flexDirection: "row",
+    gap: 10,
     paddingVertical: 12,
-  },
-  scroll: { flex: 1 },
-  body: { padding: 16, gap: 6 },
-  section: {
-    fontFamily: fonts.bodySemi,
-    fontSize: 10,
-    letterSpacing: 1.5,
-    padding: 10,
-  },
-  row: {
-    flexDirection: "row",
+    paddingHorizontal: 20,
     alignItems: "center",
-    minHeight: 48,
-    gap: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 8,
+    backgroundColor: "#FFFFFF",
+    borderColor: "#D4D4D8",
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  rowText: { fontFamily: fonts.body, fontSize: 14 },
-  account: {
-    flexShrink: 0,
-    marginHorizontal: 16,
-    borderTopWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingTop: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  avatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+  chatLabel: { fontFamily: fonts.bodySemi, fontSize: 16, color: "#18181B" },
+  gear: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: "center",
     justifyContent: "center",
   },
-  initial: { fontFamily: fonts.displaySemi, fontSize: 17 },
-  accountText: { flex: 1, gap: 2 },
-  email: { fontFamily: fonts.bodyRegular, fontSize: 11 },
 });

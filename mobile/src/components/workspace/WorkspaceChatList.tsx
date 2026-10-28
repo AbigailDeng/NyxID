@@ -1,3 +1,7 @@
+import {
+  sidebarAgentOwner,
+  sidebarOrderedAgents,
+} from "./workspaceSidebarModel";
 import { AgentAvatar, AgentAvatarStack } from "../AgentAvatar";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
@@ -136,7 +140,9 @@ export function WorkspaceChatList({
     refetchInterval: livePollInterval(5000, live),
     retry: false,
   });
-  const allAgents = orderedDrawerAgents(agents.data?.agents ?? []).filter(
+  const allAgents = (
+    mode === "drawer" ? sidebarOrderedAgents : orderedDrawerAgents
+  )(agents.data?.agents ?? []).filter(
     (agent) =>
       mode !== "picker" ||
       (agent.status !== "destroyed" && agent.can_use === true),
@@ -332,7 +338,7 @@ export function WorkspaceChatList({
     rows.push(
       <SectionHeading
         key="agents"
-        label="Agent chats"
+        label="Agents"
         count={allAgents.length}
         expanded={sections.agents}
         createLabel="New agent"
@@ -375,16 +381,34 @@ export function WorkspaceChatList({
         ) : null}
       </View>,
     );
+    let previousOwner: string | undefined;
     for (const row of boundedDrawerPreview(
       allAgents,
       openId || currentAgentId,
     )) {
+      if (mode === "drawer") {
+        const owner = sidebarAgentOwner(row);
+        if (owner.key !== previousOwner)
+          rows.push(
+            <Text
+              key={`owner:${owner.key}`}
+              accessibilityRole="header"
+              style={[styles.ownerHeading, { color: colors.textMuted }]}
+            >
+              {owner.label}
+            </Text>,
+          );
+        previousOwner = owner.key;
+      }
       const expanded = openId === row.id;
       if (expanded) stickyIndex = rows.length;
       rows.push(
         <View
           key={`agent:${row.id}`}
-          style={{ backgroundColor: colors.cardSoft }}
+          style={{
+            backgroundColor:
+              mode === "drawer" ? colors.sidebarBase : colors.cardSoft,
+          }}
           onLayout={
             expanded
               ? (event) => {
@@ -786,7 +810,7 @@ function SectionHeading({
         style={styles.sectionRow}
       >
         <Text style={[styles.section, { color: colors.textMuted }]}>
-          {label.toUpperCase()}
+          {label}
         </Text>
         <Text style={[styles.sectionCount, { color: colors.textMuted }]}>
           {count}
@@ -861,7 +885,7 @@ function GroupChatRow({
     >
       <AgentAvatarStack
         agents={group.members}
-        surface={selected ? colors.navActive : colors.cardSoft}
+        surface={selected ? colors.navActive : colors.sidebarBase}
       />
       <View style={styles.label}>
         <Text
@@ -933,6 +957,30 @@ function DisclosureRow({
         >
           {label}
         </Text>
+        {agent?.channels.length ? (
+          <View style={styles.channelBadges}>
+            {[
+              ...new Set(
+                agent.channels.map((channel) =>
+                  channelPlatformName(channel.platform),
+                ),
+              ),
+            ].map((platform) => (
+              <Text
+                key={platform}
+                style={[
+                  styles.channelBadge,
+                  {
+                    color: colors.textSecondary,
+                    backgroundColor: colors.navActive,
+                  },
+                ]}
+              >
+                {platform}
+              </Text>
+            ))}
+          </View>
+        ) : null}
         {detail ? (
           <Text
             numberOfLines={1}
@@ -1062,6 +1110,21 @@ function DrawerMessage({
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   subthreads: { marginLeft: 8, paddingLeft: 5, borderLeftWidth: 1 },
+  ownerHeading: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 12,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
+  channelBadges: { flexDirection: "row", flexWrap: "wrap", gap: 4 },
+  channelBadge: {
+    fontFamily: fonts.bodyRegular,
+    fontSize: 10,
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
   sectionHeading: { flexDirection: "row", alignItems: "center" },
   createButton: {
     width: 44,
@@ -1082,9 +1145,8 @@ const styles = StyleSheet.create({
   sectionCount: { fontFamily: fonts.bodyRegular, fontSize: 11 },
   section: {
     fontFamily: fonts.bodySemi,
-    fontSize: 10,
-    letterSpacing: 1.5,
-    padding: 10,
+    fontSize: 16,
+    padding: 12,
     flex: 1,
   },
   row: {

@@ -605,33 +605,15 @@ function ThemedAppShell({
                 navigationRef.dispatch(openWorkspaceSheetAction("GroupEditor"));
               });
             }}
-            onClose={() => setDrawerOpen(false)}
             onNavigate={navigateFromDrawer}
             onHome={() => navigateFromDrawer("Assistant")}
-            onScan={() => {
+            onBrowse={(name) => {
               closeDrawerThen(() => {
-                if (!navigationRef.isReady()) return;
-                navigationRef.dispatch(
-                  openWorkspaceSheetAction("DeviceLogin", {
-                    start_scanner: true,
-                  }),
-                );
-              });
-            }}
-            onUsageCredits={() => {
-              closeDrawerThen(() => {
-                if (!navigationRef.isReady()) return;
-                navigationRef.dispatch(
-                  openWorkspaceSheetAction("UsageCredits"),
-                );
-              });
-            }}
-            onLoginCode={() => {
-              closeDrawerThen(() => {
-                if (!navigationRef.isReady()) return;
-                navigationRef.dispatch(
-                  openWorkspaceSheetAction("AgentKeyLogin", { mint: true }),
-                );
+                if (navigationRef.isReady())
+                  navigationRef.dispatch({
+                    type: "NAVIGATE",
+                    payload: { name },
+                  });
               });
             }}
           />

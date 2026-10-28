@@ -1,3 +1,7 @@
+import {
+  WorkspaceRecentsScreen,
+  WorkspaceSearchScreen,
+} from "../components/workspace/WorkspaceBrowseScreen";
 import { UsageCreditsScreen } from "../features/billing/UsageCreditsScreen";
 import { WorkspaceInteractionSurface } from "../lib/accessibility/WorkspaceInteractionSurface";
 import { workspaceFocus } from "../lib/accessibility/workspaceFocus";
@@ -679,6 +683,26 @@ export function AppNavigator({
             {isAuthenticated ? (
               <Stack.Group navigationKey="workspace">
                 <Stack.Screen name="Workspace" component={WorkspaceNavigator} />
+                <Stack.Screen
+                  name="WorkspaceSearch"
+                  component={WorkspaceSearchScreen}
+                  options={{
+                    ...workspaceHeaderOptions({ role: "menu", onOpenMenu }),
+                    title: "Search",
+                    headerTitleAlign: "left",
+                    animation: reducedMotion ? "none" : "slide_from_right",
+                  }}
+                />
+                <Stack.Screen
+                  name="WorkspaceRecents"
+                  component={WorkspaceRecentsScreen}
+                  options={{
+                    ...workspaceHeaderOptions({ role: "menu", onOpenMenu }),
+                    title: "Recents",
+                    headerTitleAlign: "left",
+                    animation: reducedMotion ? "none" : "slide_from_right",
+                  }}
+                />
                 <Stack.Screen
                   name="AssistantContext"
                   component={AssistantContextRoute}
