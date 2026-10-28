@@ -80,9 +80,14 @@ export function sanitizeCompanionSettings(
 /** Retains identity preferences from older snapshots and discards retired data. */
 export function parseCompanionSnapshot(value: unknown): CompanionSnapshot {
   const source = record(value) ?? {};
+  const savedSettings = record(source.settings ?? source.preferences);
+  const settings = sanitizeCompanionSettings(savedSettings);
+  if (savedSettings?.companionName === "饭点儿") {
+    settings.companionName = createDefaultCompanionSettings().companionName;
+  }
   return {
     schemaVersion: COMPANION_SCHEMA_VERSION,
-    settings: sanitizeCompanionSettings(source.settings ?? source.preferences),
+    settings,
   };
 }
 

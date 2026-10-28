@@ -60,6 +60,32 @@ describe("companion snapshot recovery", () => {
     });
   });
 
+  it.each([
+    { schemaVersion: 0, field: "preferences" },
+    { schemaVersion: 1, field: "settings" },
+    { schemaVersion: 2, field: "settings" },
+  ])(
+    "replaces only the retired built-in name in schema $schemaVersion snapshots",
+    ({ schemaVersion, field }) => {
+      for (const name of ["饭点儿", "Nova", "饭点儿的小精灵"]) {
+        const snapshot = parseCompanionSnapshot({
+          schemaVersion,
+          [field]: {
+            companionName: name,
+            userName: "Ari",
+            onboardingComplete: true,
+          },
+        });
+
+        expect(snapshot.settings).toEqual({
+          companionName: name === "饭点儿" ? "Nyx" : name,
+          userName: "Ari",
+          onboardingComplete: true,
+        });
+      }
+    },
+  );
+
   it("recovers malformed snapshots to defaults", () => {
     for (const value of [null, undefined, [], "invalid", { settings: [] }]) {
       expect(parseCompanionSnapshot(value)).toEqual(

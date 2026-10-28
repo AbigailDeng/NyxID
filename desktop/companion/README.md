@@ -55,6 +55,21 @@ cd desktop/companion
 npm run desktop:dev
 ```
 
+On macOS, package the already compiled native development binary for local
+microphone checks with explicit ad-hoc signing. Keep its Vite development
+server running and run from this directory:
+
+```bash
+APPLE_SIGNING_IDENTITY=- pnpm exec tauri bundle \
+  --debug --bundles app --ci --no-binary-patching
+```
+
+This debug package loads the development server. Ad-hoc signing applies the
+audio-input entitlement and seals the bundle, but provides neither Apple
+Developer ID distribution trust nor notarization. The macOS CI bundle also
+uses ad-hoc signing and verifies the resulting signature and microphone
+permissions; public distribution requires its own signing and notarization.
+
 ## Persistence and transport
 
 `companion-snapshot.json` in the OS application-data directory for
@@ -88,3 +103,6 @@ analyzer. There is no affected TypeScript target; GitHub Actions owns full
 frontend typechecking, the complete test suite and production/native builds.
 Transport unit tests use fixtures and do not establish successful paid
 provider calls or microphone permission behavior on every host OS.
+
+Actual macOS smoke-test observations and remaining manual checks are recorded
+in [NATIVE_VOICE_ACCEPTANCE.md](NATIVE_VOICE_ACCEPTANCE.md).

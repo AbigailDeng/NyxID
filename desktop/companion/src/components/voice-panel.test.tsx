@@ -217,6 +217,27 @@ describe("NyxID voice panel", () => {
     );
   });
 
+  it("removes the idle warning when the server closes an idle call", async () => {
+    const { client } = await activate();
+    const idle = snapshot();
+    idle.session.idle_warning = true;
+    act(() => client.callbacks.onSnapshot(idle));
+    expect(
+      screen.getByText("长时间没有说话，通话即将自动结束。"),
+    ).toBeInTheDocument();
+
+    act(() =>
+      client.callbacks.onSnapshot({
+        ...idle,
+        session: { ...idle.session, state: "closed", end_reason: "idle" },
+      }),
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("通话已结束");
+    expect(
+      screen.queryByText("长时间没有说话，通话即将自动结束。"),
+    ).not.toBeInTheDocument();
+  });
+
   it("releases push-to-talk on pointer cancellation, keyboard release, and window blur", async () => {
     const { client } = await activate();
     const talk = screen.getByRole("button", { name: "按住说话" });

@@ -430,7 +430,7 @@ function VoiceSessionPanel({
             {error}
           </p>
         ) : null}
-        {snapshot?.session.idle_warning ? (
+        {active && snapshot?.session.idle_warning ? (
           <p className="voice-notice">长时间没有说话，通话即将自动结束。</p>
         ) : null}
         {snapshot?.captions.length ? (

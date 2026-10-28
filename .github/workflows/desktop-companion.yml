@@ -136,4 +136,38 @@ jobs:
         run: npm ci
 
       - name: Build macOS bundle
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
         run: npm run desktop:build
+
+      - name: Verify macOS signature and microphone permissions
+        env:
+          COMPANION_APP_PATH: src-tauri/target/release/bundle/macos/NyxID Companion.app
+        run: |
+          python3 - <<'PY'
+          import os
+          import plistlib
+          import subprocess
+          from pathlib import Path
+
+          app = Path(os.environ["COMPANION_APP_PATH"])
+          subprocess.run(
+              ["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app)],
+              check=True,
+          )
+          with (app / "Contents" / "Info.plist").open("rb") as source:
+              info = plistlib.load(source)
+          usage = info.get("NSMicrophoneUsageDescription")
+          if not isinstance(usage, str) or not usage.strip():
+              raise SystemExit("macOS bundle has no microphone usage description")
+
+          signed_entitlements = subprocess.run(
+              ["codesign", "-d", "--entitlements", "-", "--xml", str(app)],
+              check=True,
+              capture_output=True,
+          )
+          entitlements = plistlib.loads(signed_entitlements.stdout)
+          if entitlements.get("com.apple.security.device.audio-input") is not True:
+              raise SystemExit("macOS signature has no audio-input entitlement")
+          print(f"Verified signed microphone permissions: {app}")
+          PY

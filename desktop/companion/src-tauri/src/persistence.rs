@@ -58,26 +58,33 @@ impl SnapshotStore {
         }
 
         let value: serde_json::Value = serde_json::from_slice(&bytes)?;
-        if value
+        let legacy = value
             .get("schemaVersion")
             .and_then(serde_json::Value::as_u64)
-            == Some(1)
-        {
+            == Some(1);
+        let mut snapshot = if legacy {
             let legacy: LegacySnapshot = serde_json::from_value(value)?;
-            let snapshot = CompanionSnapshot {
+            CompanionSnapshot {
                 settings: CompanionSettings {
                     companion_name: legacy.settings.companion_name,
                     user_name: legacy.settings.user_name,
                     onboarding_complete: legacy.settings.onboarding_complete,
                 },
                 ..CompanionSnapshot::default()
-            };
-            // Rewrite the old file so removed feature data is no longer retained on disk.
-            self.save(&snapshot)?;
-            return Ok(Some(snapshot));
+            }
+        } else {
+            serde_json::from_value::<CompanionSnapshot>(value)?
+        };
+        let retired_name = snapshot.settings.companion_name == "饭点儿";
+        if retired_name {
+            snapshot.settings.companion_name = CompanionSettings::default().companion_name;
         }
-        let snapshot: CompanionSnapshot = serde_json::from_value(value)?;
-        snapshot.validate()?;
+        if legacy || retired_name {
+            // Rewrite retired feature data and the old built-in name on disk.
+            self.save(&snapshot)?;
+        } else {
+            snapshot.validate()?;
+        }
         Ok(Some(snapshot))
     }
 
@@ -220,6 +227,43 @@ mod tests {
         assert_eq!(persisted, serde_json::to_value(restored).unwrap());
         assert_eq!(persisted.as_object().unwrap().len(), 2);
         assert_eq!(persisted["settings"].as_object().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn migrates_only_the_exact_retired_default_name_and_rewrites_current_snapshots() {
+        for version in [1, SCHEMA_VERSION] {
+            for name in ["饭点儿", "Nova", "饭点儿的小精灵", " 饭点儿 "] {
+                let directory = tempfile::tempdir().unwrap();
+                let path = directory.path().join(SNAPSHOT_FILE_NAME);
+                let store = SnapshotStore::in_directory(directory.path());
+                fs::write(
+                    &path,
+                    serde_json::to_vec(&serde_json::json!({
+                        "schemaVersion": version,
+                        "settings": {
+                            "companionName": name,
+                            "userName": "Ari",
+                            "onboardingComplete": true,
+                        },
+                    }))
+                    .unwrap(),
+                )
+                .unwrap();
+
+                let restored = store.load().unwrap().unwrap();
+                assert_eq!(restored.schema_version, SCHEMA_VERSION);
+                assert_eq!(
+                    restored.settings.companion_name,
+                    if name == "饭点儿" { "Nyx" } else { name },
+                );
+                assert_eq!(restored.settings.user_name, "Ari");
+                assert!(restored.settings.onboarding_complete);
+                let persisted: serde_json::Value =
+                    serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+                assert_eq!(persisted, serde_json::to_value(&restored).unwrap());
+                assert_eq!(store.load().unwrap(), Some(restored));
+            }
+        }
     }
 
     #[test]
