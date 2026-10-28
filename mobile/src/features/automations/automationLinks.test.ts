@@ -5,14 +5,14 @@ import { parseAutomationLink } from "./automationLinks";
 const frontend = "https://nyx.example";
 const setup = "4b47953b-92cc-482f-8443-e0bcc30ade21";
 
-test("trusted canonical and legacy links preserve only owner setup references", () => {
+test("trusted setup links open read-only Automations and preserve only the agent filter", () => {
   for (const path of ["/assistant/automations", "/automations"]) {
     assert.deepEqual(
       parseAutomationLink(
         `${frontend}${path}?setup=${setup}&agent=researcher&instruction=private&token=secret&return_to=https://other.example#review`,
         frontend,
       ),
-      { kind: "automation", params: { setup, agentId: "researcher" } },
+      { kind: "automation", params: { agentId: "researcher" } },
     );
   }
 });
@@ -68,7 +68,7 @@ test("only automation list paths are intercepted from chat", () => {
   }
 });
 
-test("invalid or ambiguous setup parameters become native errors, never an empty editor", () => {
+test("invalid or ambiguous setup parameters become native errors, never an authoring route", () => {
   for (const query of [
     "setup=",
     "setup=not-a-uuid",

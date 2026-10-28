@@ -1,3 +1,5 @@
+export const TRANSCRIPT_SIDE_PADDING = 12;
+
 export type ChatLayout = { columnWidth: number; composerMaxHeight: number };
 export const defaultChatLayout: ChatLayout = {
   columnWidth: 758,
@@ -50,8 +52,8 @@ export function transcriptColumnStyle(
 ) {
   return {
     width: "100%" as const,
-    maxWidth: columnWidth + 24,
+    maxWidth: columnWidth + 2 * TRANSCRIPT_SIDE_PADDING,
     alignSelf: "center" as const,
-    paddingHorizontal: 12,
+    paddingHorizontal: TRANSCRIPT_SIDE_PADDING,
   };
 }

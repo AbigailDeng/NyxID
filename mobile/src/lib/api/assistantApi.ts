@@ -13,7 +13,6 @@ import {
   conversationSchema,
   historySchema,
   indexSchema,
-  modelListSchema,
   type AssistantTurnEvent,
 } from "../../features/assistant/assistantTypes";
 import { readAssistantResponse } from "../../features/assistant/assistantStreamReader";
@@ -102,9 +101,6 @@ export const assistantApi = {
       throw new Error("Assistant conversation mismatch.");
     return result;
   },
-  async models() {
-    return modelListSchema.parse(await requestJson(`${ROOT}/models`));
-  },
   async recovery(id: string, messageId: string) {
     return recoverySchema.parse(
       await requestJson(
@@ -135,18 +131,6 @@ export const assistantApi = {
     return conversationSchema.parse(
       await requestJson(path(id), { method: "PATCH", body: { title: clean } }),
     );
-  },
-  async changeModel(id: string, model: string, signal?: AbortSignal) {
-    const row = conversationSchema.parse(
-      await requestJson(`${path(id)}/model`, {
-        method: "PATCH",
-        body: { model },
-        signal,
-      }),
-    );
-    if (row.id !== id || row.model !== model)
-      throw new Error("The upload draft model could not be confirmed.");
-    return row;
   },
   async delete(id: string) {
     await requestJson(path(id), { method: "DELETE" });

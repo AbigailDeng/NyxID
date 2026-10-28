@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { accessModeSchema } from "../agents/agentContracts";
-import type { AssistantModel } from "./assistantTypes";
 
 export type ComposerAccessMode = z.infer<typeof accessModeSchema>;
 export const composerSettingsSchema = z.object({
@@ -12,26 +11,10 @@ export const COMPOSER_ACCESS_LABEL = {
   ask_every_time: "Ask every time",
 } as const satisfies Record<ComposerAccessMode, string>;
 
-/** Same labels and unavailable-current-model fallback as the web composer. */
-export function composerModelName(model: Pick<AssistantModel, "id" | "label">) {
-  const alias = model.id.replace(/^nyxagent\//, "");
-  const label = model.label.trim();
-  if (label && label !== alias && label !== model.id) return label;
-  if (model.id === "nyxagent/chat") return "Default model";
-  return alias
-    .replace(/[_-]+/g, " ")
-    .replace(/^./, (letter) => letter.toUpperCase());
-}
-export function composerModelOptions(
-  models: readonly AssistantModel[] | undefined,
-  current: string,
-) {
-  const rows = [...(models ?? [])];
-  if (!rows.some((row) => row.id === current))
-    rows.unshift({
-      id: current,
-      label: current.replace(/^nyxagent\//, ""),
-      available: false,
-    });
-  return rows;
-}
+export const COMPOSER_ACCESS_DESCRIPTION = {
+  autopilot:
+    "Never asks. Every action, including automation, machine, saved-login and service-approval confirmations, runs on its own and the chat records what was allowed automatically.",
+  nyxmode: "Acts on its own; asks before sensitive or destructive actions.",
+  ask_every_time:
+    "Asks before every action that changes something. Reading never asks.",
+} as const satisfies Record<ComposerAccessMode, string>;

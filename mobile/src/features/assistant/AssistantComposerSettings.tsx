@@ -13,22 +13,17 @@ import { getAuthEpoch } from "../../lib/auth/authEpoch";
 import { useGroupAvailability } from "../groups/useGroupRuntime";
 import {
   COMPOSER_ACCESS_LABEL,
-  composerModelName,
-  composerModelOptions,
+  COMPOSER_ACCESS_DESCRIPTION,
   type ComposerAccessMode,
 } from "./composerSettings";
 
 type Props = {
   scope: string;
-  conversationId?: string;
-  model: string;
   agentOverride?: ComposerAccessMode | null;
-  advanced: boolean;
   activeTurn: boolean;
   disabled: boolean;
   visible: boolean;
   onOpenChange: (open: boolean) => void;
-  onModelChanged: (model: string) => void;
 };
 
 /** Owner permissions are separate from the human-only per-agent override editor. */
@@ -41,12 +36,6 @@ export function AssistantComposerSettings(props: Props) {
   const settings = useQuery({
     queryKey: settingsKey,
     queryFn: ({ signal }) => assistantApi.settings(signal),
-    enabled: availability.active,
-    retry: false,
-  });
-  const models = useQuery({
-    queryKey: ["assistant", "composer-models", epoch],
-    queryFn: () => assistantApi.models(),
     enabled: availability.active,
     retry: false,
   });
@@ -66,23 +55,13 @@ export function AssistantComposerSettings(props: Props) {
     setError(undefined);
     props.onOpenChange(false);
   }, [props.scope]);
-  const thinking = props.model === "nyxagent/research";
-  const nextThinking = thinking ? "nyxagent/chat" : "nyxagent/research";
-  const options = composerModelOptions(models.data, props.model);
-  const name = composerModelName(
-    options.find((row) => row.id === props.model)!,
-  );
   const mode = props.agentOverride ?? settings.data?.access_mode;
   const accessLabel = mode ? COMPOSER_ACCESS_LABEL[mode] : "Permissions";
-  const title = props.advanced
-    ? "Model and permissions"
-    : "Thinking and permissions";
-  const modelLocked =
-    props.activeTurn || pending || models.isPending || models.isError;
+  const title = "Permissions";
   const permissionLocked =
     props.activeTurn || !!props.agentOverride || pending || !settings.data;
   const unavailable = props.disabled || !availability.active;
-  async function change(kind: "model" | "permissions", value: string) {
+  async function change(value: ComposerAccessMode) {
     const state = latest.current;
     if (
       lock.current ||
@@ -92,19 +71,7 @@ export function AssistantComposerSettings(props: Props) {
       getAuthEpoch() !== epoch
     )
       return;
-    if (
-      kind === "permissions" &&
-      (state.props.agentOverride || !settings.data || value === mode)
-    )
-      return;
-    if (
-      kind === "model" &&
-      (models.isPending ||
-        models.isError ||
-        value === state.props.model ||
-        !options.some((row) => row.id === value && row.available))
-    )
-      return;
+    if (state.props.agentOverride || !settings.data || value === mode) return;
     const scope = state.props.scope;
     const current = () =>
       mounted.current &&
@@ -114,25 +81,15 @@ export function AssistantComposerSettings(props: Props) {
     setPending(true);
     setError(undefined);
     try {
-      if (kind === "permissions") {
-        // The web composer updates directly, including Full access (no confirmation).
-        const result = await assistantApi.updateAccessMode(
-          value as ComposerAccessMode,
-        );
-        if (current()) queryClient.setQueryData(settingsKey, result);
-      } else {
-        if (state.props.conversationId)
-          await assistantApi.changeModel(state.props.conversationId, value);
-        if (current()) latest.current.props.onModelChanged(value);
-      }
+      // The web composer updates directly, including Full access (no confirmation).
+      const result = await assistantApi.updateAccessMode(value);
+      if (current()) queryClient.setQueryData(settingsKey, result);
     } catch (cause) {
       if (current())
         setError(
           cause instanceof Error
             ? cause.message
-            : kind === "permissions"
-              ? "Could not change permissions."
-              : "Could not change the model.",
+            : "Could not change permissions.",
         );
     } finally {
       lock.current = false;
@@ -140,17 +97,17 @@ export function AssistantComposerSettings(props: Props) {
     }
   }
   function row(
-    label: string,
+    value: ComposerAccessMode,
     selected: boolean,
     disabled: boolean,
     onPress: () => void,
-    checkbox = false,
   ) {
+    const label = COMPOSER_ACCESS_LABEL[value];
     return (
       <Pressable
         key={label}
-        accessibilityRole={checkbox ? "checkbox" : "radio"}
-        accessibilityLabel={checkbox ? "Thinking mode" : label}
+        accessibilityRole="radio"
+        accessibilityLabel={label}
         accessibilityState={{
           checked: selected,
           disabled: disabled || unavailable,
@@ -169,7 +126,12 @@ export function AssistantComposerSettings(props: Props) {
           opacity: disabled || unavailable ? 0.5 : 1,
         }}
       >
-        <Label style={{ flex: 1, fontSize: 14 }}>{label}</Label>
+        <View style={{ flex: 1, gap: 4 }}>
+          <Label style={{ fontSize: 14 }}>{label}</Label>
+          <Label muted style={{ fontSize: 12 }}>
+            {COMPOSER_ACCESS_DESCRIPTION[value]}
+          </Label>
+        </View>
         {selected ? <Check size={16} color={colors.textSecondary} /> : null}
       </Pressable>
     );
@@ -178,7 +140,7 @@ export function AssistantComposerSettings(props: Props) {
     <>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${title}: ${props.advanced ? name : `${accessLabel}${thinking ? ", Thinking" : ""}`}${props.advanced && mode ? `, ${accessLabel}` : ""}${props.agentOverride ? " (this agent)" : ""}`}
+        accessibilityLabel={`Permissions: ${accessLabel}${props.agentOverride ? " (this agent)" : ""}`}
         disabled={unavailable}
         onPress={() => props.onOpenChange(true)}
         style={{
@@ -198,9 +160,7 @@ export function AssistantComposerSettings(props: Props) {
           maxFontSizeMultiplier={1.3}
           style={{ fontSize: 12, flexShrink: 1 }}
         >
-          {props.advanced
-            ? name
-            : `${accessLabel}${thinking ? ", Thinking" : ""}`}
+          {accessLabel}
         </Label>
         <ChevronDown size={12} color={colors.textSecondary} />
       </Pressable>
@@ -274,56 +234,18 @@ export function AssistantComposerSettings(props: Props) {
                   {error}
                 </Label>
               ) : null}
-              {!props.advanced ? (
-                row(
-                  "Thinking",
-                  thinking,
-                  modelLocked ||
-                    !options.some(
-                      (row) => row.id === nextThinking && row.available,
-                    ),
-                  () => void change("model", nextThinking),
-                  true,
-                )
-              ) : (
-                <>
-                  <Label muted>Reasoning · Unavailable</Label>
-                  <Label accessibilityRole="header">Model · {name}</Label>
-                  {options.map((option) =>
-                    row(
-                      `${composerModelName(option)}${!option.available && !models.isPending ? " (unavailable)" : ""}`,
-                      option.id === props.model,
-                      modelLocked || !option.available,
-                      () => void change("model", option.id),
-                    ),
-                  )}
-                </>
-              )}
-              {models.isError ? (
-                <Pressable
-                  accessibilityRole="button"
-                  style={{ minHeight: 44, justifyContent: "center" }}
-                  disabled={unavailable}
-                  onPress={() => void models.refetch()}
-                >
-                  <Label>
-                    {props.advanced
-                      ? "Retry loading models"
-                      : "Retry loading settings"}
-                  </Label>
-                </Pressable>
+              {props.agentOverride ? (
+                <Label muted>
+                  This agent uses {accessLabel}. Its override is read-only here.
+                </Label>
               ) : null}
-              <Label accessibilityRole="header" style={{ paddingTop: 8 }}>
-                Permissions · {mode ? COMPOSER_ACCESS_LABEL[mode] : "Loading…"}
-                {props.agentOverride ? " · agent" : ""}
-              </Label>
               {(["autopilot", "nyxmode", "ask_every_time"] as const).map(
                 (value) =>
                   row(
-                    COMPOSER_ACCESS_LABEL[value],
+                    value,
                     mode === value,
                     permissionLocked,
-                    () => void change("permissions", value),
+                    () => void change(value),
                   ),
               )}
               {settings.isError ? (
@@ -342,4 +264,16 @@ export function AssistantComposerSettings(props: Props) {
       </Modal>
     </>
   );
+}
+
+export function useComposerAccessMode(override?: ComposerAccessMode | null) {
+  const availability = useGroupAvailability();
+  const epoch = getAuthEpoch();
+  const settings = useQuery({
+    queryKey: ["assistant", "composer-settings", epoch],
+    queryFn: ({ signal }) => assistantApi.settings(signal),
+    enabled: availability.active,
+    retry: false,
+  });
+  return override ?? settings.data?.access_mode;
 }

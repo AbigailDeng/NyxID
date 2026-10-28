@@ -14,7 +14,6 @@ import type { ImagePickerAsset } from "expo-image-picker";
 import { File, Paths } from "expo-file-system";
 import { getAuthEpoch } from "../../lib/auth/authEpoch";
 import { assistantUploadsApi } from "../../lib/api/assistantUploadsApi";
-import { assistantApi } from "../../lib/api/assistantApi";
 import {
   AssistantUploadSession,
   type PickedAssistantFile,
@@ -53,7 +52,6 @@ export function useAssistantUploads({
   conversationId,
   groupId,
   agentId,
-  model,
   generation,
   enabled,
   online,
@@ -64,7 +62,6 @@ export function useAssistantUploads({
   conversationId?: string;
   groupId?: string;
   agentId?: string;
-  model: string;
   generation: number;
   enabled: boolean;
   online: boolean;
@@ -92,11 +89,8 @@ export function useAssistantUploads({
     online,
     reservedMentionHandles,
   };
-  const modelRef = useRef(model);
-  modelRef.current = model;
   const current = useRef<AssistantUploadSession | undefined>(undefined);
   const epoch = getAuthEpoch();
-  // Model selection preserves the same draft and its pending files.
   const key = JSON.stringify([
     epoch,
     generation,
@@ -110,7 +104,6 @@ export function useAssistantUploads({
     | undefined
   >(undefined);
   function createSession() {
-    let confirmedModel: string | undefined;
     let ctx: AssistantUploadSession;
     const dependencies = {
       current: () => current.current === ctx && epoch === getAuthEpoch(),
@@ -148,29 +141,6 @@ export function useAssistantUploads({
       createDraft: (signal) => {
         if (groupId) throw new Error("Open a saved crew to attach files.");
         return assistantUploadsApi.createDraft(agentId, signal);
-      },
-      prepareDraft: async (id, signal) => {
-        // A PATCH failure retains the durable id and already accepted files.
-        while (confirmedModel !== modelRef.current) {
-          if (
-            current.current !== ctx ||
-            epoch !== getAuthEpoch() ||
-            signal.aborted
-          )
-            throw cancelled();
-          if (
-            !live.current.enabled ||
-            !live.current.focused ||
-            !live.current.foreground ||
-            AppState.currentState !== "active" ||
-            !live.current.online
-          )
-            throw new Error("Reconnect and keep this chat open to send.");
-          const requested = modelRef.current;
-          if (!requested) return;
-          await assistantApi.changeModel(id, requested, signal);
-          confirmedModel = requested;
-        }
       },
       upload: (id, file, bytes, signal, onProgress) =>
         assistantUploadsApi.upload(
@@ -487,7 +457,9 @@ export function useAssistantUploads({
     }
   }
   function choose(
-    additional: readonly [] | readonly [{ label: string; onPress: () => void }] = [],
+    additional:
+      | readonly []
+      | readonly [{ label: string; onPress: () => void }] = [],
   ) {
     if (
       pickerLock.current ||

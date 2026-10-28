@@ -4,7 +4,6 @@ import { z } from "zod";
 export type AssistantTurnInput = {
   conversationId?: string;
   agentId?: string;
-  model?: string;
   text: string;
   retryOf?: string;
   attachmentIds?: readonly string[];
@@ -32,7 +31,6 @@ export function assistantTurnBody(input: AssistantTurnInput) {
       ? { conversation_id: input.conversationId }
       : {
           ...(input.agentId ? { agent_id: input.agentId } : {}),
-          ...(input.model ? { model: input.model } : {}),
         }),
     text: input.text,
     ...(input.retryOf ? { retry_of: input.retryOf } : {}),

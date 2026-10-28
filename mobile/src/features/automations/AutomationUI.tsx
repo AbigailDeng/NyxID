@@ -1,7 +1,6 @@
 import { useReducedMotion } from "../../lib/accessibility/useReducedMotion";
 import {
   useEffect,
-  useRef,
   useState,
   type ReactNode,
   type PropsWithChildren,
@@ -21,7 +20,6 @@ import { Check, ChevronDown, X } from "lucide-react-native";
 import { z } from "zod";
 import { Label } from "../../components/workspace/WorkspaceUI";
 import { useNetworkStatus } from "../../hooks/useNetworkStatus";
-import { getAuthEpoch } from "../../lib/auth/authEpoch";
 import { useTheme } from "../../theme/ThemeContext";
 import { fonts } from "../../theme/designTokens";
 
@@ -29,66 +27,26 @@ export const AUTOMATIONS = ["workspace", "automations"] as const;
 export const AUTOMATION_SETTINGS = [...AUTOMATIONS, "settings"] as const;
 export function automationError(error: unknown): string {
   if (error instanceof z.ZodError)
-    return error.issues[0]?.message ?? "Check the form fields.";
+    return error.issues[0]?.message ?? "Could not read automations.";
   return error instanceof Error
     ? error.message
-    : "Could not complete this action. Try again.";
+    : "Could not load automations. Try again.";
 }
 
-/** Poll only while visible, and never continue a write across accounts. */
+/** Poll only while the page is visible and the app is active. */
 export function useAutomationRuntime() {
   const focused = useIsFocused();
   const [foreground, setForeground] = useState(
     AppState.currentState === "active",
   );
   const { isConnected } = useNetworkStatus();
-  const state = useRef({ mounted: true, focused, isConnected });
-  state.current.focused = focused;
-  state.current.isConnected = isConnected;
   useEffect(() => {
-    state.current.mounted = true;
     const subscription = AppState.addEventListener("change", (value) =>
       setForeground(value === "active"),
     );
-    return () => {
-      state.current.mounted = false;
-      subscription.remove();
-    };
+    return () => subscription.remove();
   }, []);
-  return {
-    active: focused && foreground,
-    online: isConnected,
-    current: (epoch: number) =>
-      state.current.mounted && getAuthEpoch() === epoch,
-    interactive: () =>
-      state.current.mounted &&
-      state.current.focused &&
-      AppState.currentState === "active" &&
-      state.current.isConnected,
-  };
-}
-
-export function useAutomationWrite() {
-  const runtime = useAutomationRuntime();
-  const lock = useRef(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  async function run(action: (current: () => boolean) => Promise<void>) {
-    if (lock.current || !runtime.interactive()) return;
-    lock.current = true;
-    const epoch = getAuthEpoch();
-    setBusy(true);
-    setError(undefined);
-    try {
-      await action(() => runtime.current(epoch));
-    } catch (cause) {
-      if (runtime.current(epoch)) setError(automationError(cause));
-    } finally {
-      lock.current = false;
-      if (runtime.current(epoch)) setBusy(false);
-    }
-  }
-  return { ...runtime, busy, error, setError, run };
+  return { active: focused && foreground, online: isConnected };
 }
 
 export type Choice = {

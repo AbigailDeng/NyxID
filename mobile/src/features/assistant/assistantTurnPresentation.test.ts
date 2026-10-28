@@ -279,7 +279,7 @@ test("context reset, steering, model interruption and billing notices match web 
   );
   assert.equal(
     contextResetCopy("model_changed"),
-    "The model changed; the assistant context was refreshed.",
+    "The agent configuration changed; the assistant context was refreshed.",
   );
   assert.match(contextResetCopy("stopped"), /fresh context with a recap/);
   assert.equal(

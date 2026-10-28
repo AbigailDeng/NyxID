@@ -47,8 +47,6 @@ type Dependencies = {
   available: () => boolean;
   /** Live group member names must not collide with attachment references. */
   reservedMentionHandles?: () => readonly string[];
-  /** Only upload-created drafts synchronize the latest model before send. */
-  prepareDraft?: (id: string, signal: AbortSignal) => Promise<void>;
   changed: () => void;
 };
 
@@ -262,8 +260,6 @@ export class AssistantUploadSession {
     let detached = false;
     let restore = true;
     try {
-      if (rows.length && this.ownsDraft)
-        await this.deps.prepareDraft?.(this.id!, this.controller.signal);
       if (!this.available())
         throw new Error("Reconnect and keep this chat open to send.");
       const payload = rows.length

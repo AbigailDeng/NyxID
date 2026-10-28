@@ -1,25 +1,5 @@
 import type { AssistantAgent } from "../agents/agentContracts";
-import type {
-  Automation,
-  AutomationRun,
-  AutomationRunsPage,
-} from "./automationContracts";
-
-export function ownedAutomationAgents(
-  agents: AssistantAgent[],
-  userId?: string,
-) {
-  if (!userId) return [];
-  return agents.filter(
-    (agent) =>
-      agent.status !== "destroyed" &&
-      agent.owner_kind !== "org" &&
-      agent.can_use !== false &&
-      (agent.owner_id
-        ? agent.owner_id === userId
-        : agent.can_maintain !== false),
-  );
-}
+import type { Automation, AutomationRunsPage } from "./automationContracts";
 
 export function automationTarget(
   row: Automation,
@@ -50,23 +30,6 @@ export function automationPauseReason(reason: string | null | undefined) {
   }
 }
 
-export function automationRunNotice(run: AutomationRun) {
-  switch (run.outcome) {
-    case "pending":
-      return "Run queued. Check run history for its progress and result.";
-    case "started":
-      return "Run started. Check run history for its result.";
-    case "waiting":
-      return "Run is waiting. Open its thread to review any required confirmation.";
-    case "completed":
-      return "Run completed. Open run history to view its thread.";
-    case "failed":
-      return "Run failed. Check run history for the reason.";
-    case "skipped":
-      return "Run skipped. Check run history for the reason.";
-  }
-}
-
 export function uniqueAutomationRuns(pages: AutomationRunsPage[]) {
   const seen = new Set<string>();
   return pages
@@ -76,4 +39,15 @@ export function uniqueAutomationRuns(pages: AutomationRunsPage[]) {
       seen.add(run.id);
       return true;
     });
+}
+
+export function automationScheduleSummary(row: Automation): string {
+  const schedule = row.schedule;
+  if (!schedule || (row.source ?? "webhook") === "webhook")
+    return "Webhook event";
+  if (schedule.kind === "cron")
+    return `${schedule.expression} · ${schedule.timezone}`;
+  if (schedule.kind === "every")
+    return `Every ${schedule.amount} ${schedule.unit}`;
+  return "One time";
 }

@@ -5,7 +5,14 @@ import {
 } from "./AssistantPendingState";
 import { AssistantSystemMessage } from "./AssistantSystemMessage";
 import { AssistantLinkContext } from "./AssistantLinkContext";
-import { AssistantComposerSettings } from "./AssistantComposerSettings";
+import {
+  AssistantComposerSettings,
+  useComposerAccessMode,
+} from "./AssistantComposerSettings";
+import {
+  COMPOSER_ACCESS_LABEL,
+  COMPOSER_ACCESS_DESCRIPTION,
+} from "./composerSettings";
 import { useComposerConnection } from "./useComposerConnection";
 import { useAssistantGuidance } from "./useAssistantGuidance";
 import { ComposerConnectionPicker } from "./ComposerConnectionPicker";
@@ -51,7 +58,7 @@ import { useNavigation } from "@react-navigation/native";
 import { useQuery } from "@tanstack/react-query";
 import type { NativeStackNavigationOptions } from "@react-navigation/native-stack";
 import * as WebBrowser from "expo-web-browser";
-import { AssistantMarkdownBody } from "./AssistantMarkdownBody";
+import { AssistantReplyBody } from "./AssistantReplyBody";
 import { Check, MoreHorizontal, SquarePen, X } from "lucide-react-native";
 import type {
   AssistantParams,
@@ -193,7 +200,7 @@ export function AssistantScreen({
     setDraft(value);
   }
   const [sheet, setSheet] = useState<
-    "agents" | "history" | "model" | "details" | "context"
+    "agents" | "history" | "permissions" | "details" | "context"
   >();
   const [title, setTitle] = useState("");
   const [localError, setLocalError] = useState<string>();
@@ -241,10 +248,10 @@ export function AssistantScreen({
     : homeVisible
       ? "Home"
       : "New chat";
-  const currentModelId = conversation?.model ?? assistant.model;
-  const currentModelLabel =
-    assistant.models.find((item) => item.id === currentModelId)?.label ??
-    currentModelId.replace(/^nyxagent\//, "");
+  const accessMode = useComposerAccessMode(
+    assistant.agent?.access_mode_override,
+  );
+
   const pendingCount =
     (assistant.history?.acknowledgements.filter((a) => a.status === "pending")
       .length ?? 0) + (assistant.history?.approvals.length ?? 0);
@@ -312,7 +319,6 @@ export function AssistantScreen({
     retainKey: draftKey,
     conversationId: assistant.conversationId,
     agentId: assistant.agentId,
-    model: assistant.model,
     generation: composerGeneration,
     enabled: canCompose,
     online: assistant.online,
@@ -346,7 +352,7 @@ export function AssistantScreen({
     !assistant.agentId ||
     ((assistant.sending || uploads.session.sending) &&
       !assistant.conversationId);
-  const modelLocked = running || uploads.session.sending;
+  const permissionsLocked = running || uploads.session.sending;
   const headerDisabled =
     assistant.loading ||
     ((assistant.sending || uploads.session.sending) &&
@@ -488,19 +494,12 @@ export function AssistantScreen({
       if (automation?.kind === "invalid") {
         Alert.alert("Could not open automation", automation.message);
       } else if (automation?.kind === "automation") {
-        if (automation.params.setup) {
-          navigation.dispatch(
-            openWorkspacePageAction("AutomationEditor", automation.params),
-          );
-        } else {
-          navigation.dispatch(
-            workspaceNavigateAction("Automations", {
-              agentId: undefined,
-              setup: undefined,
-              ...automation.params,
-            }),
-          );
-        }
+        navigation.dispatch(
+          workspaceNavigateAction("Automations", {
+            agentId: undefined,
+            ...automation.params,
+          }),
+        );
       } else {
         void WebBrowser.openBrowserAsync(href).catch(() => undefined);
       }
@@ -581,7 +580,6 @@ export function AssistantScreen({
     setComposerGeneration((value) => value + 1);
     const agentId = assistant.agentId;
     assistant.openConversation();
-    assistant.setModel(assistant.agent?.model ?? "nyxagent/chat");
     navigation.setParams(newAssistantChatParams(agentId));
     setSheet(undefined);
   }
@@ -747,50 +745,6 @@ export function AssistantScreen({
             {attribution}
           </Label>
         ) : null}
-        <AssistantActivityDisclosure
-          key={item.id}
-          activities={item.activities}
-          activityTotal={item.activity_total}
-          turnLabel={
-            item.error_code === "cancelled"
-              ? "Stopped"
-              : item.status === "failed"
-                ? "Turn failed"
-                : "Completed"
-          }
-          metadata={item.turn_metadata}
-          decisions={(assistant.history?.acknowledgements ?? []).filter(
-            (row) =>
-              row.status !== "pending" &&
-              !row.authored_skill &&
-              row.creation_turn_id === item.turn_id,
-          )}
-          onToggle={() => {
-            // Opening details is an explicit reading action. Keep the header
-            // in view instead of following the newly expanded list to its end.
-            transcriptScroll.pause();
-          }}
-        />
-        {conversation?.id &&
-          item.activities
-            .filter((activity) => activity.machine)
-            .map((activity) => (
-              <MachineToolCard
-                key={`machine:${activity.id}`}
-                receipt={activity.machine!}
-                attachments={item.attachments}
-                conversationId={conversation.id}
-                onOpenDesktop={(params) =>
-                  navigation.navigate("MachineDesktop", params)
-                }
-              />
-            ))}
-        {!isUser &&
-          assistant.history?.cma_operations
-            ?.filter((operation) => operation.turn_id === item.turn_id)
-            .map((operation) => (
-              <AssistantCmaOperation key={operation.id} operation={operation} />
-            ))}
         {isUser && item.steering ? (
           <Label muted>
             Steering ·{" "}
@@ -807,9 +761,78 @@ export function AssistantScreen({
             </Text>
           ) : null
         ) : (
-          <AssistantMarkdownBody
+          <AssistantReplyBody
             text={sanitizeAssistantMessageContent(item.text)}
             onLinkPress={openSafeLink}
+            activity={
+              item.activities.length ||
+              (item.turn_metadata?.capacity_wait_ms ?? 0) > 0 ||
+              (item.turn_metadata?.attempts ?? 0) > 1 ||
+              item.turn_metadata?.channel_delivery ||
+              assistant.history?.acknowledgements.some(
+                (row) =>
+                  row.status !== "pending" &&
+                  !row.authored_skill &&
+                  row.creation_turn_id === item.turn_id,
+              ) ||
+              assistant.history?.cma_operations?.some(
+                (row) => row.turn_id === item.turn_id,
+              ) ? (
+                <>
+                  <AssistantActivityDisclosure
+                    key={item.id}
+                    activities={item.activities}
+                    activityTotal={item.activity_total}
+                    turnLabel={
+                      item.error_code === "cancelled"
+                        ? "Stopped"
+                        : item.status === "failed"
+                          ? "Turn failed"
+                          : "Completed"
+                    }
+                    metadata={item.turn_metadata}
+                    decisions={(
+                      assistant.history?.acknowledgements ?? []
+                    ).filter(
+                      (row) =>
+                        row.status !== "pending" &&
+                        !row.authored_skill &&
+                        row.creation_turn_id === item.turn_id,
+                    )}
+                    onToggle={() => {
+                      // Opening details is an explicit reading action. Keep the header
+                      // in view instead of following the newly expanded list to its end.
+                      transcriptScroll.pause();
+                    }}
+                  />
+                  {conversation?.id &&
+                    item.activities
+                      .filter((activity) => activity.machine)
+                      .map((activity) => (
+                        <MachineToolCard
+                          key={`machine:${activity.id}`}
+                          receipt={activity.machine!}
+                          attachments={item.attachments}
+                          conversationId={conversation.id}
+                          onOpenDesktop={(params) =>
+                            navigation.navigate("MachineDesktop", params)
+                          }
+                        />
+                      ))}
+                  {!isUser &&
+                    assistant.history?.cma_operations
+                      ?.filter(
+                        (operation) => operation.turn_id === item.turn_id,
+                      )
+                      .map((operation) => (
+                        <AssistantCmaOperation
+                          key={operation.id}
+                          operation={operation}
+                        />
+                      ))}
+                </>
+              ) : undefined
+            }
           />
         )}
         {item.attachments
@@ -985,7 +1008,6 @@ export function AssistantScreen({
                 return;
               setComposerGeneration((value) => value + 1);
               assistant.openConversation(conversationId, acknowledgementId);
-              assistant.setModel(agent.model ?? "nyxagent/chat");
               navigation.setParams({
                 ...(conversationId
                   ? { home: false, draftId: undefined }
@@ -1148,39 +1170,48 @@ export function AssistantScreen({
                     <Label muted style={styles.messageLabel}>
                       {agentName}
                     </Label>
-                    <AssistantActivityDisclosure
-                      key={
-                        conversation?.active_turn?.turn_id ??
-                        assistant.live?.turnId ??
-                        "pending-turn"
+                    <AssistantReplyBody
+                      text={liveText}
+                      onLinkPress={openSafeLink}
+                      activity={
+                        liveActivities.length ? (
+                          <>
+                            <AssistantActivityDisclosure
+                              key={
+                                conversation?.active_turn?.turn_id ??
+                                assistant.live?.turnId ??
+                                "pending-turn"
+                              }
+                              activities={liveActivities}
+                              activityTotal={
+                                conversation?.active_turn?.activity_total
+                              }
+                              turnLabel="Working…"
+                              onToggle={() => {
+                                transcriptScroll.pause();
+                              }}
+                            />
+                            {conversation?.id &&
+                              liveActivities
+                                .filter((activity) => activity.machine)
+                                .map((activity) => (
+                                  <MachineToolCard
+                                    key={`machine:${activity.id}`}
+                                    receipt={activity.machine!}
+                                    attachments={liveAttachments}
+                                    conversationId={conversation.id}
+                                    onOpenDesktop={(params) =>
+                                      navigation.navigate(
+                                        "MachineDesktop",
+                                        params,
+                                      )
+                                    }
+                                  />
+                                ))}
+                          </>
+                        ) : undefined
                       }
-                      activities={liveActivities}
-                      activityTotal={conversation?.active_turn?.activity_total}
-                      turnLabel="Working…"
-                      onToggle={() => {
-                        transcriptScroll.pause();
-                      }}
                     />
-                    {conversation?.id &&
-                      liveActivities
-                        .filter((activity) => activity.machine)
-                        .map((activity) => (
-                          <MachineToolCard
-                            key={`machine:${activity.id}`}
-                            receipt={activity.machine!}
-                            attachments={liveAttachments}
-                            conversationId={conversation.id}
-                            onOpenDesktop={(params) =>
-                              navigation.navigate("MachineDesktop", params)
-                            }
-                          />
-                        ))}
-                    {liveText ? (
-                      <AssistantMarkdownBody
-                        text={liveText}
-                        onLinkPress={openSafeLink}
-                      />
-                    ) : null}
                     {liveAttachments
                       .filter(
                         (a) =>
@@ -1376,14 +1407,8 @@ export function AssistantScreen({
                 {mentionAction}
                 <AssistantComposerSettings
                   scope={`${getAuthEpoch()}:${draftKey}`}
-                  conversationId={assistant.conversationId}
-                  model={currentModelId}
                   agentOverride={assistant.agent?.access_mode_override}
-                  advanced={
-                    voiceFeatures.data?.includes("assistant:model-controls") ===
-                    true
-                  }
-                  activeTurn={modelLocked}
+                  activeTurn={permissionsLocked}
                   disabled={
                     !assistant.online ||
                     !assistant.agent ||
@@ -1394,12 +1419,10 @@ export function AssistantScreen({
                     openingVoice ||
                     !!voiceThread
                   }
-                  visible={sheet === "model"}
-                  onOpenChange={(open) => setSheet(open ? "model" : undefined)}
-                  onModelChanged={(model) => {
-                    assistant.setModel(model);
-                    if (assistant.conversationId) void assistant.recover();
-                  }}
+                  visible={sheet === "permissions"}
+                  onOpenChange={(open) =>
+                    setSheet(open ? "permissions" : undefined)
+                  }
                 />
                 <View style={{ flex: 1 }} />
                 <ComposerDictationButton
@@ -1474,15 +1497,15 @@ export function AssistantScreen({
       </View>
 
       <Sheet
-        visible={!!sheet && sheet !== "model"}
+        visible={!!sheet && sheet !== "permissions"}
         scroll={sheet !== "agents"}
         title={
           sheet === "agents"
             ? "Choose agent"
             : sheet === "history"
               ? `${agentName} · Chat history`
-              : sheet === "model"
-                ? "Choose a model"
+              : sheet === "permissions"
+                ? "Permissions"
                 : sheet === "context"
                   ? "Working context"
                   : "Chat details"
@@ -1509,9 +1532,7 @@ export function AssistantScreen({
               <Card>
                 <Label style={styles.sheetSection}>This thread</Label>
                 <Label>{conversation?.title || chatTitle}</Label>
-                <Label muted>
-                  {agentName} · {currentModelLabel}
-                </Label>
+                <Label muted>{agentName}</Label>
                 {conversation ? (
                   <Label muted>
                     {formatDate(conversation.last_message_at)} ·{" "}
@@ -1566,8 +1587,6 @@ export function AssistantScreen({
               if (!sameThread) {
                 setComposerGeneration((value) => value + 1);
                 assistant.openConversation(target.conversationId);
-                if (!target.conversationId)
-                  assistant.setModel(agent.model ?? "nyxagent/chat");
                 navigation.setParams({
                   ...(target.conversationId
                     ? { home: false, draftId: undefined }
@@ -1714,20 +1733,23 @@ export function AssistantScreen({
               </Label>
             </Card>
             <Card>
-              <Label style={styles.cardTitle}>Model</Label>
-              <Label>{currentModelLabel}</Label>
-              <Label muted>
-                {assistant.conversationId
-                  ? "The model used by this saved chat. Changes apply to its next reply."
-                  : "Choose the model for this new chat."}
+              <Label style={styles.cardTitle}>Permissions</Label>
+              <Label>
+                {accessMode
+                  ? COMPOSER_ACCESS_LABEL[accessMode]
+                  : "Loading permissions…"}
               </Label>
+              <Label muted>
+                {accessMode ? COMPOSER_ACCESS_DESCRIPTION[accessMode] : ""}
+              </Label>
+              {assistant.agent?.access_mode_override ? (
+                <Label muted>This agent’s override is read-only here.</Label>
+              ) : null}
               <ActionButton
-                label="Model and permissions"
+                label="Change permissions"
                 variant="secondary"
-                disabled={modelLocked}
-                onPress={() => {
-                  setSheet("model");
-                }}
+                disabled={permissionsLocked}
+                onPress={() => setSheet("permissions")}
               />
             </Card>
             {currentAgent?.id ? (

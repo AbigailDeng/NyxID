@@ -26,12 +26,11 @@ function harness(platform = "android") {
   const disposed: string[] = [];
   const requests: string[] = [];
   const props: {
-    model: string;
     generation: number;
     enabled: boolean;
     online: boolean;
     retainKey?: string;
-  } = { model: "model", generation: 0, enabled: true, online: true };
+  } = { generation: 0, enabled: true, online: true };
   class File {
     constructor(readonly uri: string) {}
     get exists() {
@@ -141,9 +140,6 @@ function harness(platform = "android") {
         },
         remove: async () => {},
       },
-    },
-    "../../lib/api/assistantApi": {
-      assistantApi: { changeModel: async () => {} },
     },
   });
   const hook = h.load(

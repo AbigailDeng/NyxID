@@ -121,12 +121,43 @@ test("private and crew GFM render accessible tasks, scrollable aligned tables, s
       assert.equal(checkbox.props.onPress, undefined);
     }
     assert.equal(rules.list_item(node(), []), "ordinary list item");
+    const types = [
+      "heading1",
+      "paragraph",
+      "fence",
+      "table",
+      "heading2",
+      "paragraph",
+      "blockquote",
+      "bullet_list",
+      "image",
+    ];
+    const body = rules.body(
+      {
+        ...node(),
+        children: types.map((type, i) => ({ type, key: String(i) })),
+      },
+      types,
+      [],
+      { _VIEW_SAFE_body: { color: "white" } },
+    );
+    assert.deepEqual(
+      body.props.children.map((child: any) => child.props.style.marginTop),
+      [0, 8, 12, 12, 16, 8, 12, 12, 12],
+    );
+    assert.equal(
+      body.props.children.at(-1).props.style.marginBottom,
+      undefined,
+    );
+    assert.equal(h.value().props.style.paragraph.marginBottom, 0);
     const table = rules.table(
       node({}, [{ type: "thead", children: [{ children: [1, 2, 3] }] }]),
       ["cells"],
     );
     assert.equal(table.type, "ScrollView");
     assert.equal(table.props.horizontal, true);
+    assert.equal(table.props.contentContainerStyle.paddingRight, 12);
+    assert.equal(table.props.style.marginBottom, undefined);
     assert.equal(table.props.children.props.style.minWidth, 420);
     const cell = rules.textgroup(
       node(),

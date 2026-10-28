@@ -20,7 +20,6 @@ import { NYXID_FRONTEND_URL } from "../../lib/env";
 import { useTheme } from "../../theme/ThemeContext";
 import {
   openWorkspaceSheetAction,
-  openWorkspacePageAction,
   workspaceNavigateAction,
 } from "../../app/navigationHierarchy";
 import {
@@ -212,17 +211,17 @@ export function ScopedAssistantLinkHost({
                   <Label>
                     {target.kind === "channel"
                       ? `Continue setting up ${target.platform} on the web.`
-                      : "Manage automation preferences and agents here. Global limits and channel management are available on the web."}
+                      : "View automations and manage agents here. Global limits and channel management are available on the web."}
                   </Label>
                   {target.kind === "account" ? (
                     <>
                       <ActionButton
-                        label="Automation preferences"
+                        label="Automations"
                         variant="secondary"
                         onPress={() => {
                           close();
                           navigation.dispatch(
-                            openWorkspacePageAction("AutomationPreferences"),
+                            workspaceNavigateAction("Automations"),
                           );
                         }}
                       />

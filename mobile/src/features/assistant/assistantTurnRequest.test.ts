@@ -11,7 +11,6 @@ test("attachment-only send uses its existing upload draft and omits new-chat ide
     assistantTurnBody({
       conversationId: id,
       agentId: "agent",
-      model: "chosen",
       text: "",
       attachmentIds: [file],
     }),
@@ -60,4 +59,20 @@ test("only a definite refusal before admission can restore editable text and upl
   assert.equal(restoreRefusedAssistantSend({ statusCode: 409 }, true), false);
   assert.equal(restoreRefusedAssistantSend({ statusCode: 503 }, false), false);
   assert.equal(restoreRefusedAssistantSend(new Error("timeout"), false), false);
+});
+
+test("native new turns use the server default and strip legacy selection fields", () => {
+  const input = {
+    text: "Hello",
+    agentId: "specialist",
+    model: "nyxagent/research",
+  };
+  assert.deepEqual(assistantTurnBody(input), {
+    agent_id: "specialist",
+    text: "Hello",
+  });
+  assert.deepEqual(assistantTurnBody({ ...input, conversationId: id }), {
+    conversation_id: id,
+    text: "Hello",
+  });
 });

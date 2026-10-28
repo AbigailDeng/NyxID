@@ -199,11 +199,11 @@ export function storedError(
   if (code === "credential_invalid")
     return "The assistant credential could not be accepted.";
   if (code === "model_not_configured")
-    return "This assistant profile is unavailable. Choose another model in the model selector.";
+    return "This agent is unavailable. Ask NyxBot to check its configuration.";
   if (code === "model_unavailable")
-    return "The selected model is unavailable. Choose another model in the model selector.";
+    return "This agent is unavailable. Ask NyxBot to check its configuration.";
   if (code === "model_interrupted")
-    return "The model's response was interrupted. Some actions may already have completed — check them before retrying.";
+    return "The response was interrupted. Some actions may already have completed — check them before retrying.";
   if (code === "session_busy")
     return "The assistant session is busy. Try again shortly.";
   if (code === "queue_timeout")
@@ -245,7 +245,7 @@ export function contextResetCopy(reason: string | null | undefined): string {
     case "instructions_changed":
       return "Instructions changed; the assistant context was refreshed.";
     case "model_changed":
-      return "The model changed; the assistant context was refreshed.";
+      return "The agent configuration changed; the assistant context was refreshed.";
     case "session_lost":
       return "The assistant session expired; a fresh context will be used.";
     case "audience_changed":

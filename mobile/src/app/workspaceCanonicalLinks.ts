@@ -17,6 +17,24 @@ export function workspaceStateFromPath(
   let search: URLSearchParams;
   try {
     url = new URL(path, "https://native.nyxid.invalid/");
+    // Removed native authoring URLs lead to the existing read-only pages.
+    const automation =
+      /^\/(?:assistant\/)?automations(?:\/edit(?:\/([^/]+))?|\/preferences)?\/?$/.exec(
+        url.pathname,
+      );
+    if (automation) {
+      const id = automation[1];
+      const uuid =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const agentId =
+        url.searchParams.get("agentId") ?? url.searchParams.get("agent");
+      const query = agentId ? `?${new URLSearchParams({ agentId })}` : "";
+      return withWorkspaceFallback(
+        parse(
+          id && uuid.test(id) ? `automations/${id}` : `automations${query}`,
+        ),
+      );
+    }
     if (!/^\/assistant\/?$/.test(url.pathname))
       return withWorkspaceFallback(parse(path));
     search = url.searchParams;

@@ -116,7 +116,7 @@ export function voiceStartError(error: unknown, step: VoiceStartStep): string {
           : error.statusCode === 429
             ? "Too many voice requests. Wait a moment and try again"
             : error.statusCode === 400 || error.statusCode === 422
-              ? "Voice settings were rejected. Check your source, model and voice"
+              ? "Voice settings were rejected. Check your source and voice"
               : "Voice server could not start the call");
     const status =
       Number.isInteger(error.statusCode) &&

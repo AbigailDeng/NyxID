@@ -4,7 +4,10 @@ import { fileURLToPath, URL } from "node:url";
 import { hookHarness } from "../features/assistant/assistantHookTestHarness";
 
 type E = { type: unknown; props: Record<string, any> };
-const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
+const tick = async () => {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+};
 test("slab root is opaque and reports paint only after layout and a complete frame", async () => {
   const painted: string[] = [];
   let focused = true;

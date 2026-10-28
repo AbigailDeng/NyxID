@@ -14,6 +14,7 @@ import Markdown, {
 } from "react-native-markdown-display";
 import * as WebBrowser from "expo-web-browser";
 import { useTheme } from "../../theme/ThemeContext";
+import { TRANSCRIPT_SIDE_PADDING } from "../display/chatLayout";
 import { fonts, radius } from "../../theme/designTokens";
 import { assistantSelectableMarkdown } from "./assistantSelectableMarkdown";
 import { AssistantLinkContext } from "./AssistantLinkContext";
@@ -78,7 +79,7 @@ export const AssistantMarkdownBody = memo(function AssistantMarkdownBody({
         fontSize: 14,
         lineHeight: 23,
       },
-      paragraph: { marginTop: 0, marginBottom: 10 },
+      paragraph: { marginTop: 0, marginBottom: 0 },
       heading1: {
         fontFamily: fonts.displaySemi,
         fontSize: 22,
@@ -129,7 +130,7 @@ export const AssistantMarkdownBody = memo(function AssistantMarkdownBody({
         lineHeight: 23,
         fontFamily: fonts.bodyRegular,
       },
-      paragraph: { marginTop: 0, marginBottom: 8 },
+      paragraph: { marginTop: 0, marginBottom: 0 },
       link: { color: colors.primaryOnTint },
       fence: {
         backgroundColor: colors.cardSoft,
@@ -153,6 +154,32 @@ export const AssistantMarkdownBody = memo(function AssistantMarkdownBody({
   const rules: RenderRules = useMemo(
     () => ({
       ...assistantSelectableMarkdown,
+      body: (node, children, _parents, styles) => (
+        <View key={node.key} style={styles._VIEW_SAFE_body}>
+          {children.map((child, index) => {
+            const type = node.children[index]?.type ?? "";
+            const previous = node.children[index - 1]?.type ?? "";
+            const gap =
+              index === 0
+                ? 0
+                : type === "heading1"
+                  ? 20
+                  : type.startsWith("heading")
+                    ? 16
+                    : previous.startsWith("heading")
+                      ? 8
+                      : 12;
+            return (
+              <View
+                key={node.children[index]?.key ?? index}
+                style={{ marginTop: gap }}
+              >
+                {child}
+              </View>
+            );
+          })}
+        </View>
+      ),
       link: (node, children) => {
         const target = assistantLinkTarget(
           node.attributes.href,
@@ -264,8 +291,11 @@ export const AssistantMarkdownBody = memo(function AssistantMarkdownBody({
             key={node.key}
             horizontal
             accessibilityLabel="Table"
-            contentContainerStyle={{ flexGrow: 1 }}
-            style={{ maxWidth: "100%", marginBottom: 8 }}
+            contentContainerStyle={{
+              flexGrow: 1,
+              paddingRight: TRANSCRIPT_SIDE_PADDING,
+            }}
+            style={{ maxWidth: "100%" }}
           >
             <View
               style={{
@@ -341,7 +371,6 @@ export const AssistantMarkdownBody = memo(function AssistantMarkdownBody({
             borderTopWidth: 1,
             borderColor: colors.border,
             paddingTop: 8,
-            marginTop: 8,
           }}
         >
           <Text

@@ -1,28 +1,16 @@
 import type { ReactNode } from "react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { useEffect, useState } from "react";
-import { Alert, Pressable, View } from "react-native";
-import {
-  useInfiniteQuery,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { Pressable, View } from "react-native";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import * as WebBrowser from "expo-web-browser";
-import {
-  ChevronRight,
-  Clock3,
-  MoreHorizontal,
-  SlidersHorizontal,
-} from "lucide-react-native";
+import { ChevronRight, Clock3 } from "lucide-react-native";
 import type {
   WorkspaceContentParamList,
   WorkspaceScreenProps,
 } from "../../app/navigationTypes";
-import {
-  useOpenWorkspaceChat,
-  useWorkspaceBack,
-} from "../../app/WorkspaceHeader";
+import { useOpenWorkspaceChat } from "../../app/WorkspaceHeader";
+import { newAssistantChatParams } from "../../app/assistantChatParams";
 import {
   ActionButton,
   Card,
@@ -33,15 +21,12 @@ import {
 } from "../../components/workspace/WorkspaceUI";
 import { agentsApi } from "../../lib/api/agentsApi";
 import { automationsApi } from "../../lib/api/automationsApi";
-import { NYXID_FRONTEND_URL } from "../../lib/env";
 import { useTheme } from "../../theme/ThemeContext";
-import { automationScheduleSummary } from "./automationForm";
 import type { Automation, AutomationRunsCursor } from "./automationContracts";
 import { deviceTimezone, formatAutomationTime } from "./automationTime";
-import { validateBrowserUrl } from "../services/serviceContracts";
 import {
   automationPauseReason,
-  automationRunNotice,
+  automationScheduleSummary,
   automationTarget,
   uniqueAutomationRuns,
 } from "./automationPresentation";
@@ -49,23 +34,17 @@ import {
   AUTOMATIONS,
   AUTOMATION_SETTINGS,
   AutomationLoading,
-  AutomationSheet,
   AutomationStatus,
   ChoiceField,
   automationError,
   automationStyles as s,
   useAutomationRuntime,
-  useAutomationWrite,
 } from "./AutomationUI";
-
-export { AutomationEditorScreen } from "./AutomationEditorScreen";
-export { AutomationPreferencesScreen } from "./AutomationPreferencesScreen";
 
 export function AutomationsScreen({
   navigation,
   route,
 }: WorkspaceScreenProps<"Automations">) {
-  const openChat = useOpenWorkspaceChat();
   const runtime = useAutomationRuntime();
   const { colors } = useTheme();
   const [search, setSearch] = useState("");
@@ -93,15 +72,6 @@ export function AutomationsScreen({
   useEffect(() => {
     setAgentId(route.params?.agentId ?? "");
   }, [route.params?.agentId]);
-  useEffect(() => {
-    if (!route.params?.setup || !runtime.active) return;
-    const setup = route.params.setup;
-    navigation.setParams({ setup: undefined });
-    navigation.push("AutomationEditor", {
-      setup,
-      agentId: route.params.agentId,
-    });
-  }, [route.params?.setup, route.params?.agentId, runtime.active, navigation]);
   const zone = settings.data?.timezone ?? deviceTimezone();
   const rows = (list.data?.triggers ?? []).filter(
     (row) =>
@@ -136,22 +106,8 @@ export function AutomationsScreen({
             On a schedule or when an event arrives.
           </Label>
         </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Automation preferences"
-          style={s.iconButton}
-          onPress={() => navigation.push("AutomationPreferences")}
-        >
-          <SlidersHorizontal size={21} color={colors.textSecondary} />
-        </Pressable>
       </View>
-      <ActionButton
-        label="Create automation"
-        disabled={!runtime.online}
-        onPress={() =>
-          navigation.push("AutomationEditor", { agentId: agentId || undefined })
-        }
-      />
+      <AutomationGuidance />
       <Field
         label="Search automations"
         placeholder="Search by name or agent"
@@ -181,7 +137,7 @@ export function AutomationsScreen({
         </View>
       </View>
       {!runtime.online && (
-        <Notice message="You’re offline. Reconnect to refresh or change automations." />
+        <Notice message="You’re offline. Reconnect to refresh automations." />
       )}
       {list.isPending && <AutomationLoading />}
       {list.error && (
@@ -245,20 +201,13 @@ export function AutomationsScreen({
           <Label style={s.title}>
             {list.data.triggers.length
               ? "No matching automations"
-              : "Your first automation"}
+              : "No automations yet"}
           </Label>
           <Label muted>
             {list.data.triggers.length
               ? "Try another search, agent or status."
-              : "Ask NyxBot to help, or create a task and choose when it should run."}
+              : "Your configured automations will appear here."}
           </Label>
-          {!list.data.triggers.length && (
-            <ActionButton
-              label="Ask NyxBot"
-              variant="secondary"
-              onPress={() => openChat({ draft: true })}
-            />
-          )}
         </Card>
       )}
     </WorkspacePage>
@@ -269,63 +218,30 @@ export function AutomationDetailScreen({
   navigation,
   route,
 }: NativeStackScreenProps<WorkspaceContentParamList, "AutomationDetail">) {
-  const write = useAutomationWrite();
-  const { colors } = useTheme();
-  const client = useQueryClient();
-  const [menu, setMenu] = useState(false);
-  const [notice, setNotice] = useState<string>();
-  const [deleted, setDeleted] = useState(false);
+  const runtime = useAutomationRuntime();
   const detail = useQuery({
     queryKey: [...AUTOMATIONS, "detail", route.params.id],
     queryFn: ({ signal }) => automationsApi.detail(route.params.id, signal),
-    enabled: write.active,
+    enabled: runtime.active,
     retry: false,
-    refetchInterval: write.active ? 5000 : false,
+    refetchInterval: runtime.active ? 5000 : false,
   });
   const agents = useQuery({
     queryKey: ["workspace", "agents", "list"],
     queryFn: ({ signal }) => agentsApi.list(signal),
-    enabled: write.active,
+    enabled: runtime.active,
     retry: false,
   });
   const settings = useQuery({
     queryKey: AUTOMATION_SETTINGS,
     queryFn: ({ signal }) => automationsApi.settings(signal),
-    enabled: write.active,
+    enabled: runtime.active,
     retry: false,
   });
   const row = detail.data;
   const zone = settings.data?.timezone ?? deviceTimezone();
   const scheduleZone =
     row?.schedule?.kind === "cron" ? row.schedule.timezone : zone;
-  useWorkspaceBack({
-    active: write.busy,
-    defaultRole: "back",
-    disabled: write.busy,
-    onBack: navigation.goBack,
-  });
-  useEffect(() => {
-    if (deleted && !write.busy && write.active) navigation.goBack();
-  }, [deleted, write.busy, write.active, navigation]);
-  function mutate(action: "run" | "toggle" | "delete") {
-    setMenu(false);
-    if (!row) return;
-    void write.run(async (current) => {
-      setNotice(undefined);
-      if (action === "delete") await automationsApi.remove(row.id);
-      else if (action === "toggle")
-        await automationsApi.update(row.id, {
-          status: row.status === "active" ? "disabled" : "active",
-        });
-      else {
-        const result = await automationsApi.run(row.id);
-        if (current()) setNotice(automationRunNotice(result));
-      }
-      if (!current()) return;
-      void client.invalidateQueries({ queryKey: AUTOMATIONS });
-      if (action === "delete") setDeleted(true);
-    });
-  }
   return (
     <WorkspacePage title="Automation" showHeading={false}>
       {detail.isPending && <AutomationLoading />}
@@ -339,22 +255,9 @@ export function AutomationDetailScreen({
           />
         </>
       )}
-      {write.error && <Notice tone="error" message={write.error} />}
-      {notice && <Notice message={notice} />}
       {row && (
         <>
-          <View style={s.spread}>
-            <AutomationStatus value={row.status} />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Automation actions"
-              disabled={write.busy}
-              onPress={() => setMenu(true)}
-              style={s.iconButton}
-            >
-              <MoreHorizontal size={23} color={colors.textPrimary} />
-            </Pressable>
-          </View>
+          <AutomationStatus value={row.status} />
           <Label accessibilityRole="header" style={s.section}>
             {row.label}
           </Label>
@@ -366,7 +269,7 @@ export function AutomationDetailScreen({
             <Notice message={automationPauseReason(row.pause_reason)!} />
           )}
           {row.status === "disabled" && (
-            <Notice message="Future scheduled runs are paused. Resuming calculates the next future occurrence; existing threads remain available." />
+            <Notice message="Future scheduled runs are paused. Existing run threads remain available." />
           )}
           <Card>
             <Label style={s.title}>Schedule</Label>
@@ -427,81 +330,32 @@ export function AutomationDetailScreen({
           <ActionButton
             label="View run history"
             variant="secondary"
-            disabled={write.busy}
             onPress={() => navigation.push("AutomationRuns", { id: row.id })}
           />
-          <ActionButton
-            label="Edit automation"
-            disabled={write.busy || !write.online}
-            onPress={() => navigation.push("AutomationEditor", { id: row.id })}
-          />
+          <AutomationGuidance />
           {row.delivery.type === "assistant" && (
             <Label muted style={s.small}>
               Normal agent usage and billing apply. This automation uses
               existing agent permissions.
             </Label>
           )}
-          <AutomationSheet
-            title="Automation actions"
-            visible={menu && write.active}
-            onClose={() => setMenu(false)}
-          >
-            {row.source !== "schedule" && (
-              <ActionButton
-                label="Webhook secrets & delivery history on Web"
-                variant="secondary"
-                onPress={() => {
-                  setMenu(false);
-                  void write.run(async () => {
-                    const url = new URL(
-                      "/triggers",
-                      validateBrowserUrl(NYXID_FRONTEND_URL),
-                    );
-                    await WebBrowser.openBrowserAsync(url.href);
-                  });
-                }}
-              />
-            )}
-            <ActionButton
-              label={
-                row.status === "active"
-                  ? "Pause automation"
-                  : "Resume automation"
-              }
-              variant="secondary"
-              disabled={!write.online || write.busy}
-              onPress={() => mutate("toggle")}
-            />
-            <ActionButton
-              label="Run now"
-              variant="secondary"
-              disabled={!write.online || write.busy || row.status !== "active"}
-              onPress={() => mutate("run")}
-            />
-            <ActionButton
-              label="Delete automation"
-              variant="danger"
-              disabled={!write.online || write.busy}
-              onPress={() => {
-                setMenu(false);
-                Alert.alert(
-                  `Delete ${row.label}?`,
-                  "Future runs stop. Existing run threads remain available.",
-                  [
-                    { text: "Cancel", style: "cancel" },
-                    {
-                      text: "Delete",
-                      style: "destructive",
-                      onPress: () => mutate("delete"),
-                    },
-                  ],
-                );
-              }}
-            />
-          </AutomationSheet>
         </>
       )}
     </WorkspacePage>
+  );
+}
+
+function AutomationGuidance() {
+  const openChat = useOpenWorkspaceChat();
+  return (
+    <Card>
+      <Label muted>To create, run or change automations, ask NyxBot.</Label>
+      <ActionButton
+        label="Ask NyxBot"
+        variant="secondary"
+        onPress={() => openChat(newAssistantChatParams())}
+      />
+    </Card>
   );
 }
 
@@ -531,14 +385,12 @@ function AutomationDeliveryCard({
                 ? "Notification"
                 : "Thread"}
           </Label>
-          {row.source !== "schedule" && (
-            <Label muted>
-              Confirm:{" "}
-              {d.confirmation_policy === "destructive"
-                ? "Destructive actions"
-                : "Every changing action"}
-            </Label>
-          )}
+          <Label muted>
+            Confirmation:{" "}
+            {d.confirmation_policy === "destructive"
+              ? "Destructive actions"
+              : "Every changing action"}
+          </Label>
         </>
       ) : d.type === "webhook" ? (
         <Label selectable>{d.url}</Label>

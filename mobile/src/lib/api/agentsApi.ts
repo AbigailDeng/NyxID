@@ -71,18 +71,6 @@ export const agentsApi = {
   async remove(id: string) {
     await requestJson(agentPath(id), { method: "DELETE" });
   },
-  async models(signal?: AbortSignal) {
-    return z
-      .array(
-        z.object({
-          id: z.string(),
-          label: z.string(),
-          available: z.boolean(),
-          description: z.string().nullish(),
-        }),
-      )
-      .parse(await requestJson(`${ROOT}/models`, { signal }));
-  },
   async remember(id: string, text: string) {
     await requestJson(`${agentPath(id)}/memory`, {
       method: "POST",

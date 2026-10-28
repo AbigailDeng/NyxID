@@ -33,6 +33,24 @@ import {
   type SkillVersion,
 } from "./pluginSkillsTypes";
 
+function LatestBadge() {
+  const { colors } = useTheme();
+  return (
+    <View
+      style={{
+        borderRadius: 6,
+        paddingHorizontal: 7,
+        paddingVertical: 2,
+        backgroundColor: colors.cardSoft,
+      }}
+    >
+      <Label style={{ fontSize: 11, color: colors.textSecondary }}>
+        Latest
+      </Label>
+    </View>
+  );
+}
+
 const ROOT = ["workspace", "plugins", "skills"] as const;
 const titleOf = (agent: AssistantAgent) => agent.display_name || agent.name;
 const failure = (cause: unknown) =>
@@ -393,7 +411,16 @@ function AgentSkillsManager({
   const pins = current.data?.skills ?? [];
   const pin = pins.find((item) => item.skill_id === detail?.id);
   const metadata = detail ? current.data?.metadata[detail.id] : undefined;
-  const latestVersion = versions.data?.items.find((item) => !item.deprecated);
+  const latestVersion =
+    versionPage === 1
+      ? versions.data?.items.find((item) => !item.deprecated)
+      : undefined;
+  const pinnedLatest = Boolean(
+    pin &&
+    latestVersion &&
+    pin.version === latestVersion.version &&
+    pin.sha256 === latestVersion.sha256,
+  );
 
   return (
     <View style={styles.stack}>
@@ -490,7 +517,10 @@ function AgentSkillsManager({
                 <Label muted style={styles.caption}>
                   Pinned version
                 </Label>
-                <Label mono>{pin?.version ?? "Not attached"}</Label>
+                <View style={styles.versionHeading}>
+                  <Label mono>{pin?.version ?? "Not attached"}</Label>
+                  {pinnedLatest && <LatestBadge />}
+                </View>
                 {pin && (
                   <Label muted style={styles.caption}>
                     {metadata?.size_bytes !== undefined
@@ -504,9 +534,9 @@ function AgentSkillsManager({
               {pin?.disabled && (
                 <Notice message="This skill is disabled. Ask NyxBot to enable it before changing its version." />
               )}
-              {latestVersion && (
+              {latestVersion && !pinnedLatest && (
                 <ActionButton
-                  label={`Use latest (${latestVersion.version})`}
+                  label={`Use latest (v${latestVersion.version})`}
                   variant="secondary"
                   disabled={busy || !current.data || Boolean(pin?.disabled)}
                   onPress={() => {
@@ -623,8 +653,8 @@ function AgentSkillsManager({
           {view === "versions" && detail && (
             <>
               <Label muted>
-                Choose a literal version of {detail.name}. Attaching external
-                guidance changes how {titleOf(agent)} works.
+                Choose which version of {detail.name} this agent uses. Skills
+                change how the agent works.
               </Label>
               {versions.isFetching && (
                 <ActivityIndicator
@@ -669,7 +699,12 @@ function AgentSkillsManager({
                   ]}
                 >
                   <View style={styles.flex}>
-                    <Label mono>{item.version}</Label>
+                    <View style={styles.versionHeading}>
+                      <Label mono>{item.version}</Label>
+                      {item.version === latestVersion?.version && (
+                        <LatestBadge />
+                      )}
+                    </View>
                     <Label muted style={styles.caption}>
                       {item.deprecated
                         ? "Deprecated version"
@@ -845,6 +880,12 @@ function Pagination({
   );
 }
 const styles = StyleSheet.create({
+  versionHeading: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
   stack: { gap: 16 },
   stackSmall: { gap: 8 },
   flex: { flex: 1, minWidth: 0 },

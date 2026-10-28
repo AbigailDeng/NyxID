@@ -35,7 +35,6 @@ import type {
   AssistantAttachment,
   AssistantConversation,
   AssistantHistory,
-  AssistantModel,
   AssistantMessage,
 } from "./assistantTypes";
 
@@ -53,8 +52,6 @@ export function useAssistant(
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [indexedAgentId, setIndexedAgentId] = useState<string>();
   const [history, setHistory] = useState<AssistantHistory>();
-  const [models, setModels] = useState<AssistantModel[]>([]);
-  const [model, setModel] = useState("nyxagent/chat");
   const [live, setLive] = useState<AssistantLiveReply>();
   const [inputText, setInputText] = useState<string>();
   const [inputAttachments, setInputAttachments] = useState<
@@ -119,13 +116,6 @@ export function useAssistant(
   const agent = agents.data?.agents.find((item) => item.id === agentId);
   const indexOwner = useRef(agentId);
   indexOwner.current = agentId;
-  const modelOwner = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    if (!agent || modelOwner.current === agentId) return;
-    modelOwner.current = agentId;
-    setModel(agent.model ?? "nyxagent/chat");
-  }, [agentId, agent]);
-
   const updateHistory = useCallback((value: AssistantHistory | undefined) => {
     latestHistory.current = value;
     setHistory(value);
@@ -311,17 +301,7 @@ export function useAssistant(
       streamController.current?.abort();
       return;
     }
-    let current = true;
     void recover();
-    void assistantApi
-      .models()
-      .then((value) => {
-        if (current && mounted.current) setModels(value);
-      })
-      .catch(() => undefined);
-    return () => {
-      current = false;
-    };
   }, [active, recover]);
 
   useEffect(() => {
@@ -423,7 +403,6 @@ export function useAssistant(
       assistantTurnBody({
         conversationId: selected.current ?? uploads?.conversationId,
         agentId,
-        model,
         text,
         retryOf,
         attachmentIds: uploads?.attachmentIds,
@@ -456,7 +435,6 @@ export function useAssistant(
           {
             conversationId: id,
             agentId,
-            model,
             text,
             retryOf,
             attachmentIds: uploads?.attachmentIds,
@@ -526,7 +504,7 @@ export function useAssistant(
       }
       return !keepDraft;
     },
-    [agentId, agent, model, recoveryRequired, refreshHistory, refreshIndex],
+    [agentId, agent, recoveryRequired, refreshHistory, refreshIndex],
   );
 
   useEffect(() => {
@@ -801,9 +779,6 @@ export function useAssistant(
     conversationId,
     conversations,
     history,
-    models,
-    model,
-    setModel,
     live,
     inputText,
     inputAttachments,

@@ -78,7 +78,10 @@ function setup(
     },
   };
   const harness = hookHarness<Element>({
-    "../../components/AgentAvatar": { AgentAvatar: "AgentAvatar", AgentAvatarStack: "AgentAvatarStack" },
+    "../../components/AgentAvatar": {
+      AgentAvatar: "AgentAvatar",
+      AgentAvatarStack: "AgentAvatarStack",
+    },
     "react/jsx-runtime": {
       jsx: (type: unknown, props: unknown) => ({ type, props }),
       jsxs: (type: unknown, props: unknown) => ({ type, props }),
@@ -178,7 +181,6 @@ function setup(
       useTheme: () => ({ colors: { primaryTone: {} } }),
     },
     "./agentContracts": contracts,
-    "./AgentModelField": { AgentModelField: "AgentModelField" },
     "./AgentPermissionsField": {
       AgentPermissionsField: "AgentPermissionsField",
     },

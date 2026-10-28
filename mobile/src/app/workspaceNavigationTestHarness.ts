@@ -37,9 +37,7 @@ export const contentNames = [
   "MachinePolicy",
   "MachineActivity",
   "AutomationDetail",
-  "AutomationEditor",
   "AutomationRuns",
-  "AutomationPreferences",
   "ActivityDetail",
 ];
 export const settingsNames = [

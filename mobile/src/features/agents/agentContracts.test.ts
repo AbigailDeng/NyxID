@@ -195,3 +195,14 @@ test("permission submission preserves unchanged guest levels and omits machine/l
     },
   );
 });
+
+test("agent create/profile writes strip legacy model selection fields", () => {
+  const values = {
+    ...agentProfile(agent),
+    model: "nyxagent/research",
+    services: [],
+    account_read: false,
+  };
+  assert.equal("model" in agentCreateSchema.parse(values), false);
+  assert.deepEqual(buildAgentPatch(agent, values), {});
+});

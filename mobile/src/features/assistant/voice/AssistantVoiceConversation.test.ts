@@ -374,32 +374,19 @@ test("billing browser errors retain the reservation error and provide fixed webs
   f.harness.unmount();
 });
 
-test("a credit failure never switches paid sources automatically and offers only eligible alternatives", async () => {
+test("a failed paid reservation retries the same automatic default without exposing alternatives", async () => {
   const f = setup(creditFailure);
-  assert.equal(
-    f.all().some((row) => row.props.label === "Choose another voice source"),
-    false,
-  );
   f.query.options.data.options.push({
     ...source,
     connection_id: sessionId,
     key_source: "own",
-    available: false,
+    default_model: false,
   });
   f.harness.render();
   assert.equal(
     f.all().some((row) => row.props.label === "Choose another voice source"),
     false,
   );
-  f.query.options.data.options[1]!.available = true;
-  f.harness.render();
-  f.button("Choose another voice source").props.onPress();
-  assert.equal(
-    f.all().filter((row) => row.props.accessibilityRole === "radio").length,
-    2,
-  );
-  assert.deepEqual(f.events, []);
-  f.button("Back to voice call").props.onPress();
   await f.button("Try again").props.onPress();
   assert.deepEqual(JSON.parse(JSON.stringify(f.events[0]?.[1])), saved);
   f.harness.unmount();
@@ -442,47 +429,44 @@ test("Grok forces Hold to talk even when the saved microphone mode was automatic
   f.harness.unmount();
 });
 
-test("a saved unavailable source remains visible and cannot start a different paid source", () => {
-  const f = setup({
-    source: {
-      ...source,
-      available: false,
-      unavailable_reason: "Membership ended",
-    },
-  });
+test("unavailable defaults cannot start and display clear guidance", () => {
+  const f = setup({ source: { ...source, available: false } });
   assert.equal(f.button("Start voice").props.disabled, true);
-  assert.equal(
-    f
-      .all()
-      .some(
-        (row) =>
-          row.type === "Notice" && row.props.message === "Membership ended",
-      ),
-    true,
-  );
   assert.deepEqual(f.events, []);
   f.harness.unmount();
 });
 
-test("source picker shows unavailable connections with their reason and disables selection", () => {
+test("voice never exposes source or configuration selectors, and starts with the available default", async () => {
   const f = setup();
+  f.query.options.data.options.unshift({
+    ...source,
+    model: "old",
+    model_label: "Old choice",
+    default_model: false,
+  });
   f.query.options.data.options.push({
     ...source,
     key_source: "own",
     connection_id: sessionId,
-    available: false,
-    unavailable_reason: "Reconnect your provider",
+    default_model: false,
   });
   f.harness.render();
-  f.button("Source & model: GPT Live").props.onPress();
-  const rows = f.all().filter((row) => row.props.accessibilityRole === "radio");
-  assert.equal(rows.length, 2);
-  const available = rows.find((row) => !row.props.disabled)!;
-  const unavailable = rows.find((row) => row.props.disabled)!;
-  assert.equal(available.props.accessibilityState.disabled, false);
-  assert.equal(unavailable.props.accessibilityState.disabled, true);
-  assert.match(unavailable.props.accessibilityLabel, /Reconnect your provider/);
-  assert.deepEqual(f.events, []);
+  assert.equal(
+    f
+      .all()
+      .some((row) => /source|model/i.test(row.props.accessibilityLabel ?? "")),
+    false,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(f.harness.value()),
+    /GPT Live|Old choice|Source & model/,
+  );
+  await f.button("Start voice").props.onPress();
+  assert.equal(
+    (f.events.find((event) => event[0] === "start")?.[1] as VoicePreferences)
+      ?.model,
+    source.model,
+  );
   f.harness.unmount();
 });
 

@@ -23,7 +23,7 @@ export type AssistantParams = {
 
 export type WorkspaceParamList = {
   Assistant: AssistantParams | undefined;
-  Automations: { agentId?: string; setup?: string } | undefined;
+  Automations: { agentId?: string } | undefined;
   Machines: { machine?: string; tab?: "logins" } | undefined;
   Services: undefined;
   Plugins: { tab?: "connectors" | "skills"; agentId?: string } | undefined;
@@ -83,11 +83,7 @@ export type WorkspaceContentParamList = Omit<
   MachinePolicy: { machineId: string; ownerId: string };
   MachineActivity: { machineId: string; ownerId: string };
   AutomationDetail: { id: string };
-  AutomationEditor:
-    | { id?: string; agentId?: string; setup?: string }
-    | undefined;
   AutomationRuns: { id: string };
-  AutomationPreferences: undefined;
   ActivityDetail: { challengeId: string; entryPoint?: string };
 };
 
@@ -157,9 +153,7 @@ export const workspaceContentRouteNames: (keyof WorkspaceContentParamList)[] = [
   "MachinePolicy",
   "MachineActivity",
   "AutomationDetail",
-  "AutomationEditor",
   "AutomationRuns",
-  "AutomationPreferences",
   "ActivityDetail",
 ];
 export const workspaceSettingsRouteNames: (keyof WorkspaceSheetParamList)[] = [

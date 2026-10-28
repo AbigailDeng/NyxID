@@ -38,12 +38,7 @@ import { useTheme } from "../../../theme/ThemeContext";
 import { fonts } from "../../../theme/designTokens";
 import { useNativeVoice } from "./useNativeVoice";
 import { VoiceMediaBridge } from "./VoiceMediaBridge";
-import {
-  chooseVoiceOption,
-  voiceElapsed,
-  voiceOptionKey,
-  voiceTariff,
-} from "./voiceSelection";
+import { chooseVoiceOption, voiceElapsed, voiceTariff } from "./voiceSelection";
 import type { VoicePreferences } from "./voiceContracts";
 
 type Props = {
@@ -53,7 +48,7 @@ type Props = {
   onUpdate: () => void;
   onReview: (acknowledgementId?: string) => void;
 };
-type Picker = "source" | "voice" | "mode";
+type Picker = "voice" | "mode";
 
 export function AssistantVoiceConversation(props: Props) {
   const sheet = useNativeSheetDismiss(props.onClose);
@@ -106,7 +101,6 @@ function VoiceConversation({
   const voice = useNativeVoice(thread, environment, onUpdate);
   const [minimized, setMinimized] = useState(false);
   const [picker, setPicker] = useState<Picker>();
-  const [selected, setSelected] = useState<string>();
   const [preferredVoice, setPreferredVoice] = useState<string>();
   const [mode, setMode] = useState<VoicePreferences["input_mode"]>();
   const [notify, setNotify] = useState<boolean>();
@@ -128,7 +122,7 @@ function VoiceConversation({
   });
   const saved = settings.data?.voice;
   const choices = options.data?.options ?? [];
-  const option = chooseVoiceOption(choices, selected, saved);
+  const option = chooseVoiceOption(choices);
   const isGrok = option?.voice.protocol === "xai_realtime";
   const inputMode = isGrok
     ? "push_to_talk"
@@ -234,48 +228,39 @@ function VoiceConversation({
     }
   }
   const pickerRows =
-    picker === "source"
-      ? choices.map((row) => ({
-          id: voiceOptionKey(row),
-          title: row.model_label,
-          detail: `${row.key_source === "own" ? "Your connection" : "Platform connection"}${row.available ? "" : ` · ${row.unavailable_reason ?? "Unavailable"}`}`,
-          selected: option && voiceOptionKey(option) === voiceOptionKey(row),
-          disabled: !row.available,
-          choose: () => setSelected(voiceOptionKey(row)),
+    picker === "voice"
+      ? (option?.voice.voices ?? []).map((row) => ({
+          id: row.id,
+          title: row.label,
+          detail: "",
+          selected: row.id === voiceId,
+          disabled: false,
+          choose: () => setPreferredVoice(row.id),
         }))
-      : picker === "voice"
-        ? (option?.voice.voices ?? []).map((row) => ({
-            id: row.id,
-            title: row.label,
-            detail: "",
-            selected: row.id === voiceId,
+      : [
+          {
+            id: "push_to_talk",
+            title: "Hold to talk",
+            detail:
+              "Your microphone sends audio only while you hold the button.",
+            selected: inputMode === "push_to_talk",
             disabled: false,
-            choose: () => setPreferredVoice(row.id),
-          }))
-        : [
-            {
-              id: "push_to_talk",
-              title: "Hold to talk",
-              detail:
-                "Your microphone sends audio only while you hold the button.",
-              selected: inputMode === "push_to_talk",
-              disabled: false,
-              choose: () => setMode("push_to_talk"),
-            },
-            ...(!isGrok
-              ? [
-                  {
-                    id: "automatic",
-                    title: "Automatic",
-                    detail:
-                      "Keep talking naturally. Your microphone stays on during the call.",
-                    selected: inputMode === "automatic",
-                    disabled: false,
-                    choose: () => setMode("automatic" as const),
-                  },
-                ]
-              : []),
-          ];
+            choose: () => setMode("push_to_talk"),
+          },
+          ...(!isGrok
+            ? [
+                {
+                  id: "automatic",
+                  title: "Automatic",
+                  detail:
+                    "Keep talking naturally. Your microphone stays on during the call.",
+                  selected: inputMode === "automatic",
+                  disabled: false,
+                  choose: () => setMode("automatic" as const),
+                },
+              ]
+            : []),
+        ];
   return (
     <>
       {voice.media ? (
@@ -340,11 +325,9 @@ function VoiceConversation({
             ) : null}
             <Text accessibilityRole="header" style={[styles.heading, theme]}>
               {picker
-                ? picker === "source"
-                  ? "Voice source"
-                  : picker === "voice"
-                    ? "Voice"
-                    : "Microphone mode"
+                ? picker === "voice"
+                  ? "Voice"
+                  : "Microphone mode"
                 : "Voice conversation"}
             </Text>
             {!picker && active ? (
@@ -465,18 +448,6 @@ function VoiceConversation({
                       variant="secondary"
                       onPress={openBilling}
                     />
-                    {choices.some(
-                      (row) =>
-                        row.available &&
-                        option &&
-                        voiceOptionKey(row) !== voiceOptionKey(option),
-                    ) ? (
-                      <ActionButton
-                        label="Choose another voice source"
-                        variant="secondary"
-                        onPress={() => setPicker("source")}
-                      />
-                    ) : null}
                     <ActionButton
                       label="Continue with text"
                       variant="secondary"
@@ -567,12 +538,6 @@ function VoiceConversation({
                     ) : null}
                     <Card>
                       <SettingRow
-                        label="Source & model"
-                        value={option?.model_label ?? "Choose a voice source"}
-                        onPress={() => setPicker("source")}
-                        disabled={!choices.length}
-                      />
-                      <SettingRow
                         label="Voice"
                         value={voiceLabel ?? "Choose a voice"}
                         onPress={() => setPicker("voice")}
@@ -609,7 +574,7 @@ function VoiceConversation({
                           <Notice
                             message={
                               option.unavailable_reason ??
-                              "This voice source is unavailable. Choose another source."
+                              "Voice is unavailable. Reconnect your provider and try again."
                             }
                           />
                         ) : null}

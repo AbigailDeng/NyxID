@@ -82,7 +82,7 @@ export function AssistantMessageNotices({
               failure.code === "guest_model_route_required" ? (
                 <Label muted>
                   Send one message to this agent as its owner using its
-                  configured model to record the route for guest replies.
+                  configured provider to record the route for guest replies.
                 </Label>
               ) : null}
               <Label selectable muted mono>

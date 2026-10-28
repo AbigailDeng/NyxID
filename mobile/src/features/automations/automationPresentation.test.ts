@@ -3,9 +3,8 @@ import test from "node:test";
 import { agentSchema, type AssistantAgent } from "../agents/agentContracts";
 import {
   automationPauseReason,
-  automationRunNotice,
   automationTarget,
-  ownedAutomationAgents,
+  automationScheduleSummary,
   uniqueAutomationRuns,
 } from "./automationPresentation";
 import {
@@ -36,81 +35,6 @@ const run: AutomationRun = {
   thread_id: null,
   duration_ms: null,
 };
-
-test("automation agent choices require the current person and exclude org, guest, destroyed and unusable targets", () => {
-  const ownNyxBot: AssistantAgent = {
-    ...agent,
-    id: "nyxbot",
-    kind: "nyxbot",
-    status: "running",
-  };
-  const rows: AssistantAgent[] = [
-    agent,
-    ownNyxBot,
-    {
-      ...agent,
-      id: "shared-person",
-      owner_id: "person-b",
-      can_maintain: false,
-    },
-    {
-      ...agent,
-      id: "other-owner-maintainer",
-      owner_id: "person-b",
-      can_maintain: true,
-    },
-    {
-      ...agent,
-      id: "org-owner",
-      owner_kind: "org",
-      owner_id: "person-a",
-      can_maintain: true,
-    },
-    { ...agent, id: "destroyed", status: "destroyed" },
-    { ...agent, id: "denied-use", can_use: false },
-  ];
-  assert.deepEqual(
-    ownedAutomationAgents(rows, "person-a").map((row) => row.id),
-    ["agent-a", "nyxbot"],
-  );
-  assert.deepEqual(ownedAutomationAgents(rows), []);
-  assert.deepEqual(ownedAutomationAgents(rows, ""), []);
-  assert.deepEqual(ownedAutomationAgents(rows, "unknown"), []);
-});
-
-test("legacy personally listed agents remain available while explicit denied maintenance is excluded", () => {
-  const legacy = {
-    ...agent,
-    owner_id: undefined,
-    owner_kind: undefined,
-    can_use: undefined,
-    can_maintain: undefined,
-  };
-  assert.deepEqual(ownedAutomationAgents([legacy], "person-a"), [legacy]);
-  assert.deepEqual(
-    ownedAutomationAgents([{ ...legacy, can_maintain: false }], "person-a"),
-    [],
-  );
-});
-
-test("a run admission notice never claims a queued or started request has completed", () => {
-  const queued = automationRunNotice(run);
-  assert.match(queued, /queued/i);
-  assert.match(queued, /history/i);
-  assert.doesNotMatch(queued, /completed|succeeded|finished/i);
-  const started = automationRunNotice({ ...run, outcome: "started" });
-  assert.match(started, /started/i);
-  assert.doesNotMatch(started, /completed|succeeded|finished/i);
-  const waiting = automationRunNotice({
-    ...run,
-    outcome: "waiting",
-    reason: "confirmation_required",
-  });
-  assert.match(waiting, /waiting/i);
-  assert.match(waiting, /review|confirmation/i);
-  for (const outcome of ["completed", "failed", "skipped"] as const)
-    assert.match(automationRunNotice({ ...run, outcome }), new RegExp(outcome));
-});
 
 test("history cursor overlap deduplicates by run identity, preserves newest results and keeps simultaneous distinct runs", () => {
   const older = {
@@ -182,4 +106,53 @@ test("destination labels use returned agent names and remain useful after an age
     "future pause reason",
   );
   assert.equal(automationPauseReason(null), undefined);
+});
+
+test("schedule summaries distinguish webhook, cron, interval and one-time tasks", () => {
+  const row = automationSchema.parse({
+    id: run.id,
+    user_id: "owner",
+    label: "Task",
+    user_service_id: null,
+    status: "active",
+    verification: { mode: "schedule" },
+    delivery: { type: "notification" },
+    inbound_url: null,
+    created_at: run.scheduled_at,
+    updated_at: run.scheduled_at,
+  });
+  assert.equal(automationScheduleSummary(row), "Webhook event");
+  assert.equal(
+    automationScheduleSummary({
+      ...row,
+      source: "schedule",
+      schedule: {
+        kind: "cron",
+        expression: "0 8 * * 1-5",
+        timezone: "Asia/Singapore",
+      },
+    }),
+    "0 8 * * 1-5 · Asia/Singapore",
+  );
+  assert.equal(
+    automationScheduleSummary({
+      ...row,
+      source: "schedule",
+      schedule: {
+        kind: "every",
+        amount: 2,
+        unit: "hours",
+        anchor: run.scheduled_at,
+      },
+    }),
+    "Every 2 hours",
+  );
+  assert.equal(
+    automationScheduleSummary({
+      ...row,
+      source: "schedule",
+      schedule: { kind: "at", at: run.scheduled_at },
+    }),
+    "One time",
+  );
 });

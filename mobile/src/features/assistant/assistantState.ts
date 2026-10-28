@@ -138,7 +138,7 @@ export function storedAssistantError(code: string | null): string {
       return "Paused because the task repeated without progress. Send new guidance to continue.";
     case "model_not_configured":
     case "model_unavailable":
-      return "The selected assistant model is unavailable.";
+      return "This agent is unavailable.";
     case "session_busy":
     case "capacity_exceeded":
       return "The assistant is busy. Try again shortly.";

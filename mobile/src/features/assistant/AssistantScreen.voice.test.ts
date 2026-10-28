@@ -274,9 +274,15 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
       AssistantWaitingNote: "WaitingNote",
     },
     "./AssistantSystemMessage": { AssistantSystemMessage: "SystemMessage" },
-    "./AssistantMarkdownBody": { AssistantMarkdownBody: "Markdown" },
+    "./AssistantReplyBody": {
+      AssistantReplyBody: (props: any) => ({
+        type: "ReplyBody",
+        props: { ...props, children: props.activity },
+      }),
+    },
     "./AssistantComposerSettings": {
       AssistantComposerSettings: "ComposerSettings",
+      useComposerAccessMode: () => "nyxmode",
     },
     "react-native-markdown-display": {
       default: "Markdown",
@@ -1051,7 +1057,6 @@ test("home opens the exact request conversation and leaves Message NyxBot below 
   home.props.onChat("agent-a", A, "request-id");
   assert.deepEqual(x.events.slice(2), [
     ["open", A, "request-id"],
-    ["model", "nyxagent/chat"],
     [
       "params",
       {
@@ -1141,7 +1146,7 @@ test("Choose agent uses the shared hierarchy and links the existing thread sheet
       .all()
       .some(
         (node) =>
-          node.type === "Label" && node.props.children.includes("Model"),
+          node.type === "Label" && node.props.children.includes("Permissions"),
       ),
   );
   x.harness.unmount();
@@ -1664,7 +1669,7 @@ test("private/contextual transcript viewport spans the safe area while content k
   x.harness.unmount();
 });
 
-test("private and contextual composers bind permissions and model controls to the exact current agent/thread", async () => {
+test("private and contextual composers bind permissions only to the current agent/thread", () => {
   for (const contextual of [false, true]) {
     const x = setup(A);
     x.props.contextual = contextual;
@@ -1672,22 +1677,12 @@ test("private and contextual composers bind permissions and model controls to th
       kind: "specialist",
       access_mode_override: "ask_every_time",
     });
-    x.setFeatures(["assistant:voice", "assistant:model-controls"]);
     x.harness.render();
     const control = () => x.all().find((n) => n.type === "ComposerSettings")!;
-    assert.equal(control().props.conversationId, A);
     assert.equal(control().props.agentOverride, "ask_every_time");
-    assert.equal(control().props.advanced, true);
     assert.equal(control().props.activeTurn, false);
-    control().props.onModelChanged("nyxagent/research");
-    await x.harness.settle();
-    assert.ok(
-      x.events.some(
-        ([action, model]) =>
-          action === "model" && model === "nyxagent/research",
-      ),
-    );
-    assert.ok(x.events.some(([action]) => action === "recover"));
+    for (const field of ["model", "advanced", "onModelChanged"])
+      assert.equal(control().props[field], undefined);
     x.assistant.history!.conversation.active_turn = { turn_id: "turn" };
     x.harness.render();
     assert.equal(control().props.activeTurn, true);

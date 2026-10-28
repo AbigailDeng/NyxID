@@ -8,6 +8,7 @@ import {
   StackActions,
   type NavigationState,
 } from "@react-navigation/routers";
+import { workspaceStateFromPath } from "./workspaceCanonicalLinks";
 import { navigationLinkingConfig } from "./navigationLinking";
 import { desktopRouteParams } from "../features/machines/desktopEntry";
 import {
@@ -85,9 +86,7 @@ const mainEntries = [
   ["MachinePolicy", { machineId: "machine", ownerId: "owner" }],
   ["MachineActivity", { machineId: "machine", ownerId: "owner" }],
   ["AutomationDetail", { id: "watch" }],
-  ["AutomationEditor", { agentId: "agent" }],
   ["AutomationRuns", { id: "watch" }],
-  ["AutomationPreferences", undefined],
   ["ActivityDetail", { challengeId: "challenge" }],
 ] as const;
 
@@ -174,9 +173,9 @@ test("main navigation from a Settings quick action closes that sheet before show
 test("module deep links keep Home below the main page and canonical URLs stay unchanged", () => {
   for (const [path, name, params] of [
     [
-      "automations?agentId=agent%20one&setup=watch-1",
+      "automations?agentId=agent%20one",
       "Automations",
-      { agentId: "agent one", setup: "watch-1" },
+      { agentId: "agent one" },
     ],
     ["agents?tab=groups", "Agents", { tab: "groups" }],
     [
@@ -234,10 +233,7 @@ test("cold detail links add the appropriate main module and pop horizontally bac
     ["groups/edit", "GroupEditor", "Agents"],
     ["groups/edit/crew", "GroupEditor", "Agents"],
     ["automations/watch", "AutomationDetail", "Automations"],
-    ["automations/edit", "AutomationEditor", "Automations"],
-    ["automations/edit/watch", "AutomationEditor", "Automations"],
     ["automations/watch/runs", "AutomationRuns", "Automations"],
-    ["automations/preferences", "AutomationPreferences", "Automations"],
   ]) {
     const state = linked(path!);
     assert.deepEqual(
@@ -372,7 +368,7 @@ test("notification routing waits for authentication and all pending write guards
     ),
     null,
   );
-  const caller = pushContent(fixture(), "AutomationEditor", { id: "watch" });
+  const caller = pushContent(fixture(), "GroupEditor", { groupId: "crew" });
   assert.equal(challengeNavigationAction(caller, "challenge", true), null);
   const next = apply(caller, challengeNavigationAction(caller, "challenge"));
   assert.deepEqual(
@@ -517,4 +513,25 @@ test("a shared entry retains an unmounted Settings target and its native Back pa
     ["AccountSettings", "AccountSecurity", "DeviceLogin"],
   );
   assert.deepEqual(next.routes[0], base.routes[0]);
+});
+
+test("removed automation authoring deep links resolve only to read-only pages", () => {
+  const id = "12345678-1234-4123-8123-123456789abc";
+  for (const path of [
+    "automations/edit",
+    "automations/preferences",
+    "automations?setup=watch",
+    "assistant/automations?setup=watch",
+  ]) {
+    const state = workspaceStateFromPath(path, (value) =>
+      getStateFromPath(value, navigationLinkingConfig),
+    )!;
+    assert.equal(selected(content(hydrate(state))).name, "Automations");
+    assert.equal(selected(content(hydrate(state))).params, undefined);
+  }
+  const state = workspaceStateFromPath(`automations/edit/${id}`, (value) =>
+    getStateFromPath(value, navigationLinkingConfig),
+  )!;
+  assert.equal(selected(content(hydrate(state))).name, "AutomationDetail");
+  assert.deepEqual(selected(content(hydrate(state))).params, { id });
 });

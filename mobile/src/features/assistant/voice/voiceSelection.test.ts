@@ -46,64 +46,16 @@ function preferences(value: VoiceOption): VoicePreferences {
   };
 }
 
-test("voice source selection preserves explicit unavailable choices instead of silently switching", () => {
-  const available = option();
-  const unavailable = option({
-    model: "saved-model",
-    available: false,
-    default_model: false,
-  });
-  assert.equal(
-    chooseVoiceOption([available, unavailable], voiceOptionKey(unavailable)),
-    unavailable,
-  );
-  assert.equal(
-    chooseVoiceOption(
-      [available, unavailable],
-      undefined,
-      preferences(unavailable),
-    ),
-    unavailable,
-  );
-  assert.equal(
-    chooseVoiceOption(
-      [available, unavailable],
-      voiceOptionKey(unavailable),
-      preferences(available),
-    ),
-    unavailable,
-  );
-});
-
-test("source defaults choose an available default, then first available, or no source", () => {
-  const unavailableDefault = option({ model: "disabled", available: false });
+test("automatic voice selection matches web: available default, then first available, then none", () => {
+  const disabled = option({ model: "disabled", available: false });
   const first = option({ model: "first", default_model: false });
-  const defaultOption = option({ model: "preferred" });
-  assert.equal(
-    chooseVoiceOption([unavailableDefault, first, defaultOption]),
-    defaultOption,
-  );
-  assert.equal(chooseVoiceOption([unavailableDefault, first]), first);
-  assert.equal(chooseVoiceOption([unavailableDefault]), undefined);
+  const preferred = option({ model: "default" });
+  assert.equal(chooseVoiceOption([disabled, first, preferred]), preferred);
+  assert.equal(chooseVoiceOption([disabled, first]), first);
+  assert.equal(chooseVoiceOption([disabled]), undefined);
   assert.equal(chooseVoiceOption([]), undefined);
-  assert.equal(
-    chooseVoiceOption([first], "removed-choice", preferences(defaultOption)),
-    first,
-  );
-});
-
-test("source identity includes service, connection, key source and model", () => {
-  const base = option();
-  const variants = [
-    base,
-    option({ service_id: connectionId }),
-    option({ key_source: "own", connection_id: connectionId }),
-    option({ model: "gpt-live-1-mini" }),
-  ];
-  assert.equal(new Set(variants.map(voiceOptionKey)).size, variants.length);
-  assert.equal(voiceOptionKey(base), voiceOptionKey(preferences(base)));
-  const own = variants[2]!;
-  assert.equal(chooseVoiceOption(variants, undefined, preferences(own)), own);
+  assert.notEqual(voiceOptionKey(first), voiceOptionKey(preferred));
+  assert.equal(voiceOptionKey(first), voiceOptionKey(preferences(first)));
 });
 
 test("platform tariffs retain exact decimal rates and only list synced applicable components", () => {

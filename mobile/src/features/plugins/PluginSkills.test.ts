@@ -679,7 +679,7 @@ test("skill detail is read-only with version choice, newest supported pin and ag
       version,
     ];
     env.harness.render();
-    env.control(`Use latest (${version.version})`).props.onPress();
+    env.control(`Use latest (v${version.version})`).props.onPress();
     assert.equal(env.routes.at(-1)?.name, "SkillVersions");
     assert.equal(
       env.control(`Select version ${version.version}`).props.accessibilityState
@@ -727,6 +727,39 @@ test("Use latest carries its literal version across a real versions-page remount
     assert.equal(env.queries.get("preview")?.queryKey[5], version.version);
     assert.equal(env.control("Attach skill").props.disabled, false);
     assert.equal(env.calls.length, 0);
+  } finally {
+    env.unmount();
+  }
+});
+
+test("the latest pinned version is badged and does not offer a redundant latest write", () => {
+  const env = setup();
+  try {
+    env.library().props.onOpenSkill("pin-original", "dns-helper");
+    env.harness.flush();
+    env.state.get("versions").data.items = [
+      { ...version, version: "1.0.0", sha256: "sha-original" },
+    ];
+    env.harness.render();
+    assert.ok(
+      env
+        .elements()
+        .some(
+          (row) =>
+            typeof row.type === "function" && row.type.name === "LatestBadge",
+        ),
+    );
+    assert.throws(() => env.control("Use latest (v1.0.0)"));
+    env.control("Choose exact version").props.onPress();
+    assert.ok(
+      env
+        .elements()
+        .some(
+          (row) =>
+            typeof row.type === "function" && row.type.name === "LatestBadge",
+        ),
+    );
+    assert.equal(env.calls.filter((call) => call.method === "write").length, 0);
   } finally {
     env.unmount();
   }

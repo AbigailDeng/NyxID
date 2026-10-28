@@ -278,14 +278,6 @@ export const indexSchema = z.object({
   conversations: z.array(conversationSchema),
   next_cursor: z.string().nullable(),
 });
-export const modelListSchema = z.array(
-  z.object({
-    id: z.string(),
-    label: z.string(),
-    available: z.boolean().default(true),
-    description: z.string().nullish(),
-  }),
-);
 export const assistantCapabilitiesSchema = z.object({
   steer: z
     .object({
@@ -389,7 +381,6 @@ export type AssistantConversation = z.infer<typeof conversationSchema>;
 export type AssistantHistory = z.infer<typeof historySchema>;
 export type AssistantMessage = z.infer<typeof messageSchema>;
 export type AssistantAcknowledgement = z.infer<typeof acknowledgementSchema>;
-export type AssistantModel = z.infer<typeof modelListSchema>[number];
 export type AssistantTurnEvent = z.infer<typeof turnEventSchema>;
 
 export const assistantContextSchema = z.object({

@@ -52,9 +52,7 @@ import { GroupEditorScreen } from "../features/groups/GroupEditorScreen";
 import {
   AutomationsScreen,
   AutomationDetailScreen,
-  AutomationEditorScreen,
   AutomationRunsScreen,
-  AutomationPreferencesScreen,
 } from "../features/automations/AutomationsScreen";
 import {
   PluginsScreen,
@@ -129,7 +127,7 @@ function AgentsRoute({ navigation, route }: WorkspaceScreenProps<"Agents">) {
       onOpenAutomations={(agentId) =>
         navigation.navigate({
           name: "Automations",
-          params: { agentId, setup: undefined },
+          params: { agentId },
           merge: true,
         })
       }
@@ -204,11 +202,7 @@ function AgentDetailRoute({
         navigation.push("AgentMachines", { agentId })
       }
       onOpenAutomations={(agentId) =>
-        navigation.popTo(
-          "Automations",
-          { agentId, setup: undefined },
-          { merge: true },
-        )
+        navigation.popTo("Automations", { agentId }, { merge: true })
       }
     />
   );
@@ -482,21 +476,9 @@ function WorkspaceNavigator() {
         options={{ title: "Automation" }}
       />
       <ContentStack.Screen
-        name="AutomationEditor"
-        component={AutomationEditorScreen}
-        options={({ route }) => ({
-          title: route.params?.id ? "Edit automation" : "Create automation",
-        })}
-      />
-      <ContentStack.Screen
         name="AutomationRuns"
         component={AutomationRunsScreen}
         options={{ title: "Run history" }}
-      />
-      <ContentStack.Screen
-        name="AutomationPreferences"
-        component={AutomationPreferencesScreen}
-        options={{ title: "Automation preferences" }}
       />
       <ContentStack.Screen
         name="ActivityDetail"

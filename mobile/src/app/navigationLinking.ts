@@ -31,7 +31,7 @@ export const navigationLinkingConfig: NonNullable<
         Automations: {
           path: "automations",
           alias: ["assistant/automations"],
-          parse: { agentId: String, setup: String },
+          parse: { agentId: String },
         },
         Agents: {
           path: "agents",
@@ -58,12 +58,7 @@ export const navigationLinkingConfig: NonNullable<
           parse: { groupId: String },
         },
         AutomationDetail: { path: "automations/:id", parse: { id: String } },
-        AutomationEditor: {
-          path: "automations/edit/:id?",
-          parse: { id: String, agentId: String, setup: String },
-        },
         AutomationRuns: { path: "automations/:id/runs", parse: { id: String } },
-        AutomationPreferences: "automations/preferences",
       },
     },
     WorkspaceSheet: {

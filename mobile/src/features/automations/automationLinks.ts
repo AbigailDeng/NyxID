@@ -1,6 +1,5 @@
 export type AutomationLinkParams = {
   agentId?: string;
-  setup?: string;
 };
 
 export type AutomationLink =
@@ -10,7 +9,7 @@ export type AutomationLink =
 const setupId =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Model text may link into native settings only on the configured frontend. */
+/** Model text may link into native Automations only on the configured frontend. */
 export function parseAutomationLink(
   value: string,
   frontendUrl: string,
@@ -51,8 +50,8 @@ export function parseAutomationLink(
         message:
           "This automation link has an invalid agent. Ask NyxBot for a new link.",
       };
-    if (setup.length) params.setup = setup[0]!;
     if (agent.length) params.agentId = agent[0]!;
+    // Setup authoring is not native. Only the read-only agent filter crosses.
     // Instructions, secrets, and arbitrary return URLs never enter route state.
     return { kind: "automation", params };
   } catch {

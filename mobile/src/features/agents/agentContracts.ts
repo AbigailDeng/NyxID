@@ -109,7 +109,7 @@ export const agentCreateSchema = z.object({
 export type AgentCreate = z.infer<typeof agentCreateSchema>;
 export type AgentProfile = Pick<
   AssistantAgent,
-  "name" | "description" | "model" | "access_mode_override"
+  "name" | "description" | "access_mode_override"
 > & {
   display_name: string;
   persona: string;
@@ -122,7 +122,6 @@ export function agentProfile(agent: AssistantAgent): AgentProfile {
     description: agent.description,
     display_name: agent.display_name ?? "",
     persona: agent.persona ?? "",
-    model: agent.model,
     access_mode_override: agent.access_mode_override ?? null,
   };
 }
@@ -137,7 +136,6 @@ export function buildAgentPatch(
       ...(agent.kind === "nyxbot"
         ? { name: z.string(), description: z.string().trim().max(2048) }
         : {}),
-      model: z.string().optional(),
       access_mode_override: accessModeSchema.nullable().optional(),
     });
   const parsed = schema.parse(values);

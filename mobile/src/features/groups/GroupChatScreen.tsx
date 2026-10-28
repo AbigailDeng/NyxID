@@ -23,7 +23,7 @@ import {
   View,
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import { AssistantMarkdownBody } from "../assistant/AssistantMarkdownBody";
+import { AssistantReplyBody } from "../assistant/AssistantReplyBody";
 import { Check, Plus, Settings2, X } from "lucide-react-native";
 import {
   ActionButton,
@@ -179,7 +179,6 @@ function GroupChat({
   const uploads = useAssistantUploads({
     retainKey: draftKey,
     groupId,
-    model: "",
     generation: 0,
     enabled:
       canParticipate &&
@@ -967,20 +966,27 @@ function GroupMessage({
         </Label>
       )}
       {user ? (
-        <Label selectable>{message.text}</Label>
+        <>
+          <Label selectable>{message.text}</Label>
+          <GroupMachineReceipts groupId={group?.id} message={message} />
+        </>
       ) : (
-        <AssistantMarkdownBody
+        <AssistantReplyBody
           variant="crew"
           text={sanitizeAssistantMessageContent(message.text)}
+          activity={
+            message.activities.length || message.attachments.length ? (
+              <>
+                <AssistantActivityDisclosure
+                  activities={message.activities}
+                  onToggle={onDisclosure}
+                />
+                <GroupMachineReceipts groupId={group?.id} message={message} />
+              </>
+            ) : undefined
+          }
         />
       )}
-      {!!message.activities?.length && (
-        <AssistantActivityDisclosure
-          activities={message.activities}
-          onToggle={onDisclosure}
-        />
-      )}
-      <GroupMachineReceipts groupId={group?.id} message={message} />
       <AssistantMessageFooter
         text={
           user ? message.text : sanitizeAssistantMessageContent(message.text)

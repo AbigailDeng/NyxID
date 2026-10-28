@@ -39,7 +39,6 @@ import { servicesApi } from "../../lib/api/servicesApi";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import { fonts } from "../../theme/designTokens";
 import { WorkspaceSelectionSheet } from "../../components/workspace/WorkspaceSelectionField";
-import { AgentModelField } from "./AgentModelField";
 import {
   AgentPermissionsField,
   type AgentPermissions,
@@ -156,13 +155,6 @@ export function AgentsScreen({
         agent.kind === "specialist" &&
         agent.status !== "destroyed",
     ).length >= list.data.limits.max_live_subagents;
-  const models = useQuery({
-    queryKey: [...ROOT, "models"],
-    queryFn: ({ signal }) => agentsApi.models(signal),
-    enabled: focused && foreground && Boolean(selectedId),
-    retry: false,
-    staleTime: 60_000,
-  });
   const reload = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ROOT });
   }, [queryClient]);
@@ -435,8 +427,6 @@ export function AgentsScreen({
             <AgentProfileForm
               key={`profile:${agent.id}:${editorVersion}:${profileVersion}`}
               agent={agent}
-              models={models.data ?? []}
-              modelsError={models.isError}
               busy={busy}
               onSave={(baseline, values) =>
                 void run(
@@ -935,11 +925,11 @@ function CreateAgentForm({
     onDirtyChange(
       Boolean(
         value.name ||
-          value.display_name ||
-          value.description ||
-          value.persona ||
-          value.services.length ||
-          value.account_read,
+        value.display_name ||
+        value.description ||
+        value.persona ||
+        value.services.length ||
+        value.account_read,
       ),
     );
   }, [value, onDirtyChange]);
@@ -990,14 +980,10 @@ function CreateAgentForm({
 
 function AgentProfileForm({
   agent,
-  models,
-  modelsError,
   busy,
   onSave,
 }: {
   agent: AssistantAgent;
-  models: { id: string; label: string; available: boolean }[];
-  modelsError: boolean;
   busy: boolean;
   onSave: (baseline: AssistantAgent, values: AgentProfile) => void;
 }) {
@@ -1015,18 +1001,6 @@ function AgentProfileForm({
         disabled={disabled}
         nyxbot={agent.kind === "nyxbot"}
         onChange={(patch) => setValue((old) => ({ ...old, ...patch }))}
-      />
-      {modelsError && (
-        <Notice
-          message="Could not load the model list. Your current model is preserved."
-          tone="error"
-        />
-      )}
-      <AgentModelField
-        value={value.model}
-        models={models}
-        disabled={disabled}
-        onChange={(model) => setValue((old) => ({ ...old, model }))}
       />
       <Label>Confirmation mode</Label>
       <Label muted>Controls when this agent asks before acting.</Label>

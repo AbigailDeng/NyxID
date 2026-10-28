@@ -586,6 +586,17 @@ account pages and QR/terminal quick actions use the retained pull-up surface. Se
   the safe-area inset rather than adding a second padded strip. The one-row
   private header stays compact; group name, ownership context and settings
   share one header, with member details retained.
+- Native permissions controls contain Full access, Auto and Ask every time only,
+  with the effective agent override shown read-only. Chat and agent settings use
+  the server default without a native selector or per-turn override. Voice automatically uses an available server default, without a source selector. This is the user's deliberate native scope (2026-10-28).
+- Native Automations is display-only: configured tasks, source/schedule, target,
+  confirmation policy, read-only status and paged run history with exact thread
+  links. It issues GET requests only. Creation, changes and execution belong to
+  NyxBot; no native editor, preferences, toggle, invoke, delete or webhook setup.
+- Reply activity/receipts and prose have a 16pt gap. Ordinary Markdown blocks have
+  12pt sibling spacing; headings have 20pt (h1) or 16pt above and 8pt below, without
+  start/end margins. Horizontally scrolling tables include the transcript's 12pt
+  trailing inset. Private, live and crew replies share the same layout.
 - Native skills are read-only except explicit version pinning and “Remove from
   agent”. “Use latest (version)” resolves the newest supported package and pins
   its exact version/hash; no floating latest contract exists. Editing belongs to

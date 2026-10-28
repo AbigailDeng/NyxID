@@ -2,14 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { URL, fileURLToPath } from "node:url";
 import { deferred, hookHarness } from "./assistantHookTestHarness";
-import { composerModelName, composerModelOptions } from "./composerSettings";
+import { COMPOSER_ACCESS_DESCRIPTION } from "./composerSettings";
 
-const id = `nyxa-${"a".repeat(32)}`;
 type Element = { type: unknown; props: Record<string, any> };
 const nodes = (n: any): Element[] =>
   n?.props ? [n, ...[n.props.children].flat(Infinity).flatMap(nodes)] : [];
 const plain = (v: any) => JSON.parse(JSON.stringify(v));
-function setup(saved = false) {
+function setup() {
   let epoch = 1;
   let available = true;
   const calls: unknown[][] = [];
@@ -19,34 +18,16 @@ function setup(saved = false) {
     isError: false,
     refetch: () => calls.push(["retry-settings"]),
   };
-  const models: any = {
-    data: [
-      { id: "nyxagent/chat", label: "chat", available: true },
-      { id: "nyxagent/research", label: "research", available: true },
-      { id: "nyxagent/old", label: "Old model", available: false },
-    ],
-    isPending: false,
-    isError: false,
-    refetch: () => calls.push(["retry-models"]),
-  };
   let modeWrite = async (mode: string) => ({ access_mode: mode });
-  let modelWrite = async (_id: string, _model: string) => ({});
   const queries: any[] = [];
   const props: any = {
     scope: "one",
-    conversationId: saved ? id : undefined,
-    model: "nyxagent/chat",
-    advanced: false,
     activeTurn: false,
     disabled: false,
     visible: false,
     onOpenChange: (open: boolean) => {
       props.visible = open;
       calls.push(["open", open]);
-    },
-    onModelChanged: (model: string) => {
-      props.model = model;
-      calls.push(["model", model]);
     },
   };
   const h = hookHarness<Element>({
@@ -80,7 +61,7 @@ function setup(saved = false) {
     "@tanstack/react-query": {
       useQuery: (options: any) => {
         queries.push(options);
-        return options.queryKey[1] === "composer-settings" ? settings : models;
+        return settings;
       },
       useQueryClient: () => ({
         setQueryData: (key: any, value: any) => {
@@ -92,14 +73,9 @@ function setup(saved = false) {
     "../../lib/api/assistantApi": {
       assistantApi: {
         settings: async () => settings.data,
-        models: async () => models.data,
         updateAccessMode: (mode: string) => {
           calls.push(["PUT", mode]);
           return modeWrite(mode);
-        },
-        changeModel: (id: string, model: string) => {
-          calls.push(["PATCH", id, model]);
-          return modelWrite(id, model);
         },
       },
     },
@@ -120,14 +96,10 @@ function setup(saved = false) {
     props,
     calls,
     settings,
-    models,
     queries,
     find,
     writeMode: (write: typeof modeWrite) => {
       modeWrite = write;
-    },
-    writeModel: (write: typeof modelWrite) => {
-      modelWrite = write;
     },
     available: (value: boolean) => {
       available = value;
@@ -140,33 +112,16 @@ function setup(saved = false) {
   };
 }
 
-test("composer model labels and unavailable current model port the web rules exactly", () => {
-  assert.equal(
-    composerModelName({ id: "nyxagent/chat", label: "chat" }),
-    "Default model",
-  );
-  assert.equal(
-    composerModelName({ id: "nyxagent/research", label: "research" }),
-    "Research",
-  );
-  assert.equal(
-    composerModelName({ id: "vendor/model-1", label: "Exact upstream" }),
-    "Exact upstream",
-  );
-  assert.equal(
-    composerModelName({
-      id: "nyxagent/older_model",
-      label: "nyxagent/older_model",
-    }),
-    "Older model",
-  );
-  const input = [{ id: "nyxagent/chat", label: "chat", available: true }];
-  assert.deepEqual(composerModelOptions(input, "gone")[0], {
-    id: "gone",
-    label: "gone",
-    available: false,
-  });
-  assert.equal(input.length, 1);
+test("native settings expose only permissions and the three descriptions, with no discovery or model transport", () => {
+  const x = setup();
+  const text = nodes(x.h.value())
+    .map((n) => (typeof n.props.children === "string" ? n.props.children : ""))
+    .join(" ");
+  assert.doesNotMatch(text, /model|thinking|research/i);
+  for (const description of Object.values(COMPOSER_ACCESS_DESCRIPTION))
+    assert.ok(text.includes(description));
+  assert.ok(x.queries.every((q) => q.queryKey[1] === "composer-settings"));
+  x.h.unmount();
 });
 
 test("Full access changes owner settings directly like web, once per pending write, with all three exact labels", async () => {
@@ -188,10 +143,7 @@ test("Full access changes owner settings directly like web, once per pending wri
   await Promise.all([first, second]);
   await x.h.settle();
   assert.equal(x.find("Full access").props.accessibilityState.checked, true);
-  assert.equal(
-    x.find("Thinking and permissions: Full access").props.disabled,
-    false,
-  );
+  assert.equal(x.find("Permissions: Full access").props.disabled, false);
   assert.equal(x.find("Full access").props.style.minHeight, 44);
   x.h.unmount();
 });
@@ -201,7 +153,7 @@ test("agent overrides remain displayed and read-only even to a retained formerly
   const stale = x.find("Full access").props.onPress;
   x.props.agentOverride = "ask_every_time";
   x.h.render();
-  assert.ok(x.find("Thinking and permissions: Ask every time (this agent)"));
+  assert.ok(x.find("Permissions: Ask every time (this agent)"));
   for (const mode of ["Full access", "Auto", "Ask every time"])
     assert.equal(x.find(mode).props.disabled, true);
   await stale();
@@ -245,82 +197,28 @@ test("active, unavailable and missing-settings states refuse access changes; ret
   }
 });
 
-test("Thinking toggles draft models locally; saved-thread model changes use its existing PATCH", async () => {
-  for (const saved of [false, true]) {
-    const x = setup(saved);
-    x.find("Thinking mode").props.onPress();
+test("late permission responses cannot update another scope, account or unmounted composer", async () => {
+  for (const fence of ["scope", "account", "unmount"]) {
+    const x = setup();
+    const wait = deferred<any>();
+    x.writeMode(() => wait.promise);
+    x.find("Full access").props.onPress();
+    x.h.flush();
+    if (fence === "scope") {
+      x.props.scope = "other";
+      x.h.render();
+    }
+    if (fence === "account") x.account();
+    if (fence === "unmount") x.h.unmount();
+    wait.resolve({ access_mode: "autopilot" });
     await x.h.settle();
-    assert.ok(
-      x.calls.some((c) => c[0] === "model" && c[1] === "nyxagent/research"),
-    );
     assert.equal(
-      x.calls.some((c) => c[0] === "PATCH"),
-      saved,
+      x.calls.some((c) => c[0] === "cache"),
+      false,
+      fence,
     );
-    if (saved)
-      assert.deepEqual(
-        x.calls.find((c) => c[0] === "PATCH"),
-        ["PATCH", id, "nyxagent/research"],
-      );
-    assert.equal(
-      x.find("Thinking mode").props.accessibilityState.checked,
-      true,
-    );
-    assert.ok(x.find("Thinking and permissions: Auto, Thinking"));
     x.h.unmount();
   }
-});
-
-test("advanced controls show exact model availability, read-only reasoning and retry states", async () => {
-  const x = setup();
-  x.props.advanced = true;
-  x.h.render();
-  assert.ok(x.find("Model and permissions: Default model, Auto"));
-  assert.equal(x.find("Old model (unavailable)").props.disabled, true);
-  assert.ok(
-    nodes(x.h.value()).some(
-      (n) => n.props.children === "Reasoning · Unavailable",
-    ),
-  );
-  x.models.isError = true;
-  x.h.render();
-  assert.equal(x.find("Research").props.disabled, true);
-  const retry = nodes(x.h.value()).find(
-    (n) =>
-      n.type === "Pressable" &&
-      nodes(n).some((t) => t.props.children === "Retry loading models"),
-  )!;
-  retry.props.onPress();
-  assert.ok(x.calls.some((c) => c[0] === "retry-models"));
-  x.h.unmount();
-});
-
-test("late permission/model responses cannot update another scope, account or unmounted composer", async () => {
-  for (const mutation of ["permissions", "model"])
-    for (const fence of ["scope", "account", "unmount"]) {
-      const x = setup(true);
-      const wait = deferred<any>();
-      if (mutation === "permissions") x.writeMode(() => wait.promise);
-      else x.writeModel(() => wait.promise);
-      x.find(
-        mutation === "permissions" ? "Full access" : "Thinking mode",
-      ).props.onPress();
-      x.h.flush();
-      if (fence === "scope") {
-        x.props.scope = "other";
-        x.h.render();
-      }
-      if (fence === "account") x.account();
-      if (fence === "unmount") x.h.unmount();
-      wait.resolve({ access_mode: "autopilot" });
-      await x.h.settle();
-      assert.equal(
-        x.calls.some((c) => c[0] === "cache" || c[0] === "model"),
-        false,
-        `${mutation}/${fence}`,
-      );
-      x.h.unmount();
-    }
 });
 
 test("settings write failures retain authoritative mode and expose the error", async () => {

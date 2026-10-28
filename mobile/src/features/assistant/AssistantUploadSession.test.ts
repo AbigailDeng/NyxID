@@ -518,56 +518,8 @@ test("a late refusal after navigating away cleans files without restoring anothe
   assert.deepEqual(h.disposed, ["notes.txt"]);
 });
 
-test("model configuration failure preserves draft and accepted bytes for the next attempt", async () => {
-  let model = "model-one";
-  const prepared: { id: string; model: string }[] = [];
-  const h = harness({
-    prepareDraft: async (id) => {
-      prepared.push({ id, model });
-      if (prepared.length === 1) throw new Error("Model PATCH refused");
-    },
-  });
-  h.session.add([file()]);
-  await until(() => !h.session.blocked);
-  let sends = 0;
-  await assert.rejects(
-    h.session.submit(async () => {
-      sends++;
-      return true;
-    }),
-    /Model PATCH refused/,
-  );
-  assert.equal(h.session.entries.size, 1);
-  assert.equal(h.session.sending, false);
-  model = "model-two";
-  assert.equal(
-    await h.session.submit(async () => {
-      sends++;
-      return true;
-    }),
-    true,
-  );
-  assert.deepEqual(prepared, [
-    { id: "nyxa-upload-draft", model: "model-one" },
-    { id: "nyxa-upload-draft", model: "model-two" },
-  ]);
-  assert.equal(sends, 1);
-  assert.equal(h.drafts.length, 1);
-  assert.equal(h.uploads.length, 1);
-  assert.equal(h.removals.length, 0);
-  h.session.dispose();
-});
-
-test("saved conversations never create upload drafts or change their model", async () => {
-  let prepared = 0;
-  const h = harness(
-    {
-      prepareDraft: async () => {
-        prepared++;
-      },
-    },
-    "nyxa-saved-chat",
-  );
+test("saved conversations upload into their existing thread without creating drafts", async () => {
+  const h = harness({}, "nyxa-saved-chat");
   h.session.add([file()]);
   await until(() => !h.session.blocked);
   assert.equal(
@@ -578,33 +530,6 @@ test("saved conversations never create upload drafts or change their model", asy
     true,
   );
   assert.equal(h.drafts.length, 0);
-  assert.equal(prepared, 0);
-  h.session.dispose();
-});
-
-test("going inactive during model configuration prevents send and keeps ready files", async () => {
-  const model = deferred<void>();
-  let preparing = false;
-  const h = harness({
-    prepareDraft: () => {
-      preparing = true;
-      return model.promise;
-    },
-  });
-  h.session.add([file()]);
-  await until(() => !h.session.blocked);
-  let sends = 0;
-  const submission = h.session.submit(async () => {
-    sends++;
-    return true;
-  });
-  await until(() => preparing);
-  h.setAvailable(false);
-  model.resolve();
-  await assert.rejects(submission, /keep this chat open/);
-  assert.equal(sends, 0);
-  assert.ok(h.session.entries.get("1")?.item);
-  assert.equal(h.session.sending, false);
   h.session.dispose();
 });
 

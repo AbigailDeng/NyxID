@@ -58,7 +58,7 @@ export const voiceMetadataSchema = z
       context.addIssue({
         code: "custom",
         path: ["models"],
-        message: "Choose at most one default model",
+        message: "Voice source has multiple defaults",
       });
     if (
       new Set(value.billing_metrics).size !== value.billing_metrics.length ||
