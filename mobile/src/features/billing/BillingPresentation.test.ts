@@ -3,6 +3,7 @@ import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { hookHarness } from "../assistant/assistantHookTestHarness";
 import * as credits from "./credits";
+import * as summary from "./balanceSummary";
 import { allowancesSchema, grantsSchema, serviceUsage, usageSchema, walletSchema } from "./billingContracts";
 import { allowanceFixture, grantFixture, usageFixture, walletFixture } from "./billingFixtures";
 
@@ -16,11 +17,13 @@ function setup(component: string, props: Record<string, unknown>) {
   const jsx = (type: unknown, props: Record<string, unknown>): Element => typeof type === "function" ? type(props) : { type, props };
   const harness = hookHarness<Element>({
     "react/jsx-runtime": { jsx, jsxs: jsx, Fragment: "Fragment" },
+    "lucide-react-native": { ChevronDown: "ChevronDown", ChevronRight: "ChevronRight" },
     "react-native": { Pressable: "Pressable", View: "View", StyleSheet: { create: (styles: unknown) => styles } },
     "../../components/workspace/WorkspaceUI": { ActionButton: "ActionButton", Card: "Card", Label: "Label" },
     "../../theme/ThemeContext": { useTheme: () => ({ colors: { danger: "red", textPrimary: "zinc", cardSoft: "zinc", border: "zinc" } }) },
     "../../theme/designTokens": { spacing: {}, radius: {}, typeScale: {} },
     "./credits": credits,
+    "./balanceSummary": summary,
   });
   const components = harness.load(fileURLToPath(new URL("./BillingPresentation.tsx", import.meta.url))) as Record<string, (props: Record<string, unknown>) => Element>;
   harness.mount(() => components[component]!(props));
@@ -38,56 +41,55 @@ test("figures expose exact tabular, right-aligned values and accessible labels",
   assert.equal(amount.props.style[1].color, "red");
 });
 
-test("an absent wallet has an honest empty state and no purchase control", (t) => {
-  const screen = setup("BillingWalletCard", { wallet: null });
+test("one balance card is large and exact, with only nonzero compact rows", (t) => {
+  const screen = setup("BillingWalletCard", { wallet: walletSchema.parse(walletFixture), grants: [], allowances: [], now: Date.now() });
   t.after(screen.harness.unmount);
-  assert.match(screen.text(), /No billing account yet/);
-  assert.equal(screen.all().some((item) => item.type === "ActionButton" || item.props.onPress), false);
-});
-
-test("wallet figures preserve negatives and pending expiry at pico precision", (t) => {
-  const screen = setup("BillingWalletCard", { wallet: walletSchema.parse(walletFixture) });
-  t.after(screen.harness.unmount);
+  const figure = screen.all().find((item) => item.props.accessibilityLabel === "Available credits: -1.334567890126")!;
+  assert.ok(figure);
+  assert.ok(figure.props.style[0].fontSize >= 28);
+  assert.equal(figure.props.style[0].textAlign, "right");
+  assert.deepEqual(JSON.parse(JSON.stringify(figure.props.style[0].fontVariant)), ["tabular-nums"]);
+  assert.equal(figure.props.style[1].color, "red");
   const labels = screen.all().map((item) => item.props.accessibilityLabel).filter(Boolean);
-  assert.ok(labels.includes("Balance: -0.000000000001 credits"));
+  assert.ok(labels.includes("Credit limit: 100 credits"));
+  assert.ok(labels.includes("Pending / reserved: 0.100000000002 credits"));
   assert.ok(labels.includes("Pending expiry: 1.234567890123 credits"));
-  assert.ok(labels.includes("Overdraft limit: 100 credits"));
+  assert.equal(screen.all().filter((item) => item.type === "Card").length, 1);
+  assert.doesNotMatch(screen.text(), /Personal wallet|Updated|Available with overdraft|Active/);
 });
 
-test("grant expiry and allowance exhaustion are visible with periods and exact limits", (t) => {
-  const now = Date.parse("2026-11-01T00:00:00Z");
-  const grant = setup("BillingGrantCard", { grant: grantsSchema.parse({ grants: [grantFixture] }).grants[0], now });
-  t.after(grant.harness.unmount);
-  assert.match(grant.text(), /Expired/);
-  assert.ok(grant.all().some((item) => item.props.accessibilityLabel === "Credit limit: 50.000000000001 credits"));
-  const allowance = setup("BillingAllowanceCard", { balance: allowancesSchema.parse({ allowances: [{ ...allowanceFixture, remaining_quantity: 0 }] }).allowances[0], now: now - 1 });
-  t.after(allowance.harness.unmount);
-  assert.match(allowance.text(), /Used up/);
-  assert.match(allowance.text(), /monthly/);
-  assert.match(allowance.text(), /UTC/);
-  assert.ok(allowance.all().some((item) => item.props.accessibilityLabel === "Remaining: 0 units"));
-});
-
-test("service detail bounds its initial render and expands without changing amounts", (t) => {
-  const usage = usageSchema.parse({ ...usageFixture, rows: Array.from({ length: 6 }, () => usageFixture.rows[1]) });
-  const screen = setup("BillingServiceCard", { service: serviceUsage(usage.rows)[0] });
+test("spendable grants and allowances appear as compact rows within the balance card", (t) => {
+  const screen = setup("BillingWalletCard", {
+    wallet: walletSchema.parse(walletFixture), now: Date.parse("2026-10-28T00:00:00Z"),
+    grants: grantsSchema.parse({ grants: [{ ...grantFixture, remaining: "10.000000000002", held: "0.000000000001" }] }).grants,
+    allowances: allowancesSchema.parse({ allowances: [allowanceFixture] }).allowances,
+  });
   t.after(screen.harness.unmount);
-  const quantities = () => screen.all().filter((item) => item.props.accessibilityLabel?.startsWith("input tokens"));
-  assert.equal(quantities().length, 5);
-  screen.all().find((item) => item.type === "ActionButton")!.props.onPress();
-  screen.harness.flush();
-  assert.equal(quantities().length, 6);
-  assert.ok(screen.all().some((item) => item.props.accessibilityLabel === "Usage cost: 0.000000000012 credits"));
+  assert.match(screen.text(), /Included credits · example · service limits apply/);
+  assert.match(screen.text(), /Expiring/);
+  assert.match(screen.text(), /2026/);
+  assert.match(screen.text(), /690 \/ 1,000 requests left this month/);
+  assert.equal(screen.all().filter((item) => item.type === "Card").length, 1);
+  assert.doesNotMatch(screen.text(), /Development credits|Granted|Consumed/);
 });
 
-test("account rows are accessible radios with 48pt targets", (t) => {
+test("per-service history is one exact figure per service", (t) => {
+  const screen = setup("BillingServiceCard", { service: serviceUsage(usageSchema.parse(usageFixture).rows)[0] });
+  t.after(screen.harness.unmount);
+  assert.ok(screen.all().some((item) => item.props.accessibilityLabel === "example: 9,007,199,254,740,993.000000000003 credits"));
+  assert.doesNotMatch(screen.text(), /From wallet|From grants|input tokens|Show more usage/);
+});
+
+test("history disclosure exposes expansion state and a 48pt target with a chevron", (t) => {
   let presses = 0;
-  const screen = setup("BillingOwnerRow", { label: "Personal account", selected: true, onPress: () => { presses++; } });
+  const screen = setup("BillingHistoryRow", { expanded: false, onPress: () => { presses++; } });
   t.after(screen.harness.unmount);
   const row = screen.harness.value();
-  assert.equal(row.props.accessibilityRole, "radio");
-  assert.equal(row.props.accessibilityState.checked, true);
+  assert.equal(row.props.accessibilityRole, "button");
+  assert.equal(row.props.accessibilityLabel, "Usage history");
+  assert.equal(row.props.accessibilityState.expanded, false);
   assert.ok(row.props.style({ pressed: false })[0].minHeight >= 44);
+  assert.ok(screen.all().some((item) => item.type === "ChevronRight"));
   row.props.onPress();
   assert.equal(presses, 1);
 });

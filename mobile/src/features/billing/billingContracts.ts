@@ -73,6 +73,7 @@ const serviceLimitSchema = z.object({
 });
 const grantSchema = z.object({
   id: z.string().min(1), amount: money, remaining: money, reserved: money,
+  held: creditsSchema.optional(), revoke_requested_at: instant.nullish(),
   amount_micros: legacy, remaining_micros: legacy, reserved_micros: legacy,
   activation_state: z.enum(["active", "pending_activation"]),
   status: z.enum(["active", "consumed", "expired", "revoked"]),
