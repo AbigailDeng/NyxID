@@ -5,6 +5,7 @@ import { fonts } from "../../theme/designTokens";
 import { useTheme } from "../../theme/ThemeContext";
 import type { WorkspaceRecent } from "./workspaceSidebarModel";
 import { useWorkspaceRecents } from "./useWorkspaceRecents";
+import { sidebarSectionTitle } from "./workspaceSidebarStyles";
 
 export function WorkspaceRecentRow({
   item,
@@ -100,8 +101,7 @@ export function WorkspaceRecents({
 }
 const styles = StyleSheet.create({
   heading: {
-    fontFamily: fonts.bodySemi,
-    fontSize: 16,
+    ...sidebarSectionTitle,
     paddingHorizontal: 12,
     paddingTop: 22,
     paddingBottom: 10,

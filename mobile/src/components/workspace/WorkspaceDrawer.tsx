@@ -17,6 +17,7 @@ import {
   UserPlus,
 } from "lucide-react-native";
 import { useQuery } from "@tanstack/react-query";
+import { LinearGradient } from "expo-linear-gradient";
 import { NyxidLogo } from "../brand/NyxidLogo";
 import { useTheme } from "../../theme/ThemeContext";
 import { fonts } from "../../theme/designTokens";
@@ -29,6 +30,7 @@ import { WorkspaceChatList } from "./WorkspaceChatList";
 import { WorkspaceRecents } from "./WorkspaceRecents";
 import { sidebarBottomSpace, SIDEBAR_BAR_GAP } from "./workspaceSidebarModel";
 import { workspaceCloseControlStyle } from "./workspaceCloseControl";
+import { sidebarSectionTitle } from "./workspaceSidebarStyles";
 
 export type WorkspaceRoute =
   | "Assistant"
@@ -75,6 +77,7 @@ export function WorkspaceDrawer({
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [barHeight, setBarHeight] = useState(52);
+  const [atEnd, setAtEnd] = useState(false);
   const [foreground, setForeground] = useState(
     AppState.currentState === "active",
   );
@@ -139,6 +142,14 @@ export function WorkspaceDrawer({
             { paddingBottom: sidebarBottomSpace(barHeight, insets.bottom) },
           ],
           scrollEventThrottle: 32,
+          onScroll: ({ nativeEvent }) => {
+            const { contentOffset, layoutMeasurement, contentSize } =
+              nativeEvent;
+            const end =
+              contentOffset.y + layoutMeasurement.height >=
+              contentSize.height - 2;
+            setAtEnd((old) => (old === end ? old : end));
+          },
         }}
         scrollHeader={
           <View>
@@ -224,6 +235,32 @@ export function WorkspaceDrawer({
           />
         }
       />
+      <LinearGradient
+        testID="sidebar-bottom-fade"
+        pointerEvents="none"
+        colors={[
+          `${colors.sidebarBase}00`,
+          colors.sidebarBase,
+          colors.sidebarBase,
+        ]}
+        locations={[
+          0,
+          atEnd
+            ? 0
+            : barHeight /
+              (sidebarBottomSpace(barHeight, insets.bottom) + barHeight),
+          1,
+        ]}
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height:
+            sidebarBottomSpace(barHeight, insets.bottom) +
+            (atEnd ? 0 : barHeight),
+        }}
+      />
       <View
         testID="sidebar-bottom-bar"
         onLayout={(event) => {
@@ -273,8 +310,7 @@ const styles = StyleSheet.create({
   brand: { flex: 1, minHeight: 44, justifyContent: "center" },
   body: { paddingHorizontal: 12 },
   section: {
-    fontFamily: fonts.bodySemi,
-    fontSize: 16,
+    ...sidebarSectionTitle,
     paddingHorizontal: 12,
     paddingTop: 8,
     paddingBottom: 10,

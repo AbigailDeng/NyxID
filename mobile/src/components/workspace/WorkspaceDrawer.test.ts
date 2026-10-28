@@ -4,6 +4,7 @@ import { URL, fileURLToPath } from "node:url";
 import { hookHarness } from "../../features/assistant/assistantHookTestHarness";
 import { sidebarBottomSpace } from "./workspaceSidebarModel";
 import { lightColors } from "../../theme/mobileTheme";
+import { sidebarSectionTitle } from "./workspaceSidebarStyles";
 type E = { type: unknown; props: Record<string, any> };
 const nodes = (n: any): E[] =>
   n?.props ? [n, ...[n.props.children].flat(Infinity).flatMap(nodes)] : [];
@@ -28,6 +29,7 @@ function setup() {
       SafeAreaView: "Safe",
       useSafeAreaInsets: () => ({ bottom: 34 }),
     },
+    "expo-linear-gradient": { LinearGradient: "Gradient" },
     "lucide-react-native": Object.fromEntries(
       [
         "CalendarClock",
@@ -133,6 +135,14 @@ test("sidebar header uses the logo and circular Search; Home is exclusive to log
 test("Workspace rows match the approved order, communicate coming-soon and show real pending count", () => {
   const x = setup();
   const header = nodes(x.list().props.scrollHeader);
+  const title = header.find((n) => n.props.children === "Workspace")!;
+  assert.deepEqual(Object.assign({}, ...title.props.style), {
+    ...sidebarSectionTitle,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 10,
+    color: lightColors.textPrimary,
+  });
   assert.deepEqual(
     header
       .filter((n) => n.type === "Pressable")
@@ -185,5 +195,34 @@ test("absolute bottom controls reserve their measured height and safe inset abov
   assert.equal(style.backgroundColor, "#FFFFFF");
   const gear = x.label("Settings");
   assert.ok(gear.props.style[0].height >= 44);
+  x.h.unmount();
+});
+
+test("scrolling rows fade into an opaque control band while max-scroll rows remain above the fade", () => {
+  const x = setup();
+  const fade = () =>
+    x.all().find((n) => n.props.testID === "sidebar-bottom-fade")!;
+  const props = () => x.list().props.scrollProps;
+  const scroll = (y: number) => {
+    props().onScroll({
+      nativeEvent: {
+        contentOffset: { y },
+        layoutMeasurement: { height: 700 },
+        contentSize: { height: 1100 },
+      },
+    });
+    x.h.flush();
+  };
+  const reserve = sidebarBottomSpace(52, 34);
+  assert.equal(fade().props.pointerEvents, "none");
+  assert.equal(fade().props.colors[1], lightColors.sidebarBase);
+  assert.equal(fade().props.style.height, reserve + 52);
+  assert.equal(fade().props.locations[1] * fade().props.style.height, 52);
+  scroll(400);
+  assert.equal(fade().props.style.height, reserve);
+  assert.equal(fade().props.locations[1], 0);
+  assert.equal(props().contentContainerStyle[1].paddingBottom, reserve);
+  scroll(100);
+  assert.equal(fade().props.style.height, reserve + 52);
   x.h.unmount();
 });

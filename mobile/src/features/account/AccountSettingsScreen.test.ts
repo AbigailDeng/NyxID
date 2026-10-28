@@ -95,6 +95,11 @@ function setup(connectedTelegram = false, pushDevices = 0) {
       ChatDisplaySettings: "ChatDisplaySettings",
     },
     "../../components/PrimaryButton": { PrimaryButton: "PrimaryButton" },
+    "lucide-react-native": {
+      ChevronRight: "ChevronRight",
+      QrCode: "QrCode",
+      Terminal: "Terminal",
+    },
     "../../components/DynamicTypeText": dynamicText,
     "../../components/ScreenContainer": { ScreenContainer: "ScreenContainer" },
     "../../components/OfflineBanner": { OfflineBanner: "OfflineBanner" },
@@ -138,7 +143,13 @@ function setup(connectedTelegram = false, pushDevices = 0) {
     AccountSettingsScreen: (props: any) => Element;
     AccountSettingsTitle: (props: any) => Element;
   };
-  harness.mount(() => renderRows(AccountSettingsScreen({ navigation: { push: (...args: unknown[]) => pushes.push(args) } })));
+  harness.mount(() =>
+    renderRows(
+      AccountSettingsScreen({
+        navigation: { push: (...args: unknown[]) => pushes.push(args) },
+      }),
+    ),
+  );
   const all = () => elements(harness.value());
   const text = (value: string) => {
     const node = all().find(
@@ -306,15 +317,39 @@ test("large-text notification rows retain connected identity and live push/Teleg
   env.harness.unmount();
 });
 
-
 test("Settings keeps identity and routes the sidebar quick actions and Usage within its sheet", () => {
   const x = setup();
-  for (const label of ["Scan QR code", "Terminal login code", "Usage & credits"]) {
-    const action = x.all().find(node => node.props.label === label);
+  for (const label of [
+    "Scan QR code",
+    "Terminal login code",
+    "Usage & credits",
+  ]) {
+    const action = x
+      .all()
+      .find(
+        (node) =>
+          node.props.accessibilityLabel === label || node.props.label === label,
+      );
     assert.ok(action, label);
     action.props.onPress();
   }
-  assert.deepEqual(structuredClone(x.pushes), [["DeviceLogin", { start_scanner: true }], ["AgentKeyLogin", { mint: true }], ["UsageCredits"]]);
+  assert.deepEqual(structuredClone(x.pushes), [
+    ["DeviceLogin", { start_scanner: true }],
+    ["AgentKeyLogin", { mint: true }],
+    ["UsageCredits"],
+  ]);
   assert.ok(x.text("Alex Example"));
+  for (const label of ["Scan QR code", "Terminal login code"]) {
+    const row = x
+      .all()
+      .find((node) => node.props.accessibilityLabel === label)!;
+    const style = row.props.style({ pressed: false });
+    assert.ok(style.minHeight >= 44);
+    assert.equal(style.flexDirection, "row");
+    const children = row.props.children;
+    assert.ok(["QrCode", "Terminal"].includes(children[0].type));
+    assert.equal(children.at(-1).type, "ChevronRight");
+    assert.equal(children[1].props.style.flex, 1);
+  }
   x.harness.unmount();
 });

@@ -4,6 +4,7 @@ import { fileURLToPath, URL } from "node:url";
 import { hookHarness } from "../../features/assistant/assistantHookTestHarness";
 import { formatRelativeTimeFromMs } from "../../lib/time";
 import { lightColors } from "../../theme/mobileTheme";
+import { sidebarSectionTitle } from "./workspaceSidebarStyles";
 import {
   workspaceRecents,
   type WorkspaceRecent,
@@ -62,6 +63,13 @@ test("Recents uses plain text rows, caps the sidebar at eight, and opens exact t
   const rowElements = elements(h.value()).filter(
     (n) => n.type === WorkspaceRecentRow,
   );
+  const heading = elements(h.value()).find(
+    (n) => n.props.children === "Recents",
+  )!;
+  const style = Object.assign({}, ...heading.props.style);
+  assert.equal(style.fontSize, sidebarSectionTitle.fontSize);
+  assert.equal(style.fontFamily, sidebarSectionTitle.fontFamily);
+  assert.equal(style.color, lightColors.textPrimary);
   assert.equal(rowElements.length, 8);
   const row = WorkspaceRecentRow(rowElements[0]!.props);
   assert.equal(row.props.accessibilityLabel, "Open recent Thread 0, Needs you");

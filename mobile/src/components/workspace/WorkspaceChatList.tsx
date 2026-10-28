@@ -40,6 +40,7 @@ import { getAuthEpoch } from "../../lib/auth/authEpoch";
 import { useTheme } from "../../theme/ThemeContext";
 import { fonts } from "../../theme/designTokens";
 import { WorkspaceChatBrowser } from "./WorkspaceChatBrowser";
+import { sidebarSectionTitle } from "./workspaceSidebarStyles";
 import {
   boundedDrawerPreview,
   DRAWER_PREVIEW_LIMIT,
@@ -269,6 +270,23 @@ export function WorkspaceChatList({
     ]
       .filter(Boolean)
       .join(" · ");
+  const groupedAgentSubtitle = (row: AssistantAgent) =>
+    [
+      row.pending_acknowledgements
+        ? "Needs you"
+        : row.status === "running"
+          ? "Running"
+          : undefined,
+      row.status === "destroyed"
+        ? "Past agent · chat history"
+        : row.can_use === false
+          ? "View only"
+          : row.kind === "nyxbot"
+            ? "Your personal agent"
+            : row.description,
+    ]
+      .filter(Boolean)
+      .join(" · ");
   const chatRow = (row: AssistantConversation) => (
     <ChatRow
       key={row.id}
@@ -420,7 +438,12 @@ export function WorkspaceChatList({
           <DisclosureRow
             agent={row}
             label={chatAgentLabel(row)}
-            detail={agentRowDetail(row)}
+            detail={
+              mode === "drawer"
+                ? groupedAgentSubtitle(row)
+                : agentRowDetail(row)
+            }
+            accessibilityDetail={agentRowDetail(row)}
             expanded={expanded}
             selected={
               current?.kind === "agent" &&
@@ -809,7 +832,10 @@ function SectionHeading({
         onPress={onPress}
         style={styles.sectionRow}
       >
-        <Text style={[styles.section, { color: colors.textMuted }]}>
+        <Text
+          accessibilityRole="header"
+          style={[styles.section, { color: colors.textPrimary }]}
+        >
           {label}
         </Text>
         <Text style={[styles.sectionCount, { color: colors.textMuted }]}>
@@ -916,6 +942,7 @@ function DisclosureRow({
   agent,
   label,
   detail,
+  accessibilityDetail,
   expanded,
   selected,
   onPress,
@@ -923,6 +950,7 @@ function DisclosureRow({
 }: {
   label: string;
   detail?: string;
+  accessibilityDetail?: string;
   expanded: boolean;
   selected: boolean;
   onPress: () => void;
@@ -934,7 +962,7 @@ function DisclosureRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${expanded ? "Collapse" : "Expand"} chats for ${label}${detail ? `, ${detail}` : ""}`}
+      accessibilityLabel={`${expanded ? "Collapse" : "Expand"} chats for ${label}${(accessibilityDetail ?? detail) ? `, ${accessibilityDetail ?? detail}` : ""}`}
       accessibilityState={{ expanded, selected }}
       onPress={onPress}
       style={({ pressed }) => [
@@ -1144,8 +1172,7 @@ const styles = StyleSheet.create({
   },
   sectionCount: { fontFamily: fonts.bodyRegular, fontSize: 11 },
   section: {
-    fontFamily: fonts.bodySemi,
-    fontSize: 16,
+    ...sidebarSectionTitle,
     padding: 12,
     flex: 1,
   },

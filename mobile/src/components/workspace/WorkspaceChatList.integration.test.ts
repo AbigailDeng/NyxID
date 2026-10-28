@@ -10,6 +10,8 @@ import { conversationSchema } from "../../features/assistant/assistantTypes";
 import { hookHarness } from "../../features/assistant/assistantHookTestHarness";
 import { groupSchema } from "../../features/groups/groupContracts";
 import { formatRelativeTimeFromMs } from "../../lib/time";
+import { lightColors } from "../../theme/mobileTheme";
+import { sidebarSectionTitle } from "./workspaceSidebarStyles";
 import * as listHelpers from "./workspaceChatListModel";
 
 type Element = { type: unknown; props: Record<string, any> };
@@ -218,7 +220,7 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     "../../lib/api/assistantApi": { assistantApi: {} },
     "../../lib/api/groupsApi": { groupsApi: {} },
     "../../lib/auth/authEpoch": { getAuthEpoch: () => 17 },
-    "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
+    "../../theme/ThemeContext": { useTheme: () => ({ colors: lightColors }) },
     "../../theme/designTokens": { fonts: {} },
     "./WorkspaceChatBrowser": { WorkspaceChatBrowser: "WorkspaceChatBrowser" },
     "./workspaceChatListModel": listHelpers,
@@ -968,13 +970,82 @@ test("agent picker reuses the thread hierarchy without crew or creation sections
 });
 
 test("sidebar owner sections and real channel badges keep personal agents before organizations", () => {
-  const env = setup({ kind: "agent", agentId: "agent-7" }, { agent: {
-    owner_kind: "org", owner_id: "team", owner_name: "Product team",
-    channels: [{ id: "bot", platform: "telegram", bot_label: "Release bot", status: "active" }],
-  } });
-  const texts = env.all().filter(row => row.type === "Text").map(content);
+  const env = setup(
+    { kind: "agent", agentId: "agent-7" },
+    {
+      agent: {
+        owner_kind: "org",
+        owner_id: "team",
+        owner_name: "Product team",
+        channels: [
+          {
+            id: "bot",
+            platform: "telegram",
+            bot_label: "Release bot",
+            status: "active",
+          },
+        ],
+      },
+    },
+  );
+  const texts = env
+    .all()
+    .filter((row) => row.type === "Text")
+    .map(content);
   assert.ok(texts.indexOf("Personal") < texts.indexOf("Product team"));
   assert.ok(texts.includes("Telegram"));
-  assert.ok(env.label("Collapse chats for Agent 7").props.accessibilityLabel.includes("Product team"));
+  assert.ok(
+    env
+      .label("Collapse chats for Agent 7")
+      .props.accessibilityLabel.includes("Product team"),
+  );
+  env.harness.unmount();
+});
+
+test("grouped sidebar agent subtitles keep persona/channel/status without repeating the owner", () => {
+  const env = setup(
+    { kind: "agent", agentId: "agent-7" },
+    {
+      agent: {
+        owner_kind: "org",
+        owner_id: "team",
+        owner_name: "Product team",
+        description: "Keeps releases moving",
+        pending_acknowledgements: 1,
+        channels: [
+          {
+            id: "bot",
+            platform: "telegram",
+            bot_label: "Release bot",
+            status: "active",
+          },
+        ],
+      },
+    },
+  );
+  const texts = elements(env.label("Collapse chats for Agent 7"))
+    .filter((node) => node.type === "Text")
+    .map(content);
+  assert.ok(texts.includes("Needs you · Keeps releases moving"));
+  assert.ok(texts.includes("Telegram"));
+  assert.ok(
+    texts.every(
+      (text) => !text.includes("Product team") && !text.includes("Personal"),
+    ),
+  );
+  const nyxbot = elements(env.label("Expand chats for NyxBot"))
+    .filter((node) => node.type === "Text")
+    .map(content);
+  assert.ok(nyxbot.includes("Your personal agent"));
+  assert.ok(!nyxbot.includes("Personal · Your personal agent"));
+  for (const title of ["Agents", "Crews"]) {
+    const text = env
+      .all()
+      .find((node) => node.type === "Text" && node.props.children === title)!;
+    const style = Object.assign({}, ...text.props.style);
+    assert.equal(style.color, lightColors.textPrimary);
+    assert.equal(style.fontSize, sidebarSectionTitle.fontSize);
+    assert.equal(style.fontFamily, sidebarSectionTitle.fontFamily);
+  }
   env.harness.unmount();
 });

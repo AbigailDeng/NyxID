@@ -6,6 +6,7 @@ import {
   useWindowDimensions, View, type TextProps,
 } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
+import { ChevronRight, QrCode, Terminal } from "lucide-react-native";
 import type { WorkspaceScreenProps } from "../../app/navigationTypes";
 
 import { PrimaryButton } from "../../components/PrimaryButton";
@@ -569,10 +570,17 @@ export function AccountSettingsScreen({ navigation, route }: Props) {
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Quick actions</Text>
-          <PrimaryButton refreshLabelOnFontScaleChange label="Scan QR code" kind="ghost"
-            onPress={() => navigation.push("DeviceLogin", { start_scanner: true })} />
-          <PrimaryButton refreshLabelOnFontScaleChange label="Terminal login code" kind="ghost" disabled={isOffline}
-            onPress={() => navigation.push("AgentKeyLogin", { mint: true })} />
+          {[{ label: "Scan QR code", Icon: QrCode, disabled: false, open: () => navigation.push("DeviceLogin", { start_scanner: true }) },
+            { label: "Terminal login code", Icon: Terminal, disabled: isOffline, open: () => navigation.push("AgentKeyLogin", { mint: true }) }].map(({ label, Icon, disabled, open }) => (
+            <Pressable key={label} accessibilityRole="button" accessibilityLabel={label}
+              accessibilityState={{ disabled }} disabled={disabled} onPress={open}
+              style={({ pressed }) => ({ minHeight: 48, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 12,
+                opacity: disabled ? 0.4 : 1, backgroundColor: pressed ? colors.navActive : "transparent" })}>
+              <Icon size={20} color={colors.textSecondary} />
+              <Text style={{ flex: 1, fontFamily: fonts.bodyRegular, fontSize: 14, color: colors.textPrimary }}>{label}</Text>
+              <ChevronRight size={18} color={colors.textMuted} />
+            </Pressable>
+          ))}
         </View>
 
         {/* Profile card */}
