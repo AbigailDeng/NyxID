@@ -107,16 +107,17 @@ native text measurements when system text size changes, retaining page, scroll
 and control state. Display uses fixed-size step icons in
 labelled 44pt targets, with scalable labels/values and wrapping control rows.
 The native semantic text palette now meets 4.5:1 on base/card/cardSoft surfaces.
-Dictation uses the device speech recognizer with microphone/speech permission,
-shows a review, and inserts editable text only after acceptance. It never sends a
-message automatically and releases capture on background, chat/account change,
-loss of access or drawer presentation. It requires an app build containing the
-speech recognition module; older builds retain keyboard dictation and text entry.
-Eligible private chats with the server's `assistant:voice` capability also expose
-a waveform action in the trailing Send slot for the existing voice conversation surface. Crew
-voice conversations are unsupported. Provider audio and microphone behavior
-still require device verification; JavaScript exports do not establish acoustic
-or provider compatibility. No iOS orientation/tablet support, RN-web, native rail
+Dictation follows the web's server transcription contract: private-thread
+`dictation/options` discovery and the conversation's `/dictation` WebSocket,
+PCM24k, explicit Stop, then local review/Insert text. It never sends a chat
+message or persists audio. Available default selection is automatic; native has
+no source selector or OS recognizer fallback. Microphone denial links to Settings;
+background, scope/account/access changes and sheet presentation cancel capture.
+Crew dictation is unavailable, matching web's conversation-only contract.
+Eligible private chats also expose the waveform action for voice-session
+conversation. Real provider transcription/audio requires a real authenticated
+backend; fixtures and JS tests prove only the transport/lifecycle.
+No iOS orientation/tablet support, RN-web, native rail
 or live desktop capability was added.
 
 The side menu expands one agent's saved threads directly beneath its row, newest

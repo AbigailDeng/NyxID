@@ -385,17 +385,20 @@ runtimes; physical-device and release-build verification remains separate.
 RN-web, native transcript rail and machines remain outside the supported native
 capabilities.
 
-The chat toolbar offers Photos and Files under "+", with each opening its native
-picker. Selected HEIC/AVIF/TIFF/BMP images are converted to JPEG when necessary;
-the original library assets are untouched. Existing upload size/count, session
-and foreground checks apply to both paths. The microphone starts system
-dictation, with Stop, review, Insert text and Discard. Inserting preserves the
-existing draft and never sends it. Speech recognition uses the device's configured
-speech service and needs a development or production app rebuilt with
-`expo-speech-recognition`; stock Expo Go cannot provide that module. Missing
-modules produce an inline availability message while Files/text remain usable.
-A separate waveform action opens the existing voice conversation flow for
-eligible private chats when the server enables `assistant:voice`. Voice source,
-permission and provider availability are checked there. Group chat supports
-dictation, without live voice conversations. Actual microphone/transcription and
-provider audio require native device validation beyond bundle/type checks.
+The chat toolbar offers Camera, Photos and Files under "+" through the native
+pickers. Images convert to JPEG when needed; shared upload limits and lifecycle
+checks apply. Eligible private/specialist/NyxBot chats use server dictation,
+matching web: discover dictation options, automatically choose the available
+default, stream PCM24k to the private conversation's dictation WebSocket, then
+review and explicitly Insert text or Discard. Capture is ephemeral and never
+sends a message. Microphone denial offers Settings. Tap starts/stops; holding
+the microphone records until release. Native has no OS recognizer fallback or
+source selector. Crew dictation is unsupported, matching web; the keyboard's
+own microphone remains available.
+
+A separate waveform action opens conversational voice for eligible private chats
+when the server enables `assistant:voice`. It automatically selects the available
+server default and uses the existing voice session/stream/control contract.
+Real GPT transcription and spoken responses require an authenticated real NyxID
+backend with provider access, flags and credits. Synthetic fixture transcripts
+and contract tests establish lifecycle behavior only.

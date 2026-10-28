@@ -78,8 +78,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           "Allow NyxID to scan login approval QR codes and take photos to attach in chats.",
         NSMicrophoneUsageDescription:
           "Allow NyxID to use your microphone for dictation and voice conversations.",
-        NSSpeechRecognitionUsageDescription:
-          "Allow NyxID to turn your speech into editable message text.",
       },
     },
     android: {
@@ -108,15 +106,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           cameraPermission: "Allow NyxID to scan login approval QR codes and take photos to attach in chats.",
           microphonePermission:
             "Allow NyxID to use your microphone for dictation and voice conversations.",
-        },
-      ],
-      [
-        "expo-speech-recognition",
-        {
-          microphonePermission:
-            "Allow NyxID to use your microphone for dictation and voice conversations.",
-          speechRecognitionPermission:
-            "Allow NyxID to turn your speech into editable message text.",
         },
       ],
       "expo-secure-store",

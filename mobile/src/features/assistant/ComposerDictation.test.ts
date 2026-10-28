@@ -11,6 +11,10 @@ function setup() {
     phase: "idle",
     text: "",
     error: undefined,
+    permissionDenied: false,
+    media: null,
+    origin: undefined,
+    openSettings: () => events.push("settings"),
     active: false,
     recording: false,
     start: async () => {
@@ -33,6 +37,7 @@ function setup() {
         (type: string, props: Record<string, any>) => ({ type, props }),
       ]),
     ),
+    "./voice/VoiceMediaBridge": { VoiceMediaBridge: "VoiceMediaBridge" },
     "react-native": {
       ActivityIndicator: "ActivityIndicator",
       Pressable: "Pressable",
@@ -98,7 +103,7 @@ test("dictation keeps a labelled 44pt microphone/Stop target with explicit pendi
   assert.equal(button.props.accessibilityLabel, "Stop dictation");
   button.props.onPress();
   assert.equal(x.events.at(-1), "stop");
-  for (const phase of ["permission", "stopping"] as const) {
+  for (const phase of ["permission", "connecting", "stopping"] as const) {
     x.dictation.phase = phase;
     button = x.ComposerDictationButton({ dictation: x.dictation });
     assert.equal(button.props.disabled, true);
@@ -124,4 +129,15 @@ test("idle dictation adds no blank review space, while long review text is scrol
   buttons[0]!.props.onPress();
   buttons[1]!.props.onPress();
   assert.deepEqual(x.events, ["insert", "discard"]);
+});
+
+test("hold release stops capture and suppresses the synthetic tap without blocking the next tap", () => {
+  const x = setup();
+  const button = x.ComposerDictationButton({ dictation: x.dictation });
+  button.props.onLongPress();
+  button.props.onPressOut();
+  button.props.onPress();
+  assert.deepEqual(x.events, ["start", "stop"]);
+  button.props.onPress();
+  assert.deepEqual(x.events, ["start", "stop", "start"]);
 });

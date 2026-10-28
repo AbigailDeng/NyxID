@@ -3,45 +3,78 @@ import test from "node:test";
 import { URL, fileURLToPath } from "node:url";
 import { deferred, hookHarness } from "./assistantHookTestHarness";
 import type { useComposerDictation } from "./useComposerDictation";
+import type { AssistantDictationClient } from "./voice/AssistantDictationClient";
 
-function setup({ available = true, installed = true } = {}) {
-  let state = "active";
-  let focused = true;
-  let sheetOpen = false;
-  let epoch = 1;
+type Options = ConstructorParameters<typeof AssistantDictationClient>[0];
+const option = {
+  service_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  model: "gpt-live-transcribe",
+  available: true,
+  default_model: true,
+};
+function setup() {
+  let state = "active",
+    focused = true,
+    sheetOpen = false,
+    epoch = 1;
   const permissions = deferred<{ granted: boolean }>();
-  const callbacks = new Map<string, Set<(event?: any) => void>>();
   const appListeners = new Set<(state: string) => void>();
-  const events: string[] = [];
-  const inserted: string[] = [];
+  const events: string[] = [],
+    inserted: string[] = [];
+  let options: Options;
+  let resolveForeground: (() => void) | undefined;
+  const clients: Client[] = [];
   const props = {
     scope: "agent:chat:0",
     enabled: true,
-    onInsert: (text: string) => inserted.push(text),
+    getThread: async () => {
+      events.push("thread");
+      return "nyxa-" + "a".repeat(32);
+    },
+    onInsert: (text: string) => {
+      inserted.push(text);
+    },
   };
-  const speech = {
-    isRecognitionAvailable: () => available,
-    requestPermissionsAsync: () => {
-      events.push("permission");
-      return permissions.promise;
-    },
-    addListener: (name: string, callback: (event?: any) => void) => {
-      const listeners = callbacks.get(name) ?? new Set();
-      callbacks.set(name, listeners);
-      listeners.add(callback);
-      return { remove: () => listeners.delete(callback) };
-    },
-    start: (options: any) => {
-      assert.equal(options.continuous, false);
-      assert.equal(options.recordingOptions.persist, false);
+  class Media {
+    close() {
+      events.push("media-close");
+    }
+  }
+  class Client {
+    constructor(value: Options) {
+      options = value;
+      clients.push(this);
+    }
+    async start(thread: string, preferences: any) {
       events.push("start");
-    },
-    stop: () => events.push("stop"),
-    abort: () => events.push("abort"),
-  };
+      assert.equal(thread, "nyxa-" + "a".repeat(32));
+      assert.deepEqual(JSON.parse(JSON.stringify(preferences)), {
+        service_id: option.service_id,
+        model: option.model,
+        connection_id: null,
+        key_source: "platform",
+        voice: null,
+        language: null,
+        input_mode: "push_to_talk",
+        notify_on_completion: false,
+      });
+      options.onPhase("listening");
+    }
+    stop() {
+      events.push("stop");
+      options.onPhase("stopping");
+    }
+    cancel() {
+      events.push("cancel");
+    }
+  }
   const h = hookHarness<ReturnType<typeof useComposerDictation>>({
-    expo: { requireOptionalNativeModule: () => (installed ? speech : null) },
     "react-native": {
+      Linking: {
+        openSettings: async () => {
+          events.push("settings");
+        },
+      },
       AppState: {
         get currentState() {
           return state;
@@ -52,19 +85,71 @@ function setup({ available = true, installed = true } = {}) {
         },
       },
     },
+    "expo-camera": {
+      Camera: {
+        requestMicrophonePermissionsAsync: () => {
+          events.push("permission");
+          return permissions.promise;
+        },
+      },
+    },
+    "expo-crypto": { randomUUID: () => "id" },
     "@react-navigation/native": { useIsFocused: () => focused },
     "../../lib/auth/authEpoch": { getAuthEpoch: () => epoch },
     "../../lib/accessibility/workspaceAccessibility": {
       useWorkspaceAccessibility: () => ({ sheetOpen }),
     },
+    "../../lib/api/assistantVoiceApi": {
+      nativeVoiceEnvironment: () => ({
+        epoch,
+        origin: "https://nyx.example",
+        api: {
+          dictationOptions: async () => {
+            events.push("options");
+            return {
+              options: [
+                { ...option, default_model: false, model: "other" },
+                option,
+              ],
+            };
+          },
+        },
+        createSocket: () => {},
+      }),
+    },
+    "./voice/AssistantDictationClient": { AssistantDictationClient: Client },
+    "./voice/VoiceMediaBridge": { NativeVoiceMedia: Media },
+    "./voice/voiceSelection": {
+      chooseVoiceOption: (items: any[]) =>
+        items.find((v) => v.available && v.default_model) ??
+        items.find((v) => v.available),
+    },
+    "./voice/voicePermission": {
+      waitForVoiceForeground: async (_app: unknown, signal: AbortSignal) => {
+        if (state === "active") return;
+        await new Promise<void>((resolve, reject) => {
+          resolveForeground = resolve;
+          signal.addEventListener(
+            "abort",
+            () => reject(new Error("cancelled")),
+            { once: true },
+          );
+        });
+      },
+    },
   });
   const module = h.load(
     fileURLToPath(new URL("./useComposerDictation.ts", import.meta.url)),
   );
-  const hook = module.useComposerDictation as typeof useComposerDictation;
-  h.mount(() => hook(props));
-  const emit = (name: string, event?: any) => {
-    for (const callback of [...(callbacks.get(name) ?? [])]) callback(event);
+  h.mount(() =>
+    (module.useComposerDictation as typeof useComposerDictation)(props),
+  );
+  const result = (text: string) => {
+    options.onText({ final: text, interim: "" });
+    h.flush();
+  };
+  const finish = () => {
+    options.onPhase("review");
     h.flush();
   };
   return {
@@ -73,19 +158,19 @@ function setup({ available = true, installed = true } = {}) {
     events,
     inserted,
     permissions,
-    emit,
+    clients,
+    result,
+    finish,
     append: module.appendDictation as (draft: string, text: string) => string,
-    result: (text: string, final = false) =>
-      emit("result", { isFinal: final, results: [{ transcript: text }] }),
     begin: async () => {
-      const starting = h.value().start();
+      const pending = h.value().start();
       permissions.resolve({ granted: true });
-      await starting;
+      await pending;
       await h.settle();
     },
     change: (what: string) => {
       if (what === "account") epoch++;
-      if (what === "chat") props.scope = "other:chat:1";
+      if (what === "chat") props.scope = "other";
       if (what === "disabled") props.enabled = false;
       if (what === "focus") focused = false;
       if (what === "sheet") sheetOpen = true;
@@ -93,73 +178,59 @@ function setup({ available = true, installed = true } = {}) {
     },
     app: (next: string) => {
       state = next;
-      for (const callback of [...appListeners]) callback(next);
+      for (const cb of [...appListeners]) cb(next);
+      if (next === "active") resolveForeground?.();
       h.flush();
     },
+    error: (message: string) => options.onError(message),
   };
 }
 
-test("dictation reviews cumulative text and only inserts once on explicit acceptance", async () => {
+test("server dictation requests permission, shared draft and default options in order; review inserts once", async () => {
   const x = setup();
   await x.begin();
-  x.result("Hello");
-  x.result("Hello world", true);
-  assert.equal(x.h.value().text, "Hello world");
+  assert.deepEqual(x.events, ["permission", "thread", "options", "start"]);
+  x.result("Hello world");
   assert.deepEqual(x.inserted, []);
   x.h.value().stop();
-  assert.equal(x.events.at(-1), "stop");
-  x.emit("end");
-  assert.equal(x.h.value().phase, "review");
+  x.finish();
   const insert = x.h.value().insert;
   insert();
   insert();
   assert.deepEqual(x.inserted, ["Hello world"]);
-  x.h.flush();
-  assert.equal(x.h.value().phase, "idle");
-  assert.equal(
-    x.append("Existing draft", "Hello world"),
-    "Existing draft Hello world",
-  );
-  assert.equal(
-    x.append("Existing draft\n", "Hello world"),
-    "Existing draft\nHello world",
-  );
-  assert.equal(x.append("", "Hello world"), "Hello world");
+  assert.equal(x.append("Existing\n", "Hello"), "Existing\nHello");
+  assert.equal(x.append("Existing", "Hello"), "Existing Hello");
   x.h.unmount();
 });
-
-test("discard never inserts and releases the microphone before ignoring late native events", async () => {
+test("discard releases audio and ignores late server results without inserting", async () => {
   const x = setup();
   await x.begin();
-  x.result("Discard me");
+  x.result("Private");
   x.h.value().discard();
   x.h.flush();
-  x.result("Late result", true);
-  x.emit("end");
-  assert.deepEqual(x.events, ["permission", "start", "abort"]);
-  assert.deepEqual(x.inserted, []);
-  assert.equal(x.h.value().text, "");
+  x.result("Late");
+  x.finish();
   assert.equal(x.h.value().phase, "idle");
+  assert.equal(x.h.value().text, "");
+  assert.deepEqual(x.inserted, []);
+  assert.ok(x.events.includes("cancel"));
   x.h.unmount();
 });
-
-test("account, chat, access, focus and drawer changes cancel capture and obsolete review handlers", async () => {
+test("account/chat/access/focus/sheet changes fence capture and stale review callbacks", async () => {
   for (const change of ["account", "chat", "disabled", "focus", "sheet"]) {
     const x = setup();
     await x.begin();
-    x.result("Old account words");
+    x.result("Old");
     x.change(change);
-    x.result("Late words", true);
-    x.emit("end");
-    assert.equal(x.events.at(-1), "abort", change);
+    x.result("Late");
+    x.finish();
     assert.equal(x.h.value().phase, "idle", change);
-    assert.deepEqual(x.inserted, [], change);
+    assert.deepEqual(x.inserted, []);
     x.h.unmount();
-
     const y = setup();
     await y.begin();
-    y.result("Old review", true);
-    y.emit("end");
+    y.result("Old review");
+    y.finish();
     const insert = y.h.value().insert;
     y.change(change);
     insert();
@@ -167,8 +238,7 @@ test("account, chat, access, focus and drawer changes cancel capture and obsolet
     y.h.unmount();
   }
 });
-
-test("pending permission cannot start capture after ownership changes or unmount", async () => {
+test("late permission cannot create a draft or connect after cancellation or unmount", async () => {
   for (const change of [
     "account",
     "chat",
@@ -178,83 +248,61 @@ test("pending permission cannot start capture after ownership changes or unmount
     "unmount",
   ]) {
     const x = setup();
-    const starting = x.h.value().start();
+    const pending = x.h.value().start();
     if (change === "unmount") x.h.unmount();
     else x.change(change);
     x.permissions.resolve({ granted: true });
-    await starting;
+    await pending;
     assert.deepEqual(x.events, ["permission"], change);
-    assert.deepEqual(x.inserted, [], change);
     if (change !== "unmount") x.h.unmount();
   }
 });
-
-test("permission inactivity waits for foreground; background while recording aborts without insertion", async () => {
+test("permission denial links to Settings and never creates a thread", async () => {
   const x = setup();
-  const starting = x.h.value().start();
+  const pending = x.h.value().start();
+  x.permissions.resolve({ granted: false });
+  await pending;
+  await x.h.settle();
+  assert.match(x.h.value().error!, /Settings/);
+  assert.equal(x.h.value().permissionDenied, true);
+  assert.equal(x.h.value().active, false);
+  x.h.value().openSettings();
+  assert.deepEqual(x.events, ["permission", "settings"]);
+  x.h.unmount();
+});
+test("permission inactive waits for foreground; background cancels capture", async () => {
+  const x = setup();
+  const pending = x.h.value().start();
   x.app("inactive");
   x.permissions.resolve({ granted: true });
-  await starting;
   await x.h.settle();
   assert.deepEqual(x.events, ["permission"]);
   x.app("active");
-  assert.equal(x.events.at(-1), "start");
-  x.result("Private words");
+  await pending;
+  await x.h.settle();
+  x.result("Private");
   x.app("background");
-  assert.equal(x.events.at(-1), "abort");
   assert.equal(x.h.value().text, "");
-  assert.deepEqual(x.inserted, []);
+  assert.equal(x.h.value().active, false);
   x.h.unmount();
 });
-
-test("permission denial, absent runtime module and unavailable recognizer keep text entry usable", async () => {
-  const denied = setup();
-  const starting = denied.h.value().start();
-  denied.permissions.resolve({ granted: false });
-  await starting;
-  await denied.h.settle();
-  assert.match(denied.h.value().error!, /Settings/);
-  assert.equal(denied.h.value().active, false);
-  assert.deepEqual(denied.events, ["permission"]);
-  denied.h.unmount();
-  for (const options of [{ installed: false }, { available: false }]) {
-    const x = setup(options);
-    await x.h.value().start();
-    await x.h.settle();
-    assert.match(x.h.value().error!, /keyboard/);
-    assert.equal(x.h.value().active, false);
-    assert.deepEqual(x.events, []);
-    x.h.unmount();
-  }
+test("hold release before permission completes cancels without creating a paid session", async () => {
+  const x = setup();
+  const pending = x.h.value().start();
+  x.h.value().stop();
+  x.permissions.resolve({ granted: true });
+  await pending;
+  assert.deepEqual(x.events, ["permission"]);
+  x.h.unmount();
 });
-
-test("recognizer errors and empty results release audio and never insert unreviewed text", async () => {
+test("server failure preserves completed review text and never auto-sends", async () => {
   const x = setup();
   await x.begin();
-  x.result("Partial words");
-  x.emit("error", {
-    error: "network",
-    message: "native details must stay private",
-  });
-  assert.equal(x.events.at(-1), "abort");
-  assert.equal(x.h.value().text, "");
-  assert.doesNotMatch(x.h.value().error!, /native details/);
+  x.result("Review me");
+  x.error("Connection lost");
+  x.finish();
+  assert.equal(x.h.value().phase, "review");
+  assert.equal(x.h.value().text, "Review me");
   assert.deepEqual(x.inserted, []);
   x.h.unmount();
-  const y = setup();
-  await y.begin();
-  y.emit("end");
-  assert.match(y.h.value().error!, /No speech/);
-  assert.equal(y.h.value().active, false);
-  y.h.unmount();
-});
-
-test("unmount during listening releases capture and ignores its late results", async () => {
-  const x = setup();
-  await x.begin();
-  x.h.unmount();
-  assert.equal(x.events.at(-1), "abort");
-  x.result("Late text", true);
-  x.emit("end");
-  assert.deepEqual(x.inserted, []);
 });

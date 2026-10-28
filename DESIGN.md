@@ -633,9 +633,9 @@ Native support remains portrait iPhone on iOS and Android phone, with wide
 Android windows as a secondary layout. Eligible private chats expose a
 voice-conversation mode in the trailing composer button when the server enables
 `assistant:voice`: an empty composer shows the waveform, text or attachments
-show Send, and an active reply shows Stop. Dictation keeps its own microphone
-and requires a build containing the speech recognition module; group chats
-support dictation.
+show Send, and an active reply shows Stop. Dictation streams microphone audio to
+the server for review before insertion, matching the web’s private-chat scope.
+Crew chats retain the keyboard’s own dictation.
 
 The native Machines drawer supports personal machines and organization machines
 the signed-in person administers. It includes inventory, read-only local

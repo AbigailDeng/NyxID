@@ -1,7 +1,9 @@
+import { useRef } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import { Mic, Square } from "lucide-react-native";
 import { ActionButton, Label } from "../../components/workspace/WorkspaceUI";
 import { useTheme } from "../../theme/ThemeContext";
+import { VoiceMediaBridge } from "./voice/VoiceMediaBridge";
 import type { ComposerDictationState } from "./useComposerDictation";
 import { OverflowScrollView } from "../../components/workspace/ScrollEdgeFades";
 
@@ -13,8 +15,12 @@ export function ComposerDictationButton({
   disabled?: boolean;
 }) {
   const { colors } = useTheme();
+  const held = useRef(false);
+  const suppressTap = useRef(false);
   const busy =
-    dictation.phase === "permission" || dictation.phase === "stopping";
+    dictation.phase === "permission" ||
+    dictation.phase === "connecting" ||
+    dictation.phase === "stopping";
   return (
     <Pressable
       accessibilityRole="button"
@@ -27,9 +33,27 @@ export function ComposerDictationButton({
         busy,
       }}
       disabled={disabled || busy || dictation.phase === "review"}
-      onPress={() =>
-        dictation.recording ? dictation.stop() : void dictation.start()
-      }
+      onLongPress={() => {
+        if (!dictation.active) {
+          held.current = true;
+          suppressTap.current = true;
+          void dictation.start();
+        }
+      }}
+      onPressOut={() => {
+        if (held.current) {
+          held.current = false;
+          dictation.stop();
+        }
+      }}
+      onPress={() => {
+        if (suppressTap.current) {
+          suppressTap.current = false;
+          return;
+        }
+        if (dictation.recording) dictation.stop();
+        else void dictation.start();
+      }}
       style={({ pressed }) => [
         styles.target,
         { opacity: disabled || busy ? 0.4 : pressed ? 0.65 : 1 },
@@ -55,15 +79,20 @@ export function ComposerDictationReview({
   if (!dictation.active && !dictation.error) return null;
   return (
     <View style={styles.review}>
+      {dictation.media && dictation.origin && (
+        <VoiceMediaBridge media={dictation.media} origin={dictation.origin} />
+      )}
       <Label accessibilityLiveRegion="polite" muted>
         {dictation.error ??
           (dictation.phase === "permission"
             ? "Waiting for microphone permission…"
-            : dictation.phase === "stopping"
-              ? "Finishing dictation…"
-              : dictation.phase === "review"
-                ? "Review dictation"
-                : "Listening…")}
+            : dictation.phase === "connecting"
+              ? "Connecting dictation…"
+              : dictation.phase === "stopping"
+                ? "Finishing dictation…"
+                : dictation.phase === "review"
+                  ? "Review dictation"
+                  : "Listening…")}
       </Label>
       {!!dictation.text && (
         <OverflowScrollView
@@ -74,6 +103,13 @@ export function ComposerDictationReview({
         </OverflowScrollView>
       )}
       <View style={styles.actions}>
+        {dictation.permissionDenied && (
+          <ActionButton
+            label="Open Settings"
+            variant="secondary"
+            onPress={dictation.openSettings}
+          />
+        )}
         {dictation.phase === "review" && (
           <ActionButton label="Insert text" onPress={dictation.insert} />
         )}

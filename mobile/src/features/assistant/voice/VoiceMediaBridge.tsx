@@ -11,6 +11,8 @@ import {
   voicePcmToBase64,
 } from "./voiceMediaDocument";
 
+let microphoneOwner: NativeVoiceMedia | undefined;
+
 type Pending = {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
@@ -280,10 +282,13 @@ export class NativeVoiceMedia implements VoiceMediaAdapter {
   }
 
   async prepare(
-    protocol: "openai_live" | "xai_realtime",
+    protocol: "openai_live" | "xai_realtime" | "dictation",
     signal: AbortSignal,
   ): Promise<string> {
     this.close();
+    if (microphoneOwner && microphoneOwner !== this)
+      throw new Error("The microphone is already in use.");
+    microphoneOwner = this;
     this.closed = false;
     this.diagnostics = [];
     const generation = ++this.generation;
@@ -379,6 +384,7 @@ export class NativeVoiceMedia implements VoiceMediaAdapter {
   close(): void {
     const active = !this.closed && this.ready;
     this.closed = true;
+    if (microphoneOwner === this) microphoneOwner = undefined;
     if (active) {
       try {
         this.send?.({ type: "close", generation: this.generation });

@@ -111,6 +111,15 @@ export class AssistantUploadSession {
     // The native adapter independently fences cleanup to the original owner.
     void this.deps.remove(id, attachmentId).catch(() => undefined);
   }
+  /** Dictation and attachments share the same durable unsent private thread. */
+  async ensureConversation() {
+    if (!this.available())
+      throw new Error("This composer is no longer available.");
+    const id = await this.ensureDraft();
+    if (!this.available())
+      throw new Error("This composer is no longer available.");
+    return id;
+  }
   private async ensureDraft() {
     if (this.id) return this.id;
     this.draft ??= this.deps.createDraft(this.controller.signal);

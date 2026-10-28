@@ -134,6 +134,22 @@ test("multiple selections upload serially into one durable draft", async () => {
   h.session.dispose();
 });
 
+test("dictation and attachments share the same in-flight durable draft", async () => {
+  const draft = deferred<string>();
+  let creates = 0;
+  const h = harness({ createDraft: () => { creates++; return draft.promise; } });
+  const dictation = h.session.ensureConversation();
+  h.session.add([file()]);
+  await until(() => creates === 1 && h.reads.length === 1);
+  draft.resolve("nyxa-shared-draft");
+  assert.equal(await dictation, "nyxa-shared-draft");
+  await until(() => !h.session.blocked);
+  assert.equal(creates, 1);
+  assert.equal(h.uploads[0]?.id, "nyxa-shared-draft");
+  assert.equal(await h.session.ensureConversation(), "nyxa-shared-draft");
+  h.session.dispose();
+});
+
 test("unknown or stale picker size cannot trigger a giant native file read", async () => {
   for (const pickerSize of [undefined, 3]) {
     const h = harness({ fileSize: () => MAX_ASSISTANT_ATTACHMENT_BYTES + 1 });

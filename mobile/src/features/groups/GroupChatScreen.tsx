@@ -69,14 +69,6 @@ import { GroupPendingCard } from "./GroupPendingCard";
 import { GroupMachineReceipts } from "./GroupMachineReceipts";
 import { AssistantMessageFooter } from "../assistant/AssistantMessageFooter";
 import { useAssistantUploads } from "../assistant/useAssistantUploads";
-import {
-  appendDictation,
-  useComposerDictation,
-} from "../assistant/useComposerDictation";
-import {
-  ComposerDictationButton,
-  ComposerDictationReview,
-} from "../assistant/ComposerDictation";
 import { useTranscriptScrollFollow } from "../assistant/useTranscriptScrollFollow";
 import {
   NO_RECIPIENT_EDITS,
@@ -309,14 +301,8 @@ function GroupChat({
     !chat.active ||
     !canParticipate ||
     chat.isError;
-  const dictation = useComposerDictation({
-    scope: `${groupId}:${composerGeneration}`,
-    enabled: !blocked && !uploads.picking && !!liveMembers.length,
-    onInsert: (text) => edit(appendDictation(draft, text)),
-  });
   const canSend =
     !blocked &&
-    !dictation.active &&
     !uploads.blocked &&
     !uploads.session.sending &&
     !!recipients.ids.length &&
@@ -697,7 +683,6 @@ function GroupChat({
               <Label muted>{uploads.error ?? uploads.notice}</Label>
             )}
             <ChatComposerFrame>
-              <ComposerDictationReview dictation={dictation} />
               <OverflowScrollView
                 fadeColor={colors.composerBg}
                 horizontal
@@ -778,7 +763,6 @@ function GroupChat({
                       busy={uploads.picking}
                       disabled={
                         blocked ||
-                        dictation.active ||
                         !liveMembers.length ||
                         uploads.picking ||
                         uploads.session.sending
@@ -787,12 +771,7 @@ function GroupChat({
                     />
                     {mentionAction}
                     <View style={{ flex: 1 }} />
-                    <ComposerDictationButton
-                      dictation={dictation}
-                      disabled={
-                        blocked || uploads.picking || !liveMembers.length
-                      }
-                    />
+
                     <ComposerSubmitButton
                       kind="send"
                       label="Send crew message"

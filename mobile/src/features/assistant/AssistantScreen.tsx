@@ -357,6 +357,13 @@ export function AssistantScreen({
     assistant.loading ||
     ((assistant.sending || uploads.session.sending) &&
       !assistant.conversationId);
+  const voiceFeatures = useQuery({
+    queryKey: ["workspace", "voice-features", getAuthEpoch()],
+    queryFn: ({ signal }) => assistantVoiceFeatures(signal),
+    enabled: assistant.online,
+    retry: false,
+    staleTime: 30000,
+  });
   const dictation = useComposerDictation({
     scope: `${assistant.agentId}:${assistant.conversationId ?? "new"}:${composerGeneration}`,
     enabled:
@@ -364,7 +371,13 @@ export function AssistantScreen({
       !uploads.picking &&
       !uploads.session.sending &&
       !openingVoice &&
-      !voiceThread,
+      !voiceThread &&
+      NATIVE_VOICE_ENTRY_ENABLED &&
+      voiceFeatures.data?.includes("assistant:voice") === true &&
+      !conversation?.channel &&
+      conversation?.role !== "subagent" &&
+      !destroyed,
+    getThread: () => uploads.session.ensureConversation(),
     onInsert: (text) => updateDraft(appendDictation(draft, text)),
   });
   const canSend =
@@ -385,13 +398,6 @@ export function AssistantScreen({
     !uploads.picking &&
     !!draft.trim() &&
     [...draft].length <= guidance.maxChars;
-  const voiceFeatures = useQuery({
-    queryKey: ["workspace", "voice-features", getAuthEpoch()],
-    queryFn: ({ signal }) => assistantVoiceFeatures(signal),
-    enabled: assistant.online,
-    retry: false,
-    staleTime: 30000,
-  });
   const voiceAvailable = showVoiceComposer({
     enabled:
       NATIVE_VOICE_ENTRY_ENABLED &&

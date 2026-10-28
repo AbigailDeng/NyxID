@@ -840,3 +840,31 @@ test("the WebView is inaccessible, blocks later navigation, and closes on unmoun
   harness.unmount();
   assert.equal(closed, 1);
 });
+
+test("dictation captures PCM24k without a conversational peer or microphone playback", async () => {
+  const e = engine();
+  e.command({
+    type: "prepare",
+    protocol: "dictation",
+    generation: 1,
+    requestId: 1,
+  });
+  await settle();
+  assert.equal(e.peers.length, 0);
+  assert.equal(e.worklets.length, 1);
+  assert.equal(e.tracks[0]!.enabled, false);
+  e.command({ type: "input", enabled: true, generation: 1 });
+  assert.equal(e.tracks[0]!.enabled, true);
+  const worklet = e.worklets[0];
+  worklet.port.onmessage({
+    data: { type: "pcm", bytes: new ArrayBuffer(960), generation: 1 },
+  });
+  assert.equal(e.messages.filter((m) => m.type === "pcm").length, 1);
+  e.command({ type: "close", generation: 1 });
+  assert.equal(e.tracks[0]!.stopped, true);
+  assert.equal(e.contexts[0]!.closed, true);
+  worklet.port.onmessage({
+    data: { type: "pcm", bytes: new ArrayBuffer(960), generation: 1 },
+  });
+  assert.equal(e.messages.filter((m) => m.type === "pcm").length, 1);
+});
