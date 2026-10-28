@@ -44,6 +44,7 @@ function setup({
   let nativeBacks = 0;
   let menuOpens = 0;
   let closePresses = 0;
+  let cancelledNavigations = 0;
   let header: ReturnType<typeof workspaceHeaderOptions>;
   let preventionId = 0;
   const listeners = new Set<BeforeRemove>();
@@ -263,6 +264,7 @@ function setup({
     WorkspaceMenuContext: Context;
     WorkspaceNavigationGuardContext: Context;
     WorkspaceEdgeBackContext: Context;
+    WorkspaceNavigationCancelledContext: Context;
   };
   module.WorkspaceSheetContext.value = inSheet
     ? {
@@ -293,6 +295,8 @@ function setup({
     guardChanges.push(blocked);
     criticalChanges.push(critical);
   };
+  module.WorkspaceNavigationCancelledContext.value = () =>
+    cancelledNavigations++;
   module.WorkspaceEdgeBackContext.value = (id: symbol, back?: () => void) => {
     if (back) edgeBacks.set(id, back);
     else edgeBacks.delete(id);
@@ -352,6 +356,7 @@ function setup({
     criticalChanges,
     edgeBack: () => [...edgeBacks.values()].at(-1)?.(),
     rootAction,
+    cancelled: () => cancelledNavigations,
     button,
     flush,
     options: () => header,
@@ -858,4 +863,19 @@ test("a dirty native leaf route confirms POP once and replays the exact action w
     assert.equal(env.counts().localBacks, 0);
     env.unmount();
   }
+});
+
+test("the real dirty leave guard reports Keep editing to the sidebar but never cancels an accepted Discard", () => {
+  const x = setup({
+    inSheet: false,
+    discardOnClose: { title: "Discard changes?", message: "Unsaved edits" },
+  });
+  x.attempt(x.rootAction);
+  x.choose("Keep editing");
+  assert.equal(x.cancelled(), 1);
+  x.attempt(x.rootAction);
+  x.choose("Discard");
+  assert.equal(x.cancelled(), 1);
+  assert.deepEqual(x.dispatched.at(-1), x.rootAction);
+  x.unmount();
 });

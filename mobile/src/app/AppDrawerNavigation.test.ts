@@ -7,8 +7,6 @@ import { runInNewContext } from "node:vm";
 import test from "node:test";
 import ts from "typescript";
 import {
-  StackRouter,
-  TabRouter,
   type NavigationAction,
   type NavigationState,
 } from "@react-navigation/routers";
@@ -16,7 +14,8 @@ import {
   openWorkspaceSheetAction,
   isWorkspaceSidebarRoot,
   workspaceNavigateAction,
-  workspaceRouterOptions,
+  workspaceDestinationMatches,
+  workspaceContentIdentity,
 } from "./navigationHierarchy";
 import {
   activeWorkspaceChatTarget,
@@ -45,27 +44,14 @@ function elements(root: Element): Element[] {
   ];
 }
 
-function fixture(): NavigationState {
-  const root = StackRouter({ initialRouteName: "Workspace" }).getInitialState({
-    routeNames: [
-      "Workspace",
-      "AssistantContext",
-      "GroupChat",
-      "WorkspaceSheet",
-    ],
-    routeParamList: {},
-    routeGetIdList: {},
-  });
-  const workspace = TabRouter(workspaceRouterOptions).getInitialState({
-    routeNames: ["Assistant"],
-    routeParamList: {},
-    routeGetIdList: {},
-  });
-  return {
-    ...root,
-    routes: root.routes.map((route) => ({ ...route, state: workspace })),
-  };
-}
+import {
+  fixture,
+  apply,
+  content,
+  pushContent,
+} from "./workspaceNavigationTestHarness";
+import { dismissWorkspaceSheetAction } from "./navigationHierarchy";
+import { workspaceContentAnimation } from "../components/workspace/workspacePushState";
 
 /** Extract actual declarations so App's splash/network/push startup effects never execute. */
 function shellSource() {
@@ -158,9 +144,18 @@ function setup() {
       }
     },
   };
-  const jsx = (type: unknown, props: Record<string, unknown>) => ({
+  const jsx = (type: unknown, props: Record<string, any>) => ({
     type,
-    props,
+    props:
+      type === "AppNavigator"
+        ? {
+            ...props,
+            children: props.renderWorkspace({
+              type: "ContentNavigator",
+              props: {},
+            }),
+          }
+        : props,
   });
   const exports: { ThemedAppShell?: (props: object) => Element } = {};
   const output = ts.transpileModule(shellSource(), {
@@ -208,6 +203,8 @@ function setup() {
     openWorkspaceSheetAction,
     isWorkspaceSidebarRoot,
     activeWorkspaceChatTarget,
+    workspaceDestinationMatches,
+    workspaceContentIdentity,
   });
   const component = exports.ThemedAppShell;
   assert.ok(component);
@@ -282,6 +279,12 @@ function setup() {
     },
     background,
     shell: () => find("WorkspacePushShell"),
+    navigator: () => find("AppNavigator"),
+    commitLast: () => {
+      rootState = apply(rootState, dispatched.at(-1)!);
+      find("NavigationContainer").props.onStateChange();
+      flush();
+    },
     open: () => {
       find("AppNavigator").props.onOpenMenu();
       flush();
@@ -322,114 +325,228 @@ const comparable = (value: unknown): unknown =>
     JSON.stringify(value, (key, item) => (key === "key" ? undefined : item)),
   );
 
-test("management, chat, scanner and login selections wait for actual slab settlement", () => {
-  const target: WorkspaceChatTarget = {
-    kind: "agent",
-    agentId: "researcher",
-    conversationId: "chat-1",
-  };
-  for (const selection of [
-    {
-      choose: (drawer: Element) => drawer.props.onHome(),
-      expected: (state: NavigationState) =>
-        workspaceChatNavigationAction(state, { kind: "home" }),
-    },
-    {
-      choose: (drawer: Element) => drawer.props.onNavigate("Assistant"),
-      expected: (state: NavigationState) =>
-        workspaceChatNavigationAction(state, { kind: "home" }),
-    },
-    {
-      choose: (drawer: Element) => drawer.props.onNavigate("Agents"),
-      expected: (state: NavigationState) =>
-        workspaceNavigateAction("Agents", undefined, state),
-    },
-    {
-      choose: (drawer: Element) => drawer.props.onOpenChat(target),
-      expected: (state: NavigationState) =>
-        workspaceChatNavigationAction(state, target),
-    },
-    {
-      choose: (drawer: Element) =>
-        drawer.props.onOpenChat({ kind: "group", groupId: "group-1" }),
-      expected: (state: NavigationState) =>
-        workspaceChatNavigationAction(state, {
-          kind: "group",
-          groupId: "group-1",
-        }),
-    },
-    {
-      choose: (drawer: Element) => drawer.props.onCreateAgent(),
-      expected: (state: NavigationState) =>
-        workspaceNavigateAction("AgentCreate", undefined, state),
-    },
-    {
-      choose: (drawer: Element) => drawer.props.onCreateGroup(),
-      expected: (state: NavigationState) =>
-        workspaceNavigateAction("GroupEditor", undefined, state),
-    },
-    {
-      choose: (drawer: Element) => drawer.props.onNavigate("AccountSettings"),
-      expected: () => workspaceNavigateAction("AccountSettings"),
-    },
-    ...["WorkspaceSearch", "WorkspaceRecents"].map((name) => ({
-      choose: (drawer: Element) => drawer.props.onBrowse(name),
-      expected: (state: NavigationState) =>
-        workspaceNavigateAction(name as "WorkspaceSearch", undefined, state),
-    })),
-  ]) {
+const choices = [
+  {
+    choose: (d: Element) => d.props.onHome(),
+    action: (s: NavigationState) =>
+      workspaceChatNavigationAction(s, { kind: "home" }),
+  },
+  {
+    choose: (d: Element) => d.props.onNavigate("Assistant"),
+    action: (s: NavigationState) =>
+      workspaceChatNavigationAction(s, { kind: "home" }),
+  },
+  {
+    choose: (d: Element) => d.props.onNavigate("Machines"),
+    action: (s: NavigationState) =>
+      workspaceNavigateAction("Machines", undefined, s),
+  },
+  {
+    choose: (d: Element) =>
+      d.props.onOpenChat({
+        kind: "agent",
+        agentId: "researcher",
+        conversationId: "chat-1",
+      }),
+    action: (s: NavigationState) =>
+      workspaceChatNavigationAction(s, {
+        kind: "agent",
+        agentId: "researcher",
+        conversationId: "chat-1",
+      }),
+  },
+  {
+    choose: (d: Element) =>
+      d.props.onOpenChat({ kind: "group", groupId: "crew-1" }),
+    action: (s: NavigationState) =>
+      workspaceChatNavigationAction(s, { kind: "group", groupId: "crew-1" }),
+  },
+  {
+    choose: (d: Element) => d.props.onCreateAgent(),
+    action: (s: NavigationState) =>
+      workspaceNavigateAction("AgentCreate", undefined, s),
+  },
+  {
+    choose: (d: Element) => d.props.onCreateGroup(),
+    action: (s: NavigationState) =>
+      workspaceNavigateAction("GroupEditor", undefined, s),
+  },
+  ...(["WorkspaceSearch", "WorkspaceRecents"] as const).map((name) => ({
+    choose: (d: Element) => d.props.onBrowse(name),
+    action: (s: NavigationState) => workspaceNavigateAction(name, undefined, s),
+  })),
+];
+
+test("every main destination swaps under the open slab with no inner animation, then requests one close", () => {
+  for (const choice of choices) {
     const env = setup();
     env.open();
-    assert.equal(env.shell().props.visible, true);
-    selection.choose(env.drawer());
-    env.flush();
-    assert.equal(env.shell().props.visible, false);
-    assert.deepEqual(env.dispatched, []);
+    const before = env.state();
     assert.equal(
-      env.rootReads(),
-      0,
-      "navigation state is resolved after slab settlement",
+      workspaceContentAnimation(
+        false,
+        env.navigator().props.suppressWorkspaceAnimation,
+      ),
+      "none",
     );
-    env.drawer().props.onDismiss();
-    // Scanner/login params are created inside the isolated component realm.
+    choice.choose(env.drawer());
+    env.flush();
+    assert.equal(
+      env.shell().props.visible,
+      true,
+      "wait for the guarded root swap to commit",
+    );
     assert.deepEqual(
       comparable(env.dispatched),
-      comparable([selection.expected(env.state())]),
+      comparable([choice.action(before)]),
     );
+    env.commitLast();
+    assert.equal(
+      env.shell().props.visible,
+      false,
+      "new page slides in once with the slab",
+    );
+    assert.equal(
+      env.navigator().props.suppressWorkspaceAnimation,
+      true,
+      "no native stack travel during closing",
+    );
+    env.drawer().props.onDismiss();
+    env.flush();
+    assert.equal(env.navigator().props.suppressWorkspaceAnimation, false);
     env.drawer().props.onDismiss();
     assert.equal(env.dispatched.length, 1);
   }
 });
 
-test("navigation accessibility stays excluded through menu exit and restores after slab settlement or auth change", () => {
+test("rapid destination double taps cannot replace the in-flight swap or bounce the slab", () => {
+  const env = setup();
+  env.open();
+  const drawer = env.drawer();
+  drawer.props.onNavigate("Machines");
+  drawer.props.onNavigate("Automations");
+  assert.equal(env.dispatched.length, 1);
+  env.commitLast();
+  drawer.props.onNavigate("Agents");
+  env.shell().props.onOpenChange(true);
+  env.flush();
+  assert.equal(env.shell().props.visible, false);
+  assert.equal(env.dispatched.length, 1);
+  env.drawer().props.onDismiss();
+  env.flush();
+  env.open();
+  env.drawer().props.onNavigate("Automations");
+  assert.equal(
+    env.dispatched.length,
+    2,
+    "another destination works after settlement",
+  );
+});
+
+test("Keep editing cancels the pending swap, leaves the slab open and permits another guarded selection", () => {
+  const env = setup();
+  env.open();
+  env.drawer().props.onNavigate("Machines");
+  env.changedNavigation();
+  assert.equal(
+    env.shell().props.visible,
+    true,
+    "a prevented action does not close navigation",
+  );
+  env.navigator().props.onNavigationCancelled();
+  env.drawer().props.onNavigate("Automations");
+  assert.equal(env.dispatched.length, 2);
+  env.commitLast();
+  assert.equal(env.shell().props.visible, false);
+});
+
+test("Discard closes only after the deferred guarded action commits, retaining the thread draft", () => {
+  const env = setup();
+  const chat = content(env.state()).routes[0]!;
+  env.setState(
+    pushContent(env.state(), "AgentDetail", { agentId: "dirty-agent" }),
+  );
+  env.open();
+  env.drawer().props.onNavigate("Machines");
+  env.changedNavigation();
+  assert.equal(env.shell().props.visible, true);
+  env.commitLast();
+  assert.equal(env.shell().props.visible, false);
+  assert.deepEqual(content(env.state()).routes[0], chat);
+});
+
+test("selecting an already active root closes once without requiring a navigation event", () => {
+  const env = setup();
+  env.setState(
+    apply(
+      env.state(),
+      workspaceNavigateAction("Machines", undefined, env.state()),
+    ),
+  );
+  env.open();
+  env.drawer().props.onNavigate("Machines");
+  env.flush();
+  assert.equal(env.shell().props.visible, false);
+  assert.equal(env.dispatched.length, 0);
+});
+
+test("Settings presents over the expanded sidebar and dismissal preserves the exact page and open state", () => {
+  const env = setup();
+  env.readyNavigation();
+  env.open();
+  const contentBefore = content(env.state());
+  env.drawer().props.onNavigate("AccountSettings");
+  env.flush();
+  assert.equal(env.shell().props.visible, true);
+  env.commitLast();
+  assert.equal(env.shell().props.visible, true);
+  assert.equal(env.shell().props.obscured, true);
+  assert.strictEqual(content(env.state()), contentBefore);
+  env.setState(apply(env.state(), dismissWorkspaceSheetAction(env.state())));
+  env.changedNavigation();
+  assert.equal(env.shell().props.visible, true);
+  assert.equal(env.shell().props.presented, true);
+  assert.equal(env.shell().props.obscured, false);
+  assert.strictEqual(content(env.state()), contentBefore);
+});
+
+test("a content destination inside Settings closes the sidebar only after the sheet host is removed", () => {
+  const env = setup();
+  env.readyNavigation();
+  env.open();
+  env.drawer().props.onNavigate("AccountSettings");
+  env.commitLast();
+  assert.equal(env.shell().props.visible, true);
+  // The sheet's actual guarded dismissal dispatches this only on exit completion.
+  env.setState(
+    apply(
+      env.state(),
+      workspaceNavigateAction("Agents", undefined, env.state()),
+    ),
+  );
+  env.changedNavigation();
+  assert.equal(env.shell().props.obscured, false);
+  assert.equal(env.shell().props.visible, false);
+});
+
+test("navigation accessibility remains excluded until slab settlement, including sign-out cleanup", () => {
   const env = setup();
   assert.equal(env.background().props.accessibilityElementsHidden, false);
   env.open();
   assert.equal(env.background().props.accessibilityElementsHidden, true);
-  assert.equal(
-    env.background().props.importantForAccessibility,
-    "no-hide-descendants",
-  );
-  assert.equal(env.background().props.collapsable, false);
   env.shell().props.onOpenChange(false);
   env.flush();
-  assert.equal(env.shell().props.visible, false);
-  assert.equal(
-    env.background().props.accessibilityElementsHidden,
-    true,
-    "the native host remains during its exit animation",
-  );
+  assert.equal(env.background().props.accessibilityElementsHidden, true);
   env.drawer().props.onDismiss();
   env.flush();
   assert.equal(env.background().props.accessibilityElementsHidden, false);
-  assert.equal(env.background().props.importantForAccessibility, "auto");
   env.open();
   env.authenticate(false);
   assert.equal(env.hasDrawer(), false);
   assert.equal(env.background().props.accessibilityElementsHidden, false);
 });
 
-test("plain menu Close restores a live primary owner only after the background visibility commit", () => {
+test("plain menu Close restores the live invoking owner only after the visible background commits", () => {
   const env = setup();
   env.readyNavigation();
   const scope = env.state().routes[0]!.key;
@@ -441,52 +558,34 @@ test("plain menu Close restores a live primary owner only after the background v
   env.shell().props.onOpenChange(false);
   env.flush();
   env.flushFocus();
-  assert.deepEqual(env.focused, [], "closing animation still owns focus");
+  assert.deepEqual(env.focused, []);
   env.drawer().props.onDismiss();
-  assert.equal(
-    env.background().props.accessibilityElementsHidden,
-    true,
-    "the shell has not committed restored visibility yet",
-  );
+  assert.equal(env.background().props.accessibilityElementsHidden, true);
   env.flush();
-  assert.equal(env.background().props.accessibilityElementsHidden, false);
   assert.ok(env.scheduledWhileHidden.length > 0);
-  assert.ok(
-    env.scheduledWhileHidden.every((hidden) => !hidden),
-    "return focus is scheduled after the visible background commit",
-  );
+  assert.ok(env.scheduledWhileHidden.every((hidden) => !hidden));
   env.focus.release(original);
   env.focus.register(Symbol("remounted header"), () => tag, true, scope);
   tag = 20;
   env.flushFocus();
-  assert.deepEqual(
-    env.focused,
-    [20],
-    "resolve the mounted active owner and its current native handle",
-  );
+  assert.deepEqual(env.focused, [20]);
 });
 
-test("menu return focus is skipped or cancelled for navigation, auth, scope replacement and reopening", () => {
-  for (const cancel of [
-    "navigation",
-    "auth",
-    "auth-before-dismiss",
-    "scope",
-    "reopen",
-  ] as const) {
+test("navigation, auth, scope replacement and reopening cancel stale focus restoration", () => {
+  for (const cancel of ["navigation", "auth", "scope", "reopen"]) {
     const env = setup();
     env.readyNavigation();
     const scope = env.state().routes[0]!.key;
-    const owner = Symbol("invoking header");
+    const owner = Symbol("header");
     env.focus.register(owner, () => 10, true, scope);
     env.focus.invoked(owner);
     env.open();
-    if (cancel === "navigation") env.drawer().props.onNavigate("Agents");
-    else env.shell().props.onOpenChange(false);
+    if (cancel === "navigation") {
+      env.drawer().props.onNavigate("Agents");
+      env.commitLast();
+    } else env.shell().props.onOpenChange(false);
     env.flush();
-    const dismiss = env.drawer().props.onDismiss;
-    if (cancel === "auth-before-dismiss") env.authenticate(false);
-    dismiss();
+    env.drawer().props.onDismiss();
     env.flush();
     if (cancel === "auth") env.authenticate(false);
     if (cancel === "scope") {
@@ -500,144 +599,63 @@ test("menu return focus is skipped or cancelled for navigation, auth, scope repl
     if (cancel === "reopen") env.open();
     env.flushFocus();
     assert.deepEqual(env.focused, [], cancel);
-    if (cancel === "navigation") {
-      assert.equal(env.dispatched.length, 1);
-      assert.deepEqual(
-        env.scheduledWhileHidden,
-        [],
-        "queued navigation never requests primary focus",
-      );
-    }
   }
 });
 
-test("management Chats resolves the latest root state when dismissal completes", () => {
-  const env = setup();
-  env.open();
-  env.drawer().props.onNavigate("Assistant");
-  env.flush();
-  const previous = env.state();
-  const latest = {
-    ...previous,
-    key: "root-after-selection",
-    index: 2,
-    routes: [
-      previous.routes[0]!,
-      {
-        key: "context-latest",
-        name: "AssistantContext",
-        params: { conversationId: "latest-chat" },
-      },
-      { key: "sheet-latest", name: "WorkspaceSheet" },
-    ],
-  };
-  env.setState(latest);
-  env.drawer().props.onDismiss();
-  const action = env.dispatched[0];
-  assert.ok(action);
-  assert.equal(action.target, latest.key);
-  assert.deepEqual(
-    action,
-    workspaceChatNavigationAction(latest, { kind: "home" }),
-  );
-  assert.equal(env.rootReads(), 1);
-});
-
-test("chat selection preserves the latest mounted workspace rather than selection-time state", () => {
-  const env = setup();
-  env.open();
-  const target: WorkspaceChatTarget = { kind: "group", groupId: "group-1" };
-  env.drawer().props.onOpenChat(target);
-  env.flush();
-  const previous = env.state();
-  const latestWorkspace = { ...previous.routes[0]!, key: "latest-workspace" };
-  const latest = { ...previous, key: "latest-root", routes: [latestWorkspace] };
-  env.setState(latest);
-  env.drawer().props.onDismiss();
-  const action = env.dispatched[0];
-  assert.ok(action);
-  assert.equal(action.target, latest.key);
-  const payload = action.payload as { routes: unknown[] } | undefined;
-  assert.equal((payload?.routes[0] as any).key, latestWorkspace.key);
-});
-
-test("signing out clears every queued selection before a stale dismissal callback can run", () => {
-  for (const choose of [
-    (drawer: Element) => drawer.props.onNavigate("Services"),
-    (drawer: Element) =>
-      drawer.props.onOpenChat({ kind: "group", groupId: "group-1" }),
-    (drawer: Element) => drawer.props.onBrowse("WorkspaceSearch"),
-    (drawer: Element) => drawer.props.onCreateAgent(),
-    (drawer: Element) => drawer.props.onCreateGroup(),
-    (drawer: Element) => drawer.props.onBrowse("WorkspaceRecents"),
-    (drawer: Element) => drawer.props.onNavigate("AccountSettings"),
-  ]) {
+test("sign-out fences stale selection and dismissal callbacks without re-dispatching actions", () => {
+  for (const choice of choices) {
     const env = setup();
     env.open();
     const stale = env.drawer();
-    choose(stale);
+    choice.choose(stale);
     env.flush();
+    const count = env.dispatched.length;
     env.authenticate(false);
-    assert.equal(env.hasDrawer(), false);
+    choice.choose(stale);
     stale.props.onDismiss();
-    assert.deepEqual(env.dispatched, []);
     env.authenticate(true);
     env.drawer().props.onDismiss();
-    assert.deepEqual(env.dispatched, []);
+    assert.equal(env.dispatched.length, count);
     assert.equal(env.shell().props.visible, false);
   }
 });
 
-test("manual Close dismisses the menu without scheduling navigation", () => {
+test("readiness is checked before swapping and unavailable selections are never deferred", () => {
   const env = setup();
   env.open();
-  env.shell().props.onOpenChange(false);
-  env.flush();
-  assert.equal(env.shell().props.visible, false);
-  env.drawer().props.onDismiss();
-  env.drawer().props.onDismiss();
-  assert.deepEqual(env.dispatched, []);
-  assert.equal(env.rootReads(), 0);
-});
-
-test("navigation readiness is checked at dismissal and unavailable actions are consumed once", () => {
-  const env = setup();
-  env.open();
+  env.readiness(false);
   env.drawer().props.onBrowse("WorkspaceSearch");
   env.flush();
-  env.readiness(false);
-  env.drawer().props.onDismiss();
-  assert.deepEqual(env.dispatched, []);
+  assert.equal(env.shell().props.visible, true);
+  assert.equal(env.dispatched.length, 0);
   env.readiness(true);
-  env.drawer().props.onDismiss();
-  assert.deepEqual(env.dispatched, []);
-  env.open();
-  env.readiness(false);
   env.drawer().props.onBrowse("WorkspaceRecents");
-  env.flush();
-  env.readiness(true);
-  env.drawer().props.onDismiss();
-  assert.deepEqual(
-    comparable(env.dispatched),
-    comparable([
-      workspaceNavigateAction("WorkspaceRecents", undefined, env.state()),
-    ]),
-  );
+  env.commitLast();
+  assert.equal(env.dispatched.length, 1);
+  assert.equal(env.shell().props.visible, false);
 });
 
-test("a second selection before dismissal replaces the queued destination", () => {
-  const env = setup();
-  env.open();
-  const drawer = env.drawer();
-  drawer.props.onNavigate("Agents");
-  drawer.props.onNavigate("Automations");
-  env.flush();
-  assert.deepEqual(env.dispatched, []);
-  env.drawer().props.onDismiss();
-  assert.deepEqual(
-    comparable(env.dispatched),
-    comparable([
-      workspaceNavigateAction("Automations", undefined, env.state()),
-    ]),
+test("root-swap comparison ignores unrelated state events and matches exact agent/thread/draft parameters", () => {
+  const state = fixture();
+  const action = workspaceChatNavigationAction(state, {
+    kind: "agent",
+    agentId: "new-agent",
+  })!;
+  assert.equal(workspaceDestinationMatches(state, action), false);
+  const next = apply(state, action);
+  assert.equal(workspaceDestinationMatches(next, action), true);
+  const other = apply(
+    next,
+    workspaceChatNavigationAction(next, {
+      kind: "agent",
+      agentId: "new-agent",
+    }),
   );
+  assert.equal(
+    workspaceDestinationMatches(other, action),
+    false,
+    "fresh draft identity differs",
+  );
+  assert.equal(workspaceContentAnimation(true, false), "none");
+  assert.equal(workspaceContentAnimation(false, false), "slide_from_right");
 });

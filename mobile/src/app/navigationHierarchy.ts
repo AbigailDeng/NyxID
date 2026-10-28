@@ -298,3 +298,39 @@ export function isWorkspaceSidebarRoot(name: string | undefined) {
     ].includes(name)
   );
 }
+
+/** Confirm the requested root swap committed (guards can defer/cancel it). */
+export function workspaceDestinationMatches(
+  state: NavigationState | undefined,
+  action: { type: string; payload?: unknown },
+) {
+  const wanted = action.payload as PartialState<NavigationState> | undefined;
+  if (action.type !== "RESET" || !state || !wanted?.routes) return false;
+  const leaf = (root: NavigationState | PartialState<NavigationState>) => {
+    let route = root.routes[root.index ?? root.routes.length - 1];
+    while (route?.state) {
+      const nested = route.state;
+      route = nested.routes[nested.index ?? nested.routes.length - 1];
+    }
+    return route;
+  };
+  const expected = leaf(wanted);
+  const actual = leaf(state);
+  return (
+    actual?.name === expected?.name &&
+    Object.entries(expected?.params ?? {}).every(([key, value]) =>
+      Object.is(
+        (actual?.params as Record<string, unknown> | undefined)?.[key],
+        value,
+      ),
+    )
+  );
+}
+
+/** Track the actual slab page independently from a Settings route above it. */
+export function workspaceContentIdentity(state: NavigationState | undefined) {
+  const workspace = state?.routes.find((route) => route.name === "Workspace");
+  const content = workspace?.state;
+  const page = content?.routes[content.index ?? content.routes.length - 1];
+  return JSON.stringify([page?.key, page?.name, page?.params]);
+}

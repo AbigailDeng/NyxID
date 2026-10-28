@@ -27,6 +27,11 @@ function setup(reduced = false) {
   const shared: { value: number }[] = [];
   let sharedCursor = 0;
   const springs: { target: number; complete: (done: boolean) => void }[] = [];
+  const timings: {
+    target: number;
+    config: any;
+    complete: (done: boolean) => void;
+  }[] = [];
   const focus: unknown[][] = [];
   let hardwareBack: (() => boolean) | undefined;
   let dismissed = 0;
@@ -97,6 +102,15 @@ function setup(reduced = false) {
       useAnimatedStyle: (read: () => unknown) => ({ read }),
       cancelAnimation() {},
       runOnJS: (callback: unknown) => callback,
+      Easing: { bezier: (...points: number[]) => points },
+      withTiming: (
+        target: number,
+        config: unknown,
+        complete: (done: boolean) => void,
+      ) => {
+        timings.push({ target, config, complete });
+        return target;
+      },
       withSpring: (
         target: number,
         _config: unknown,
@@ -172,6 +186,7 @@ function setup(reduced = false) {
     render,
     shared,
     springs,
+    timings,
     focus,
     changes,
     child,
@@ -180,7 +195,8 @@ function setup(reduced = false) {
     handlers: () => handlers,
     offset: () => shared[0]!.value,
     style: () => find("workspace-content-slab").props.style[2].read(),
-    lastComplete: (done = true) => springs.at(-1)!.complete(done),
+    lastComplete: (done = true) => timings.at(-1)!.complete(done),
+    springComplete: (done = true) => springs.at(-1)!.complete(done),
     counts: () => ({ dismissed, reveals }),
     hardwareBack: () => hardwareBack?.(),
   };
@@ -215,18 +231,18 @@ test("the stationary base and full-width translated slab retain the actual navig
 
 test("edge pan follows the finger, clamps travel and settles at the projected threshold", () => {
   const x = setup();
-  assert.deepEqual([...x.settings.activeOffsetX], [-8, 8]);
-  assert.deepEqual([...x.settings.failOffsetY], [-12, 12]);
-  let failures = 0;
-  x.handlers().onTouchesDown(
-    { allTouches: [{ x: 25 }] },
-    { fail: () => failures++ },
+  assert.equal(x.settings.activeOffsetX, 18);
+  assert.deepEqual([...x.settings.failOffsetY], [-10, 10]);
+  assert.equal(x.find("workspace-sidebar-reveal-edge").props.style.width, 24);
+  const detector = x.all().find((node) => node.type === "GestureDetector")!;
+  assert.equal(
+    detector.props.children.props.testID,
+    "workspace-sidebar-reveal-edge",
   );
-  x.handlers().onTouchesDown(
-    { allTouches: [{ x: 12 }] },
-    { fail: () => failures++ },
+  assert.ok(
+    !elements(detector).includes(x.child),
+    "no ancestor pan on content",
   );
-  assert.equal(failures, 1);
   x.handlers().onStart();
   x.render();
   x.handlers().onUpdate({ translationX: 155 });
@@ -237,7 +253,12 @@ test("edge pan follows the finger, clamps travel and settles at the projected th
   x.handlers().onEnd({ velocityX: 0 });
   x.render();
   assert.deepEqual(x.changes, [true]);
-  x.lastComplete();
+  x.springComplete();
+  assert.equal(
+    x.springs.length,
+    1,
+    "one settle, no timing restarted by the controlled commit",
+  );
   assert.equal(x.focus.filter((event) => event[0] === "focus").length, 1);
   x.handlers().onStart();
   x.render();
@@ -246,7 +267,7 @@ test("edge pan follows the finger, clamps travel and settles at the projected th
   x.handlers().onEnd({ velocityX: -100 });
   x.render();
   assert.equal(x.counts().dismissed, 0);
-  x.lastComplete();
+  x.springComplete();
   assert.equal(x.counts().dismissed, 1);
   x.harness.unmount();
 });
@@ -262,7 +283,7 @@ test("gesture cancellation restores the previous endpoint and disabling reveal p
   x.handlers().onFinalize({}, false);
   x.render();
   assert.deepEqual(x.changes, [false]);
-  x.lastComplete();
+  x.springComplete();
   assert.equal(x.counts().dismissed, 1);
   assert.ok(x.all().includes(x.child));
   x.harness.unmount();
@@ -274,7 +295,7 @@ test("sliver, Escape and Android Back request the same close; only settled curre
   x.lastComplete();
   x.find("workspace-sidebar-close-sliver").props.onPress();
   x.render();
-  const staleClose = x.springs.at(-1)!;
+  const staleClose = x.timings.at(-1)!;
   assert.equal(x.counts().dismissed, 0);
   x.set({ visible: true });
   staleClose.complete(true);
@@ -303,7 +324,7 @@ test("sign-out and unmount fence old animation callbacks and release focus owner
     const x = setup();
     x.set({ visible: true, presented: true });
     x.set({ visible: false });
-    const pending = x.springs.at(-1)!;
+    const pending = x.timings.at(-1)!;
     if (unmount) x.harness.unmount();
     else x.set({ enabled: false });
     pending.complete(true);
@@ -334,6 +355,7 @@ test("reduced motion uses instant endpoints without a spring or interactive trav
   await new Promise((resolve) => setTimeout(resolve, 5));
   assert.equal(x.counts().dismissed, 1);
   assert.equal(x.springs.length, 0);
+  assert.equal(x.timings.length, 0);
   x.harness.unmount();
 });
 
@@ -354,5 +376,68 @@ test("a nested dirty editor edge swipe requests guarded Back without translating
   x.handlers().onStart();
   x.handlers().onFinalize({}, false);
   assert.equal(backs, 1);
+  x.harness.unmount();
+});
+
+test("programmatic travel uses one 300ms curve and rejects pans until its current completion", () => {
+  const x = setup();
+  x.set({ visible: true, presented: true });
+  assert.equal(x.timings.length, 1);
+  assert.equal(x.timings[0]!.config.duration, 300);
+  assert.deepEqual([...x.timings[0]!.config.easing], [0.2, 0.8, 0.2, 1]);
+  assert.equal(x.settings.activeOffsetX, -18);
+  const detector = x.all().find((node) => node.type === "GestureDetector")!;
+  assert.equal(
+    detector.props.children.props.testID,
+    "workspace-sidebar-close-sliver",
+  );
+  let fails = 0;
+  x.handlers().onTouchesDown({}, { fail: () => fails++ });
+  x.handlers().onStart();
+  x.handlers().onUpdate({ translationX: -200 });
+  x.handlers().onEnd({ translationX: -200, velocityX: -700 });
+  assert.equal(fails, 1);
+  assert.equal(x.offset(), 310);
+  assert.equal(x.springs.length, 0);
+  x.lastComplete();
+  x.find("workspace-sidebar-close-sliver").props.onPress();
+  x.render();
+  x.render();
+  assert.equal(
+    x.timings.length,
+    2,
+    "one close animation despite repeated commits",
+  );
+  x.lastComplete();
+  assert.equal(x.counts().dismissed, 1);
+  x.harness.unmount();
+});
+
+test("Settings owns input and Back above the shell without changing its open offset or mounted sidebar", () => {
+  const x = setup();
+  x.set({ visible: true, presented: true });
+  x.lastComplete();
+  const timings = x.timings.length;
+  x.set({ obscured: true });
+  assert.equal(x.offset(), 310);
+  assert.equal(x.harness.value().props.pointerEvents, "none");
+  assert.equal(x.harness.value().props.accessibilityElementsHidden, true);
+  assert.equal(
+    x.hardwareBack(),
+    undefined,
+    "Settings handles Android Back first",
+  );
+  assert.ok(x.all().includes(x.sidebar));
+  assert.equal(
+    x.all().some((node) => node.type === "GestureDetector"),
+    false,
+  );
+  x.harness.value().props.onAccessibilityEscape();
+  assert.deepEqual(x.changes, []);
+  x.set({ obscured: false });
+  assert.equal(x.offset(), 310);
+  assert.equal(x.timings.length, timings);
+  assert.ok(x.all().includes(x.sidebar));
+  assert.equal(x.find("workspace-sidebar-base").props.pointerEvents, "auto");
   x.harness.unmount();
 });

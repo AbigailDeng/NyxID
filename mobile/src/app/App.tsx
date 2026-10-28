@@ -9,7 +9,13 @@ import { workspaceFocus } from "../lib/accessibility/workspaceFocus";
 import { StatusBar } from "expo-status-bar";
 import * as Notifications from "expo-notifications";
 import * as SplashScreen from "expo-splash-screen";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 // Keep the native splash visible until we've loaded fonts. The
 // expo-splash-screen plugin disables Expo's default auto-hide, so the
@@ -38,6 +44,7 @@ import {
 import NetInfo from "@react-native-community/netinfo";
 import {
   NavigationContainer,
+  type NavigationAction,
   NavigationState,
   PartialState,
   useNavigationContainerRef,
@@ -63,6 +70,8 @@ import {
 } from "./linking";
 import {
   isWorkspaceSidebarRoot,
+  workspaceDestinationMatches,
+  workspaceContentIdentity,
   challengeNavigationAction,
   workspaceNavigateAction,
 } from "./navigationHierarchy";
@@ -490,6 +499,8 @@ function ThemedAppShell({
   const { mode } = useTheme();
   const insets = useSafeAreaInsets();
   const { isAuthenticated } = useAuthSession();
+  const authenticatedNow = useRef(isAuthenticated);
+  authenticatedNow.current = isAuthenticated;
   const edgeBacks = useRef(new Map<symbol, () => void>());
   const [edgeBackRevision, setEdgeBackRevision] = useState(0);
   const onEdgeBackChange = useCallback<WorkspaceEdgeBackChange>((id, back) => {
@@ -504,13 +515,31 @@ function ThemedAppShell({
     useRef<ReturnType<typeof workspaceFocus.capture>>(undefined);
   const pendingMenuFocus =
     useRef<ReturnType<typeof workspaceFocus.capture>>(undefined);
-  const pendingDrawerNavigation = useRef<(() => void) | undefined>(undefined);
+  const pendingDrawerNavigation = useRef<NavigationAction | null>(null);
+  const didNavigate = useRef(false);
+  const priorSheet = useRef<{ open: boolean; content: string }>({
+    open: false,
+    content: "",
+  });
   const [currentChat, setCurrentChat] = useState<WorkspaceChatTarget>();
   const [accessibility, setAccessibility] = useState<WorkspaceAccessibility>({
     sheetOpen: false,
   });
   const trackCurrentRoute = () => {
-    const next = workspaceAccessibilityState(navigationRef.getRootState());
+    const state = navigationRef.getRootState();
+    const next = workspaceAccessibilityState(state);
+    const content = workspaceContentIdentity(state);
+    if (
+      (pendingDrawerNavigation.current &&
+        workspaceDestinationMatches(state, pendingDrawerNavigation.current)) ||
+      (priorSheet.current.open &&
+        !next.sheetOpen &&
+        content !== priorSheet.current.content)
+    ) {
+      didNavigate.current = true;
+      setDrawerOpen(false);
+    }
+    priorSheet.current = { open: next.sheetOpen, content };
     workspaceFocus.context(next.primaryKey, next.sheetOpen);
     setAccessibility(next);
     setCurrentRouteName(getActiveRouteName(navigationRef.getRootState()));
@@ -518,7 +547,8 @@ function ThemedAppShell({
   };
   useEffect(() => {
     if (!isAuthenticated) {
-      pendingDrawerNavigation.current = undefined;
+      pendingDrawerNavigation.current = null;
+      didNavigate.current = false;
       drawerOrigin.current = undefined;
       pendingMenuFocus.current = undefined;
       setDrawerOpen(false);
@@ -532,40 +562,50 @@ function ThemedAppShell({
     pendingMenuFocus.current = undefined;
     if (isAuthenticated) workspaceFocus.restore(origin);
   }, [drawerPresented, isAuthenticated]);
-  // Finish the slab's closing transition before dispatching a destination.
-  const closeDrawerThen = (navigate: () => void) => {
-    pendingDrawerNavigation.current = navigate;
-    setDrawerOpen(false);
+  // Options already disable inner native-stack animation while the sidebar is
+  // presented. Commit the guarded root swap first, then close the slab once.
+  const selectDestination = (action: NavigationAction | null) => {
+    if (
+      !authenticatedNow.current ||
+      !navigationRef.isReady() ||
+      !action ||
+      pendingDrawerNavigation.current ||
+      didNavigate.current
+    )
+      return;
+    pendingDrawerNavigation.current = action;
+    if (workspaceDestinationMatches(navigationRef.getRootState(), action)) {
+      didNavigate.current = true;
+      setDrawerOpen(false);
+    } else navigationRef.dispatch(action);
   };
   const onDrawerDismiss = useCallback(() => {
-    const navigate = pendingDrawerNavigation.current;
-    pendingDrawerNavigation.current = undefined;
-    pendingMenuFocus.current = navigate ? undefined : drawerOrigin.current;
+    pendingDrawerNavigation.current = null;
+    pendingMenuFocus.current = didNavigate.current
+      ? undefined
+      : drawerOrigin.current;
+    didNavigate.current = false;
     drawerOrigin.current = undefined;
     setDrawerPresented(false);
-    navigate?.();
   }, []);
   const navigateFromDrawer = (route: WorkspaceRoute) => {
+    if (!authenticatedNow.current || !navigationRef.isReady()) return;
     if (route === "Assistant") return openChatFromDrawer({ kind: "home" });
-    closeDrawerThen(() => {
-      if (!navigationRef.isReady()) return;
-      const action = workspaceNavigateAction(
-        route,
-        undefined,
-        navigationRef.getRootState(),
-      );
-      if (action) navigationRef.dispatch(action);
-    });
+    const action = workspaceNavigateAction(
+      route,
+      undefined,
+      navigationRef.getRootState(),
+    );
+    // The root native modal sits above the whole push shell. Neither its
+    // presentation nor its guarded dismissal changes the underlying offset.
+    if (route === "AccountSettings") navigationRef.dispatch(action);
+    else selectDestination(action);
   };
   const openChatFromDrawer = (target: WorkspaceChatTarget) => {
-    closeDrawerThen(() => {
-      if (!navigationRef.isReady()) return;
-      const action = workspaceChatNavigationAction(
-        navigationRef.getRootState(),
-        target,
+    if (navigationRef.isReady())
+      selectDestination(
+        workspaceChatNavigationAction(navigationRef.getRootState(), target),
       );
-      if (action) navigationRef.dispatch(action);
-    });
   };
 
   function revealSidebar() {
@@ -582,14 +622,15 @@ function ThemedAppShell({
         return;
       revealSidebar();
     }
-    setDrawerOpen(open);
+    if (!pendingDrawerNavigation.current) setDrawerOpen(open);
   }
 
-  return (
+  const renderWorkspace = (children: ReactNode) => (
     <WorkspacePushShell
       enabled={isAuthenticated}
       visible={drawerOpen}
       presented={drawerPresented}
+      obscured={accessibility.sheetOpen}
       gestureEnabled={
         !navigationBlocked &&
         !accessibility.sheetOpen &&
@@ -614,42 +655,36 @@ function ThemedAppShell({
             currentChat={currentChat}
             onOpenChat={openChatFromDrawer}
             onCreateAgent={() => {
-              closeDrawerThen(() => {
-                if (!navigationRef.isReady()) return;
-                navigationRef.dispatch(
+              if (navigationRef.isReady())
+                selectDestination(
                   workspaceNavigateAction(
                     "AgentCreate",
                     undefined,
                     navigationRef.getRootState(),
                   ),
                 );
-              });
             }}
             onCreateGroup={() => {
-              closeDrawerThen(() => {
-                if (!navigationRef.isReady()) return;
-                navigationRef.dispatch(
+              if (navigationRef.isReady())
+                selectDestination(
                   workspaceNavigateAction(
                     "GroupEditor",
                     undefined,
                     navigationRef.getRootState(),
                   ),
                 );
-              });
             }}
             onNavigate={navigateFromDrawer}
             onHome={() => navigateFromDrawer("Assistant")}
             onBrowse={(name) => {
-              closeDrawerThen(() => {
-                if (navigationRef.isReady())
-                  navigationRef.dispatch(
-                    workspaceNavigateAction(
-                      name,
-                      undefined,
-                      navigationRef.getRootState(),
-                    ),
-                  );
-              });
+              if (navigationRef.isReady())
+                selectDestination(
+                  workspaceNavigateAction(
+                    name,
+                    undefined,
+                    navigationRef.getRootState(),
+                  ),
+                );
             }}
           />
         ) : null
@@ -664,38 +699,48 @@ function ThemedAppShell({
           drawerPresented ? "no-hide-descendants" : "auto"
         }
       >
-        <NavigationContainer
-          ref={navigationRef}
-          linking={appLinking}
-          onReady={() => {
-            trackCurrentRoute();
-            flushPendingChallengeTapNavigation();
-          }}
-          onStateChange={() => {
-            trackCurrentRoute();
-            flushPendingChallengeTapNavigation();
-          }}
-        >
-          <StatusBar style={mode === "dark" ? "light" : "dark"} />
-          <WorkspaceAccessibilityContext.Provider value={accessibility}>
-            <AppNavigator
-              onOpenMenu={() => changeSidebar(true)}
-              onNavigationGuardChange={onNavigationGuardChange}
-              onEdgeBackChange={onEdgeBackChange}
-            />
-          </WorkspaceAccessibilityContext.Provider>
-        </NavigationContainer>
-        {/* ToastOverlay anchors to `top: 0` of its parent and relies on the
-          screen's SafeAreaView for inset. Mounted globally it has no such
-          parent, so give it explicit bounds below the notch. */}
-        <View
-          style={[pushToastStyles.overlay, { top: insets.top }]}
-          pointerEvents="box-none"
-        >
-          <ToastOverlay toast={pushToast} duration={6000} />
-        </View>
+        {children}
       </View>
     </WorkspacePushShell>
+  );
+  return (
+    <View style={appRootStyles.fill}>
+      <NavigationContainer
+        ref={navigationRef}
+        linking={appLinking}
+        onReady={() => {
+          trackCurrentRoute();
+          flushPendingChallengeTapNavigation();
+        }}
+        onStateChange={() => {
+          trackCurrentRoute();
+          flushPendingChallengeTapNavigation();
+        }}
+      >
+        <StatusBar style={mode === "dark" ? "light" : "dark"} />
+        <WorkspaceAccessibilityContext.Provider value={accessibility}>
+          <AppNavigator
+            onOpenMenu={() => changeSidebar(true)}
+            onNavigationGuardChange={onNavigationGuardChange}
+            onEdgeBackChange={onEdgeBackChange}
+            onNavigationCancelled={() => {
+              pendingDrawerNavigation.current = null;
+            }}
+            suppressWorkspaceAnimation={drawerPresented}
+            renderWorkspace={renderWorkspace}
+          />
+        </WorkspaceAccessibilityContext.Provider>
+      </NavigationContainer>
+      {/* ToastOverlay anchors to `top: 0` of its parent and relies on the
+          screen's SafeAreaView for inset. Mounted globally it has no such
+          parent, so give it explicit bounds below the notch. */}
+      <View
+        style={[pushToastStyles.overlay, { top: insets.top }]}
+        pointerEvents="box-none"
+      >
+        <ToastOverlay toast={pushToast} duration={6000} />
+      </View>
+    </View>
   );
 }
 

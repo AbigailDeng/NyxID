@@ -84,6 +84,9 @@ export type WorkspaceNavigationGuardChange = (
 export const WorkspaceNavigationGuardContext =
   createContext<WorkspaceNavigationGuardChange>(() => {});
 
+/** A cancelled leave attempt must also cancel its sidebar transition. */
+export const WorkspaceNavigationCancelledContext = createContext(() => {});
+
 export type WorkspaceEdgeBackChange = (id: symbol, back?: () => void) => void;
 export const WorkspaceEdgeBackContext = createContext<WorkspaceEdgeBackChange>(
   () => {},
@@ -265,6 +268,7 @@ export function useWorkspaceBack({
   const sheet = useContext(WorkspaceSheetContext);
   const onNavigationGuardChange = useContext(WorkspaceNavigationGuardContext);
   const onEdgeBackChange = useContext(WorkspaceEdgeBackContext);
+  const onNavigationCancelled = useContext(WorkspaceNavigationCancelledContext);
   const guardId = useRef(Symbol("workspace-navigation-guard"));
   const current = useRef({ onBack, disabled, focused, sessionActive });
   const confirmationPending = useRef(false);
@@ -396,8 +400,14 @@ export function useWorkspaceBack({
       };
       if (discardOnClose) {
         confirmationPending.current = true;
-        const cancel = () => {
+        let accepted = false;
+        const resetConfirmation = () => {
           confirmationPending.current = false;
+        };
+        const cancel = () => {
+          if (accepted) return;
+          resetConfirmation();
+          onNavigationCancelled();
         };
         Alert.alert(
           discardOnClose.title,
@@ -408,7 +418,8 @@ export function useWorkspaceBack({
               text: "Discard",
               style: "destructive",
               onPress: () => {
-                cancel();
+                accepted = true;
+                resetConfirmation();
                 proceed();
               },
             },

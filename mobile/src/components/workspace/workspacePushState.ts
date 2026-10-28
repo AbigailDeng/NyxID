@@ -23,3 +23,13 @@ export function settleSidebarOpen(
   const projected = clampSidebarOffset(offset + velocity * 0.15, width);
   return projected >= width * SIDEBAR_SETTLE_THRESHOLD;
 }
+
+/** A sidebar root swap travels only with the slab; nested pages still push. */
+export function workspaceContentAnimation(
+  reducedMotion: boolean,
+  sidebarPresented: boolean,
+) {
+  return reducedMotion || sidebarPresented
+    ? ("none" as const)
+    : ("slide_from_right" as const);
+}
