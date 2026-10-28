@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   attachmentSchema,
+  activitySchema,
   conversationIdSchema,
 } from "../assistant/assistantTypes";
 import { MAX_ASSISTANT_ATTACHMENTS } from "../assistant/assistantUploads";
@@ -56,14 +57,6 @@ export const groupSchema = z.object({
   created_at: instant,
 });
 export const groupListSchema = z.object({ groups: z.array(groupSchema) });
-const activity = z.object({
-  id: z.string(),
-  label: z.string(),
-  status: z.enum(["running", "completed", "error"]),
-  started_at: instant,
-  ended_at: instant.nullish(),
-  machine: z.record(z.string(), z.unknown()).nullish(),
-});
 export const groupFeedbackSchema = z.object({
   vote: z.enum(["up", "down"]),
   comment: z.string().nullable(),
@@ -93,7 +86,7 @@ export const groupMessageSchema = z.object({
   feedback: groupFeedbackSchema
     .partial({ comment: true, updated_at: true })
     .nullish(),
-  activities: z.array(activity).default([]),
+  activities: z.array(activitySchema).default([]),
   author: person.optional(),
   attachments: z.array(attachmentSchema).default([]),
   id: z.string().uuid(),

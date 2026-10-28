@@ -58,8 +58,8 @@ import {
   stripAttachmentMention,
   type AttachmentMention,
 } from "../assistant/assistantMentions";
-import { AssistantAttachmentView } from "../assistant/AssistantAttachmentView";
 import { AssistantActivityDisclosure } from "../assistant/AssistantActivityDisclosure";
+import { GroupMachineReceipts } from "./GroupMachineReceipts";
 import { AssistantReplyFeedback } from "../assistant/AssistantReplyFeedback";
 import { AssistantCopyButton } from "../assistant/AssistantCopyButton";
 import { assistantSelectableMarkdown } from "../assistant/assistantSelectableMarkdown";
@@ -941,9 +941,17 @@ function GroupMessage({
   const user = message.role === "user";
   if (message.role === "notice")
     return (
-      <Label muted selectable style={styles.notice}>
-        {message.text}
-      </Label>
+      <View>
+        <Label
+          muted
+          selectable
+          accessibilityLabel="Crew notice"
+          style={styles.notice}
+        >
+          {message.text}
+        </Label>
+        <GroupMachineReceipts groupId={group?.id} message={message} />
+      </View>
     );
   const link = (url: string) => {
     const safe = safeAssistantLinkUrl(url);
@@ -1056,13 +1064,7 @@ function GroupMessage({
           onToggle={onDisclosure}
         />
       )}
-      {message.attachments?.map((attachment) => (
-        <AssistantAttachmentView
-          key={attachment.id}
-          attachment={attachment}
-          groupId={group?.id}
-        />
-      ))}
+      <GroupMachineReceipts groupId={group?.id} message={message} />
       {message.role === "agent" && !!message.text.trim() && (
         <View style={styles.feedbackActions}>
           <AssistantCopyButton text={message.text} />

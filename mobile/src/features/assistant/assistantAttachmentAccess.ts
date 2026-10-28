@@ -8,7 +8,7 @@ import {
 export const ATTACHMENT_EXPIRED_MESSAGE =
   "Attachment expired per retention policy. Upload it again to continue.";
 export const IMAGE_INPUT_UNAVAILABLE_MESSAGE =
-  "Image received. This agent version cannot view it, or it exceeds its image limits. Try a smaller image.";
+  "Image received. This agent version cannot view it, or it exceeds its image limits. Ask your agent to save it to a machine, or try a smaller image.";
 export const ATTACHMENT_UNAVAILABLE_MESSAGE =
   "Attachment unavailable. Please try again or upload it again.";
 

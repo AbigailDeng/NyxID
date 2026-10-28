@@ -198,3 +198,11 @@ feedback keeps its existing guarded runtime. Details now opens Working context,
 which reads real checkpoint/pending-action state on demand, polls only active
 turns, links agent memory management and confirms reset through the existing
 context endpoint. Reset preserves the transcript and refreshes it afterward.
+
+Machine receipts render on private, crew agent and crew notice rows, with status,
+exit/byte metrics, expandable correlation IDs and screenshot association without
+duplicating the image. Private command receipts expose authenticated bounded
+saved excerpts and the real per-conversation future-excerpt preference. Inline
+tool/upload images use authenticated bytes in a private cache; blur, background,
+account changes and unmount abort reads and remove cached files. Documents keep
+native save/share. No Markdown image URL is fetched automatically.

@@ -209,6 +209,7 @@ export function AssistantScreen({
       conversation?.active_turn?.reply?.text ||
       ""
     : (conversation?.active_turn?.reply?.text ?? "");
+  const liveAttachments = conversation?.active_turn?.attachments ?? [];
   const liveActivities = conversation?.active_turn?.activities ?? [];
   const destroyed = conversation?.agent?.destroyed;
   const streamPersisted =
@@ -749,6 +750,7 @@ export function AssistantScreen({
               <MachineToolCard
                 key={`machine:${activity.id}`}
                 receipt={activity.machine!}
+                attachments={item.attachments}
                 conversationId={conversation.id}
                 onOpenDesktop={(params) =>
                   navigation.navigate("MachineDesktop", params)
@@ -786,13 +788,20 @@ export function AssistantScreen({
             {item.text}
           </Markdown>
         )}
-        {item.attachments.map((attachment) => (
-          <AssistantAttachmentView
-            key={attachment.id}
-            attachment={attachment}
-            conversationId={assistant.conversationId}
-          />
-        ))}
+        {item.attachments
+          .filter(
+            (attachment) =>
+              !item.activities.some(
+                (a) => a.machine?.screenshot_id === attachment.id,
+              ),
+          )
+          .map((attachment) => (
+            <AssistantAttachmentView
+              key={attachment.id}
+              attachment={attachment}
+              conversationId={assistant.conversationId}
+            />
+          ))}
         {!isUser ? (
           <AssistantMessageNotices
             message={item}
@@ -1119,6 +1128,7 @@ export function AssistantScreen({
                           <MachineToolCard
                             key={`machine:${activity.id}`}
                             receipt={activity.machine!}
+                            attachments={liveAttachments}
                             conversationId={conversation.id}
                             onOpenDesktop={(params) =>
                               navigation.navigate("MachineDesktop", params)
@@ -1135,6 +1145,23 @@ export function AssistantScreen({
                         {liveText}
                       </Markdown>
                     ) : null}
+                    {liveAttachments
+                      .filter(
+                        (a) =>
+                          !liveActivities.some(
+                            (tool) => tool.machine?.screenshot_id === a.id,
+                          ),
+                      )
+                      .map((a) => (
+                        <AssistantAttachmentView
+                          key={a.id}
+                          attachment={a}
+                          conversationId={
+                            assistant.conversationId ??
+                            assistant.live?.conversationId
+                          }
+                        />
+                      ))}
                     <AssistantTurnStatus
                       turn={conversation?.active_turn}
                       live={assistant.live}

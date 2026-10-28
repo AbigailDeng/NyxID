@@ -48,7 +48,7 @@ function deleteCache(cache: CachedAttachment | undefined) {
   }
 }
 
-/** Owner-only attachment reads happen on demand; no credential-bearing URLs. */
+/** Owner-only documents load on demand; visible images load inline; no credential-bearing URLs. */
 export function AssistantAttachmentView({
   attachment,
   conversationId,
@@ -69,7 +69,7 @@ export function AssistantAttachmentView({
       : conversationId && !groupId
         ? { kind: "conversations" as const, id: conversationId }
         : undefined;
-  const scope = `${epoch}:${target?.kind}:${target?.id}:${attachment.id}`;
+  const scope = `${epoch}:${target?.kind}:${target?.id}:${attachment.id}:${attachment.expired}`;
   const current = useRef({ scope, focused, isAuthenticated });
   current.current = { scope, focused, isAuthenticated };
   const mounted = useRef(false);
@@ -86,6 +86,10 @@ export function AssistantAttachmentView({
   >(undefined);
   const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
+  const [enlarged, setEnlarged] = useState(false);
+  const [foreground, setForeground] = useState(
+    AppState.currentState === "active",
+  );
   const [preview, setPreview] = useState<string>();
   const [error, setError] = useState<string>();
   const [expired, setExpired] = useState(false);
@@ -112,6 +116,7 @@ export function AssistantAttachmentView({
   useEffect(() => {
     mounted.current = true;
     setPreview(undefined);
+    setEnlarged(false);
     setBusy(false);
     setError(undefined);
     setExpired(false);
@@ -126,6 +131,7 @@ export function AssistantAttachmentView({
       // An external share target can background this app before it finishes
       // reading the file. Its own shareAsync completion owns that cleanup.
       // Scope/account/navigation cleanup still deletes it immediately.
+      setForeground(state === "active");
       if (state !== "background") return;
       const sharing = sharingFile.current;
       if (
@@ -144,9 +150,7 @@ export function AssistantAttachmentView({
   }, [cancel]);
 
   function closePreview() {
-    cancel();
-    setPreview(undefined);
-    setBusy(false);
+    setEnlarged(false);
   }
 
   async function open() {
@@ -243,8 +247,46 @@ export function AssistantAttachmentView({
     }
   }
 
+  useEffect(() => {
+    if (
+      image &&
+      foreground &&
+      focused &&
+      isAuthenticated &&
+      !attachment.expired
+    )
+      void open();
+    // Fetch is tied to the authenticated visible attachment, never a Markdown URL.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, image, foreground, focused, isAuthenticated]);
+
   return (
     <View style={styles.container}>
+      {image && preview && !unavailable ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Image from ${label}`}
+          onPress={() => setEnlarged(true)}
+          style={{ minHeight: 44 }}
+        >
+          <Image
+            accessibilityLabel={`Image from ${label}`}
+            source={{ uri: preview }}
+            resizeMode="contain"
+            style={{ width: "100%", height: 220, borderRadius: radius.md }}
+            onError={() => {
+              cancel();
+              setPreview(undefined);
+              setError(ATTACHMENT_UNAVAILABLE_MESSAGE);
+            }}
+          />
+        </Pressable>
+      ) : null}
+      {image && busy ? (
+        <Label muted accessibilityLiveRegion="polite">
+          Loading image from {label}
+        </Label>
+      ) : null}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${image ? "Preview" : "Open"} attachment ${label}`}
@@ -253,7 +295,7 @@ export function AssistantAttachmentView({
           busy,
         }}
         disabled={busy || unavailable || !target}
-        onPress={() => void open()}
+        onPress={() => (preview ? setEnlarged(true) : void open())}
         style={({ pressed }) => [
           styles.file,
           {
@@ -296,11 +338,13 @@ export function AssistantAttachmentView({
       )}
       {!unavailable && attachment.image_input === "unavailable" && (
         <Label muted style={styles.detail}>
-          {IMAGE_INPUT_UNAVAILABLE_MESSAGE}
+          {attachment.origin === "user_upload"
+            ? IMAGE_INPUT_UNAVAILABLE_MESSAGE
+            : "The agent couldn't view this image."}
         </Label>
       )}
       <Modal
-        visible={!!preview}
+        visible={enlarged && !!preview}
         animationType="fade"
         onRequestClose={closePreview}
       >
@@ -329,6 +373,8 @@ export function AssistantAttachmentView({
               style={styles.previewImage}
               onError={() => {
                 if (cached.current?.file?.uri !== preview) return;
+                cancel();
+                setPreview(undefined);
                 closePreview();
                 setError(ATTACHMENT_UNAVAILABLE_MESSAGE);
               }}
