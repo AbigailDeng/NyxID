@@ -217,6 +217,11 @@ function setup(
   const gesture = (dy: number, vy = 0, dx = 0): Gesture => ({ dx, dy, vy });
   return {
     panel,
+    rotate: (width: number, height: number, top: number) => {
+      dimensions = { width, height };
+      insetTop = top;
+      harness.render();
+    },
     present: () => harness.value().props.onLayout(),
     resolveMotion: () => {
       preference = reduced;
@@ -660,3 +665,22 @@ for (const entry of [
     }
   });
 }
+
+test("a sheet follows landscape dimensions and safe areas, then dismisses below the restored portrait screen", async () => {
+  const x = setup();
+  assert.equal(x.panel().props.style[1].height, 787);
+  x.rotate(844, 390, 0);
+  assert.equal(x.panel().props.style[1].height, 380);
+  let provider = x.all().find((node) => node.type === "SafeAreaProvider")!;
+  assert.deepEqual({ ...provider.props.initialMetrics.frame }, { x: 0, y: 10, width: 844, height: 380 });
+  assert.equal(x.offset().value, 0);
+  x.rotate(390, 844, 47);
+  assert.equal(x.panel().props.style[1].height, 787);
+  provider = x.all().find((node) => node.type === "SafeAreaProvider")!;
+  assert.deepEqual({ ...provider.props.initialMetrics.frame }, { x: 0, y: 57, width: 390, height: 787 });
+  assert.ok(x.all().includes(x.child), "rotation keeps the sheet's navigator mounted");
+  x.controller.current!.dismiss();
+  await x.harness.settle();
+  assert.equal(x.timings.at(-1)?.to, 844);
+  assert.equal(x.counts().allowedCloses, 1);
+});

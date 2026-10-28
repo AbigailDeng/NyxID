@@ -42,6 +42,8 @@
     <string>35</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
+    <key>EXDefaultScreenOrientationMask</key>
+    <string>UIInterfaceOrientationMaskPortrait</string>
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
     <key>LSRequiresIPhoneOS</key>
@@ -85,7 +87,8 @@
     <key>UISupportedInterfaceOrientations</key>
     <array>
       <string>UIInterfaceOrientationPortrait</string>
-      <string>UIInterfaceOrientationPortraitUpsideDown</string>
+      <string>UIInterfaceOrientationLandscapeLeft</string>
+      <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
     <key>UIUserInterfaceStyle</key>
     <string>Automatic</string>

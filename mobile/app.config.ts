@@ -74,6 +74,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       associatedDomains,
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
+        UISupportedInterfaceOrientations: [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationLandscapeLeft",
+          "UIInterfaceOrientationLandscapeRight",
+        ],
         NSCameraUsageDescription:
           "Allow NyxID to scan login approval QR codes and take photos to attach in chats.",
         NSMicrophoneUsageDescription:
@@ -99,6 +104,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       intentFilters: androidIntentFilters,
     },
     plugins: [
+      ["expo-screen-orientation", { initialOrientation: "PORTRAIT_UP" }],
       [
         "expo-image-picker",
         {

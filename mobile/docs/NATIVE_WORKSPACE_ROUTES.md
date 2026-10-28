@@ -32,7 +32,7 @@ transient interactions, rather than workspace destinations.
 | Sheet / DeviceLogin, AgentKeyLogin                                                   | QR, terminal and Agent Key sign-in flows with existing write guards.                                                                       |
 | Sheet / TermsOfService, PrivacyPolicy                                                | Signed-in legal documents.                                                                                                                 |
 | Root / Workspace, WorkspaceSheet                                                     | Main signed-in shell and the account/quick-action sheet host above it.                                                                     |
-| Root / MachineDesktop                                                                | Full-screen desktop viewer.                                                                                                                |
+| Root / MachineDesktop                                                                | Full-screen native desktop; landscape while focused/active, upright portrait restored on exit/background. No desktop web fallback.          |
 | Root / Auth, DeviceLogin, AgentKeyLogin, TermsOfService, PrivacyPolicy               | Signed-out authentication and shared canonical entries; signed-in wrappers resolve into the account sheet.                                 |
 
 Chat Details, History and Working context are nested content pages. History

@@ -12,8 +12,6 @@ import {
 import { MachineDesktopScreen } from "./desktop/MachineDesktopScreen";
 import { desktopRouteParams } from "./desktopEntry";
 import { desktopPrivacyQueue, type DesktopPrivacy } from "./desktopPrivacy";
-import { desktopWebPath } from "./desktop/desktopRoutes";
-import { openMachineWeb } from "./MachineUI";
 
 export function MachineDesktopRoute({
   route,
@@ -40,7 +38,7 @@ export function MachineDesktopRoute({
     }).catch(() => {
       if (mounted)
         setError(
-          "Desktop privacy protection is unavailable. Install the current development build or open the desktop on the web.",
+          "Desktop privacy protection is unavailable. Install the current development build and try again.",
         );
     });
     return () => {
@@ -77,19 +75,6 @@ export function MachineDesktopRoute({
           <Label muted>Protecting desktop privacy…</Label>
         )}
         <ActionButton label="Close desktop" onPress={navigation.goBack} />
-        {error && (
-          <ActionButton
-            label="Open desktop on web"
-            variant="secondary"
-            onPress={() =>
-              void openMachineWeb(desktopWebPath(params)).catch(() =>
-                setError(
-                  "Could not open the web desktop. Close this view and try again.",
-                ),
-              )
-            }
-          />
-        )}
       </WorkspacePage>
     );
   return (

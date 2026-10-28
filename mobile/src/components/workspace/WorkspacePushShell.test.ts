@@ -23,6 +23,7 @@ function elements(root: Element): Element[] {
   ];
 }
 function setup(reduced = false) {
+  let dimensions = { width: 402, height: 874 };
   let props: Record<string, any>;
   const shared: { value: number }[] = [];
   let sharedCursor = 0;
@@ -68,7 +69,7 @@ function setup(reduced = false) {
     "react-native": {
       View: "View",
       Pressable: "Pressable",
-      useWindowDimensions: () => ({ width: 402, height: 874 }),
+      useWindowDimensions: () => dimensions,
       StyleSheet: {
         create: (styles: unknown) => styles,
         absoluteFill: {
@@ -196,6 +197,10 @@ function setup(reduced = false) {
     all,
     find,
     set,
+    rotate: (width: number, height: number) => {
+      dimensions = { width, height };
+      render();
+    },
     render,
     shared,
     springs,
@@ -625,4 +630,29 @@ test("UI endpoint reconciliation survives a missed completion and rejects an old
     false,
   );
   x.harness.unmount();
+});
+
+test("desktop rotation and portrait return retarget the sidebar without losing its content or settled access", () => {
+  const x = setup();
+  x.set({ visible: true, presented: true });
+  x.lastComplete();
+  x.set({ obscured: true });
+  x.rotate(874, 402);
+  assert.equal(x.find("workspace-sidebar-base").props.style[1].width, sidebarPushWidth(874));
+  assert.equal(x.style().transform[0].translateX, sidebarPushWidth(874));
+  x.lastComplete();
+  assert.equal(x.find("workspace-sidebar-base").props.pointerEvents, "none");
+  x.rotate(402, 874);
+  x.lastComplete();
+  x.set({ obscured: false });
+  assert.equal(x.style().transform[0].translateX, 310);
+  assert.equal(x.find("workspace-sidebar-base").props.accessibilityElementsHidden, false);
+  assert.equal(x.find("workspace-sidebar-base").props.pointerEvents, "auto");
+  assert.ok(x.all().includes(x.child));
+  x.set({ visible: false });
+  x.lastComplete();
+  assert.equal(x.style().transform[0].translateX, 0);
+  assert.equal(x.opacity(), 1);
+  assert.equal(x.find("workspace-slab-content").props.accessibilityElementsHidden, false);
+  assert.equal(x.counts().dismissed, 1);
 });

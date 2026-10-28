@@ -61,7 +61,7 @@ Artifacts/Assistant Activity/folder placeholders are not treated as new durable 
 
 Agent details include a dedicated machine access drawer page. It uses revisioned agent-machine APIs with five capability switches, preserves saved-login scope and service grants, and requires browser access for computer/developer browser. Selection-required, shared legacy, separation refusal, revocation, delivery and quarantine remain visible. Context changes request an owner action card; requesting does not apply the change. The context-request endpoint snapshots the live assignment on the server rather than trusting the submitted selection; the client rereads revision/ownership before dispatch. External API-key/OAuth machine grants remain deferred.
 
-The desktop viewer is registered as a full-screen root route outside the management drawer. Detail entries use live session/context metadata; chat machine receipts open only their linked conversation sessions and preserve context/display selectors. Native capture prevention and app-switcher protection are prerequisites to mounting the viewer; older development binaries fail closed for this route. Stream B owns desktop transport/rendering and backend admission. Native frame performance, app-switcher snapshots, Android and production proxy behavior remain release gates until device evidence is recorded.
+The desktop viewer is registered as a full-screen root route outside the management drawer. It requests landscape while focused and active, and restores upright portrait on blur, background or unmount through a serialized native orientation helper. All other screens default to upright portrait. Detail entries use live session/context metadata; chat machine receipts open only their linked conversation sessions and preserve context/display selectors. Desktop entries and errors remain native; there is no desktop web fallback (user decision, 2026-10-28). Native capture prevention and app-switcher protection are prerequisites to mounting the viewer; older development binaries fail closed for this route. Stream B owns desktop transport/rendering and backend admission. Native frame performance, app-switcher snapshots, Android and production proxy behavior remain release gates until device evidence is recorded.
 
 The [native route inventory](NATIVE_WORKSPACE_ROUTES.md) enumerates every module,
 management stack registration, shared auth/legal entry, cold fallback and
@@ -117,8 +117,9 @@ Crew dictation is unavailable, matching web's conversation-only contract.
 Eligible private chats also expose the waveform action for voice-session
 conversation. Real provider transcription/audio requires a real authenticated
 backend; fixtures and JS tests prove only the transport/lifecycle.
-No iOS orientation/tablet support, RN-web, native rail
-or live desktop capability was added.
+Tablet support, RN-web and the web's collapsible desktop rail are outside this
+native phone scope. The full-screen desktop's landscape capability is described
+above.
 
 The side menu expands one agent's saved threads directly beneath its row, newest
 first, with a shallow guide line, relative times, Current, Needs you and Running
@@ -301,6 +302,15 @@ exclusive to the logo and Chat pill; removed coming-soon items are not indexed.
 Settings results open the existing account sheet. See all adds title search,
 per-agent filtering and cursor pagination, preserving exact chat/crew identity.
 Keyboard dismissal, saved offline data and account/focus fences apply to both.
+
+Web reference checked at `ee98263f1` (#2064): Search uses the same conversation,
+agent and crew sources and all-words matching, with eight initial recents. Its
+dialog/keyboard shortcut and collapsible desktop rail differ from the native
+main-content Search and 77% push shell by the user's phone navigation decision.
+Native pages retain the user's later choices: Home only through the logo/Chat
+pill, Activity instead of Approvals, no coming-soon or Studio destinations,
+sidebar QR/Terminal actions, and 16pt primary section headings. Native See all
+also pages beyond the web Search dialog's first 50 chats and filters by agent.
 
 
 The separate Voice settings shortcut is deliberately omitted by user decision

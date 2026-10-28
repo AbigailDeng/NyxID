@@ -214,7 +214,6 @@ export function MachinesScreen({
         <MachineDetails
           node={node}
           update={update}
-          onWeb={() => void handoff(machineWebPath(node.id))}
           onPolicy={() =>
             navigation.navigate("MachinePolicy", {
               machineId: node.id,
@@ -232,14 +231,12 @@ export function MachinesScreen({
 export function MachineDetails({
   node,
   update,
-  onWeb,
   onPolicy,
   onActivity,
   onDesktop,
 }: {
   node: MachineNode;
   update?: MachineUpdate;
-  onWeb: () => void;
   onPolicy: () => void;
   onActivity: () => void;
   onDesktop: (params: MachineDesktopParams) => void;
@@ -334,12 +331,6 @@ export function MachineDetails({
             label="Machine activity"
             variant="secondary"
             onPress={onActivity}
-          />
-          <ActionButton
-            compact
-            label="Open machine on web"
-            variant="secondary"
-            onPress={onWeb}
           />
         </View>
         <MachineDesktopEntries nodeId={node.id} onOpen={onDesktop} />

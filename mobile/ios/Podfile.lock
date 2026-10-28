@@ -246,6 +246,29 @@ PODS:
     - ExpoModulesCore
   - ExpoScreenCapture (55.0.18):
     - ExpoModulesCore
+  - ExpoScreenOrientation (55.0.20):
+    - ExpoModulesCore
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - ExpoSecureStore (55.0.12):
     - ExpoModulesCore
   - ExpoSharing (55.0.24):
@@ -2487,6 +2510,7 @@ DEPENDENCIES:
   - ExpoModulesJSI (from `../node_modules/expo-modules-core`)
   - ExpoNotifications (from `../node_modules/expo-notifications/ios`)
   - ExpoScreenCapture (from `../node_modules/expo-screen-capture/ios`)
+  - ExpoScreenOrientation (from `../node_modules/expo-screen-orientation/ios`)
   - ExpoSecureStore (from `../node_modules/expo-secure-store/ios`)
   - ExpoSharing (from `../node_modules/expo-sharing/ios`)
   - ExpoSplashScreen (from `../node_modules/expo-splash-screen/ios`)
@@ -2644,6 +2668,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-notifications/ios"
   ExpoScreenCapture:
     :path: "../node_modules/expo-screen-capture/ios"
+  ExpoScreenOrientation:
+    :path: "../node_modules/expo-screen-orientation/ios"
   ExpoSecureStore:
     :path: "../node_modules/expo-secure-store/ios"
   ExpoSharing:
@@ -2853,6 +2879,7 @@ SPEC CHECKSUMS:
   ExpoModulesJSI: 0dcd06b8d4b92826d30f52947a03a78f7590b604
   ExpoNotifications: 1d552063bcd769c237c73dfada0abecdef097620
   ExpoScreenCapture: f70b9fd607ffb46c43cd5322a9ab83633f296a0b
+  ExpoScreenOrientation: 706f29544097439de71cea5b9a4352bc6cb8f0a6
   ExpoSecureStore: f5fb965b5aca826e86473bf738948ab50cca66cd
   ExpoSharing: f628ba7d9d0bf72cf624ebb60d2e69de07fbc241
   ExpoSplashScreen: 3e64eed7a300d4e1131e8b419b5cea6e604adba7
