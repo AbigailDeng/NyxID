@@ -4,7 +4,7 @@ use crate::{
     AppState,
     errors::{AppError, AppResult},
     models::{machine_desktop::MachineDesktop, node::Node},
-    mw::auth::AuthUser,
+    mw::auth::{AuthMethod, AuthUser},
     services::{
         assistant_nyxagent as engine, audit_service, machine_desktop_service as desktop,
         node_service, org_service,
@@ -246,6 +246,68 @@ async fn stop(state: &AppState, row: &MachineDesktop) -> AppResult<()> {
     }
 }
 
+/// Desktop bearer admission uses verified extractor fields, never JWT peeks.
+/// Explicit credentials must be one nonempty Bearer AccessToken for a live
+/// first-party person session with unrestricted service/node/resource authority.
+/// Cookies cannot rescue malformed/invalid bearers. Only this non-ambient
+/// credential may omit Origin or use BASE_URL's origin (Android's default).
+/// Ambient cookie sessions retain the exact frontend-Origin requirement.
+fn admit(state: &AppState, auth: &AuthUser, headers: &HeaderMap) -> AppResult<()> {
+    super::login_client_context::require_first_party_human(auth)?;
+    let denied = || AppError::Forbidden("Desktop authentication or origin refused".into());
+    let mut authorization = headers.get_all("authorization").iter();
+    let bearer = if let Some(header) = authorization.next() {
+        if authorization.next().is_some()
+            || !header
+                .to_str()
+                .ok()
+                .and_then(|s| s.strip_prefix("Bearer "))
+                .is_some_and(|token| {
+                    !token.is_empty() && !token.bytes().any(|b| b.is_ascii_whitespace())
+                })
+            || auth.auth_method != AuthMethod::AccessToken
+            || auth.session_id.is_none()
+            || auth.mfa_enabled.is_none()
+            || !auth.allow_all_services
+            || !auth.allow_all_nodes
+            || !auth.allowed_service_ids.is_empty()
+            || !auth.allowed_node_ids.is_empty()
+            || auth.resource_uris.is_some()
+        {
+            return Err(denied());
+        }
+        true
+    } else {
+        if auth.auth_method != AuthMethod::Session {
+            return Err(denied());
+        }
+        false
+    };
+    let mut origins = headers.get_all("origin").iter();
+    let origin = origins.next();
+    if origins.next().is_some() {
+        return Err(denied());
+    }
+    let Some(origin) = origin else {
+        return if bearer { Ok(()) } else { Err(denied()) };
+    };
+    let origin = origin.to_str().map_err(|_| denied())?;
+    if origin.is_empty() || origin == "null" {
+        return Err(denied());
+    }
+    let frontend = url::Url::parse(&state.config.frontend_url)
+        .map_err(|_| AppError::Internal("Frontend origin unavailable".into()))?;
+    let api = url::Url::parse(&state.config.base_url)
+        .map_err(|_| AppError::Internal("API origin unavailable".into()))?;
+    if origin == frontend.origin().ascii_serialization()
+        || (bearer && origin == api.origin().ascii_serialization())
+    {
+        Ok(())
+    } else {
+        Err(denied())
+    }
+}
+
 pub async fn upgrade(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -254,16 +316,7 @@ pub async fn upgrade(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> AppResult<Response> {
-    super::login_client_context::require_first_party_human(&auth)?;
-    let origin = headers
-        .get("origin")
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| AppError::Forbidden("Desktop requires a browser origin".into()))?;
-    let configured = url::Url::parse(&state.config.frontend_url)
-        .map_err(|_| AppError::Internal("Frontend origin unavailable".into()))?;
-    if origin != configured.origin().ascii_serialization() {
-        return Err(AppError::Forbidden("Desktop origin refused".into()));
-    }
+    admit(&state, &auth, &headers)?;
     let owner = auth.user_id.to_string();
     let node = authorized(&state, &owner, &node).await?;
     authorized_context(&state, &node, &owner, query.context_id.as_deref()).await?;
@@ -297,6 +350,7 @@ pub async fn upgrade(
                 node,
                 row,
                 owner,
+                auth.session_id,
                 zeroize::Zeroizing::new(secret.to_vec()),
                 socket,
             )
@@ -344,15 +398,67 @@ async fn send_json(socket: &mut WebSocket, value: Value) -> bool {
         .is_ok()
 }
 
+async fn live_session(state: &AppState, actor: &str, id: uuid::Uuid) -> AppResult<bool> {
+    use crate::models::{
+        session::{COLLECTION_NAME as SESSIONS, Session},
+        user::{COLLECTION_NAME as USERS, User, UserType},
+    };
+    use mongodb::bson::doc;
+    let Some(user) = state
+        .db
+        .collection::<User>(USERS)
+        .find_one(doc! {"_id": actor, "is_active": true})
+        .await?
+    else {
+        return Ok(false);
+    };
+    let Some(session) = state
+        .db
+        .collection::<Session>(SESSIONS)
+        .find_one(crate::services::session_authority::authenticated(doc! {
+            "_id": id.to_string(), "user_id": actor, "revoked": false,
+            "expires_at": {"$gt": bson::DateTime::from_chrono(Utc::now())}
+        }))
+        .await?
+    else {
+        return Ok(false);
+    };
+    Ok(user.user_type == UserType::Person
+        && (!user.mfa_enabled || crate::services::session_authority::satisfies_mfa(&session)))
+}
+
 async fn relay(
     state: AppState,
     node: Node,
     mut row: MachineDesktop,
     requester: String,
+    session_id: Option<uuid::Uuid>,
     secret: zeroize::Zeroizing<Vec<u8>>,
     mut socket: WebSocket,
 ) {
     let viewer = uuid::Uuid::new_v4().to_string();
+    let mut started = false;
+    // Watch initial setup as well as established relay I/O: even the first
+    // node command may stall beyond the session revalidation deadline.
+    let session_ended = async {
+        let Some(id) = session_id else {
+            return std::future::pending::<()>().await;
+        };
+        let mut interval = tokio::time::interval(Duration::from_secs(10));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            if !tokio::time::timeout(Duration::from_secs(3), live_session(&state, &requester, id))
+                .await
+                .is_ok_and(|result| result.unwrap_or(false))
+            {
+                return;
+            }
+        }
+    };
+    let session_failed = tokio::select! {
+        _ = session_ended => true,
+        _ = async {
     if authorized_context(&state, &node, &requester, row.context_id.as_deref())
         .await
         .is_err()
@@ -379,6 +485,7 @@ async fn relay(
         return;
     }
     audit(&state, &row, "session_start");
+    started = true;
     if !send_json(
         &mut socket,
         json!({
@@ -402,18 +509,6 @@ async fn relay(
     let mut quota = (Instant::now(), 0usize);
     loop {
         tokio::select! {
-            frame = frames.recv() => match frame {
-                Some(bytes) => {
-                    let sent = tokio::time::timeout(
-                        Duration::from_secs(3),
-                        socket.send(Message::Binary(bytes.as_ref().clone().into())),
-                    ).await;
-                    if !sent.is_ok_and(|result| result.is_ok()) {
-                        break;
-                    }
-                }
-                None => break,
-            },
             _ = heartbeat.tick() => {
                 let Ok(current_node) = authorized(&state, &requester, &node.id).await else {
                     break;
@@ -462,6 +557,18 @@ async fn relay(
                 {
                     break;
                 }
+            },
+            frame = frames.recv() => match frame {
+                Some(bytes) => {
+                    let sent = tokio::time::timeout(
+                        Duration::from_secs(3),
+                        socket.send(Message::Binary(bytes.as_ref().clone().into())),
+                    ).await;
+                    if !sent.is_ok_and(|result| result.is_ok()) {
+                        break;
+                    }
+                }
+                None => break,
             },
             incoming = socket.next() => {
                 let Some(Ok(message)) = incoming else {
@@ -655,7 +762,21 @@ async fn relay(
             }
         }
     }
-    audit(&state, &row, "session_end");
+        } => false,
+    };
+    if session_failed {
+        let _ = tokio::time::timeout(
+            Duration::from_secs(3),
+            socket.send(Message::Close(Some(axum::extract::ws::CloseFrame {
+                code: 1008,
+                reason: "Desktop session ended".into(),
+            }))),
+        )
+        .await;
+    }
+    if started {
+        audit(&state, &row, "session_end");
+    }
 }
 
 fn audit(state: &AppState, row: &MachineDesktop, outcome: &str) {
@@ -875,8 +996,6 @@ mod tests {
         let mut developer = crate::test_utils::test_auth_user(&f.owner);
         developer.auth_method = crate::mw::auth::AuthMethod::AccessToken;
         developer.oauth_client_id = Some("developer-app".into());
-        let mut first_party = crate::test_utils::test_auth_user(&f.owner);
-        first_party.auth_method = crate::mw::auth::AuthMethod::AccessToken;
         for (auth, request_origin, expected) in [
             (
                 crate::test_utils::test_auth_user(&f.owner),
@@ -895,7 +1014,6 @@ mod tests {
             ),
             (f.auth.clone(), origin.clone(), 403),
             (developer, origin.clone(), 403),
-            (first_party, origin, 101),
         ] {
             let app = Router::new()
                 .route(
@@ -1321,3 +1439,7 @@ mod tests {
         f.state.db.drop().await.unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "machine_desktop_auth_tests.rs"]
+mod auth_tests;

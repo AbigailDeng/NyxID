@@ -585,6 +585,26 @@ logging to a website and then hand back the control to nyxbot".
   - Cross-replica: follow the existing browser SSH terminal (`/ssh/{id}/terminal`)
     and node dispatch patterns, so the browser and the node can be on different
     replicas.
+- **Native desktop admission.** The upgrade uses the real auth extractor and
+  first-party-human rejection layers. An explicit Authorization header must be
+  exactly one nonempty `Bearer` credential verified as an `AccessToken`, with
+  no OAuth client, acting client or API key identity; a present live authenticated
+  session (`sid`); verified person provenance; unrestricted service/node authority
+  and no resource restriction. This credential may omit Origin or send exactly
+  the configured frontend or `BASE_URL` origin (Android's transport default).
+  Null, empty, duplicate, malformed and unrelated Origins are refused. Origins
+  come from server configuration, never Host or forwarded headers. Cookie auth
+  still requires exactly the frontend origin. Bearer identity wins over cookies;
+  invalid or malformed explicit credentials cannot fall back to a valid cookie.
+  Node write ACL, capability, conversation and context checks still apply.
+  The relay revalidates the session, active person and current MFA policy every
+  ten seconds, with a three-second timeout that fails closed. This check runs
+  independently of initial setup and relay I/O, so even the first node command
+  cannot extend authority when it stalls.
+  Session revocation/expiry stops forwarding within thirteen seconds, including
+  the validation timeout. The policy close send has its own three-second bound.
+  A session failure closes with WebSocket policy code 1008. Closing a viewer
+  releases only its connection; it does not Stop or take/hand back control.
 - **Sessions.**
   - Desktop sessions start on demand (the panel opens, or the agent uses
     computer tools) and end when no viewer and no agent activity remain, after
