@@ -4,6 +4,7 @@ import {
 } from "./AssistantPendingState";
 import { AssistantSystemMessage } from "./AssistantSystemMessage";
 import { AssistantLinkContext } from "./AssistantLinkContext";
+import { AssistantComposerSettings } from "./AssistantComposerSettings";
 import { transcriptColumnStyle } from "../display/chatLayout";
 import { newAssistantChatParams } from "../../app/assistantChatParams";
 import { assistantDraftKey, assistantDraftStore } from "./assistantDraftStore";
@@ -310,8 +311,7 @@ export function AssistantScreen({
     !assistant.agentId ||
     ((assistant.sending || uploads.session.sending) &&
       !assistant.conversationId);
-  const modelLocked =
-    !!assistant.conversationId || assistant.sending || uploads.session.sending;
+  const modelLocked = running || uploads.session.sending;
   const headerDisabled =
     assistant.loading ||
     ((assistant.sending || uploads.session.sending) &&
@@ -338,7 +338,7 @@ export function AssistantScreen({
   const voiceFeatures = useQuery({
     queryKey: ["workspace", "voice-features", getAuthEpoch()],
     queryFn: ({ signal }) => assistantVoiceFeatures(signal),
-    enabled: NATIVE_VOICE_ENTRY_ENABLED && assistant.online,
+    enabled: assistant.online,
     retry: false,
     staleTime: 30000,
   });
@@ -1293,6 +1293,33 @@ export function AssistantScreen({
                   onPress={uploads.choose}
                 />
                 {mentionAction}
+                <AssistantComposerSettings
+                  scope={`${getAuthEpoch()}:${draftKey}`}
+                  conversationId={assistant.conversationId}
+                  model={currentModelId}
+                  agentOverride={assistant.agent?.access_mode_override}
+                  advanced={
+                    voiceFeatures.data?.includes("assistant:model-controls") ===
+                    true
+                  }
+                  activeTurn={modelLocked}
+                  disabled={
+                    !assistant.online ||
+                    !assistant.agent ||
+                    !!destroyed ||
+                    assistant.loading ||
+                    assistant.recoveryRequired ||
+                    uploads.picking ||
+                    openingVoice ||
+                    !!voiceThread
+                  }
+                  visible={sheet === "model"}
+                  onOpenChange={(open) => setSheet(open ? "model" : undefined)}
+                  onModelChanged={(model) => {
+                    assistant.setModel(model);
+                    if (assistant.conversationId) void assistant.recover();
+                  }}
+                />
                 <View style={{ flex: 1 }} />
                 <ComposerDictationButton
                   dictation={dictation}
@@ -1353,7 +1380,7 @@ export function AssistantScreen({
       </View>
 
       <Sheet
-        visible={!!sheet}
+        visible={!!sheet && sheet !== "model"}
         scroll={sheet !== "agents"}
         title={
           sheet === "agents"
@@ -1553,44 +1580,6 @@ export function AssistantScreen({
             ) : null}
           </>
         ) : null}
-        {sheet === "model" ? (
-          <>
-            {assistant.models.length ? (
-              assistant.models.map((item) => (
-                <Pressable
-                  key={item.id}
-                  accessibilityRole="button"
-                  disabled={!item.available || modelLocked}
-                  onPress={() => {
-                    if (modelLocked) return;
-                    assistant.setModel(item.id);
-                    setSheet(undefined);
-                  }}
-                >
-                  <Card>
-                    <Label
-                      style={{
-                        color:
-                          item.id === assistant.model
-                            ? colors.primaryOnTint
-                            : colors.textPrimary,
-                      }}
-                    >
-                      {item.label}
-                      {item.id === assistant.model ? " · Selected" : ""}
-                    </Label>
-                    {item.description ? (
-                      <Label muted>{item.description}</Label>
-                    ) : null}
-                    {!item.available ? <Label muted>Unavailable</Label> : null}
-                  </Card>
-                </Pressable>
-              ))
-            ) : (
-              <Notice message="Model choices are unavailable. The default assistant model will be used." />
-            )}
-          </>
-        ) : null}
         {sheet === "context" && assistant.conversationId ? (
           <AssistantWorkingContext
             key={assistant.conversationId}
@@ -1635,19 +1624,17 @@ export function AssistantScreen({
               <Label>{currentModelLabel}</Label>
               <Label muted>
                 {assistant.conversationId
-                  ? "The model used by this saved chat. Model selection is available when starting a new chat."
+                  ? "The model used by this saved chat. Changes apply to its next reply."
                   : "Choose the model for this new chat."}
               </Label>
-              {!assistant.conversationId ? (
-                <ActionButton
-                  label="Choose model"
-                  variant="secondary"
-                  disabled={modelLocked}
-                  onPress={() => {
-                    setSheet("model");
-                  }}
-                />
-              ) : null}
+              <ActionButton
+                label="Model and permissions"
+                variant="secondary"
+                disabled={modelLocked}
+                onPress={() => {
+                  setSheet("model");
+                }}
+              />
             </Card>
             {currentAgent?.id ? (
               <ActionButton

@@ -50,7 +50,7 @@ an explicit “Continue on the web” handoff, preserving its path and query par
 
 The following existing Web capabilities are **not yet migrated** by this first increment:
 
-- Chat steering submission, feedback, and switching an existing thread's model. Historical steering may be displayed, but those editing/input paths are not implemented. Conversation and crew attachment upload/download/preview are included; native reply voting is omitted by user decision (2026-10-28).
+- Chat steering submission remains a follow-up. Historical steering may be displayed. Conversation and crew attachment upload/download/preview are included; native reply voting is omitted by user decision (2026-10-28).
 - Operation-level grants, native advanced Triggers rotation/delivery replay and full Channel management. Automations links to Web Triggers for secret rotation and delivery history/replay. Native exact-version Skills and Learning review/publication are implemented.
 - Organization creation/membership/invites and organization resource creation beyond the crew journey, Billing and hosted checkout, full Studio resources including service pools/Agent Keys, Developer OAuth apps and role-gated Admin modules.
 - Credential Nodes and SSH management/native terminal, specialized device-code/BYO OAuth/SSH connection setup, OAuth scope editing and full shared-grant cascade review. These currently require the corresponding Web setup.
@@ -231,3 +231,12 @@ dismiss each request error independently, and show the web offline/unreachable /
 three-second reconnected copy. Transport observations ignore aborted, stale
 account and superseded failures. Assistant output uses the exact web XML/DSML
 function-call sanitizer before display/copy; user input is left intact.
+
+The private/contextual composer shows the effective owner permission mode (Full
+access / Auto / Ask every time); a per-agent override is displayed and read-only
+here. Only the existing human agent editor changes an override. The owner mode
+uses PUT /assistant/nyxagent/settings with access_mode alone, directly as on Web
+(no extra Full access confirmation). Changes lock during active work or a pending
+write. Default controls offer Thinking (chat/research); assistant:model-controls
+exposes the real model list and read-only Reasoning unavailable state. Saved
+threads use the existing model PATCH; drafts retain a local model selection.

@@ -254,6 +254,9 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     },
     "./AssistantSystemMessage": { AssistantSystemMessage: "SystemMessage" },
     "./AssistantMarkdownBody": { AssistantMarkdownBody: "Markdown" },
+    "./AssistantComposerSettings": {
+      AssistantComposerSettings: "ComposerSettings",
+    },
     "react-native-markdown-display": {
       default: "Markdown",
       MarkdownIt: () => ({}),
@@ -1629,4 +1632,35 @@ test("private/contextual transcript viewport spans the safe area while content k
     viewport.props.children.some((n: any) => n?.type === "ScrollEdgeFades"),
   );
   x.harness.unmount();
+});
+
+test("private and contextual composers bind permissions and model controls to the exact current agent/thread", async () => {
+  for (const contextual of [false, true]) {
+    const x = setup(A);
+    x.props.contextual = contextual;
+    Object.assign(x.assistant.agent, {
+      kind: "specialist",
+      access_mode_override: "ask_every_time",
+    });
+    x.setFeatures(["assistant:voice", "assistant:model-controls"]);
+    x.harness.render();
+    const control = () => x.all().find((n) => n.type === "ComposerSettings")!;
+    assert.equal(control().props.conversationId, A);
+    assert.equal(control().props.agentOverride, "ask_every_time");
+    assert.equal(control().props.advanced, true);
+    assert.equal(control().props.activeTurn, false);
+    control().props.onModelChanged("nyxagent/research");
+    await x.harness.settle();
+    assert.ok(
+      x.events.some(
+        ([action, model]) =>
+          action === "model" && model === "nyxagent/research",
+      ),
+    );
+    assert.ok(x.events.some(([action]) => action === "recover"));
+    x.assistant.history!.conversation.active_turn = { turn_id: "turn" };
+    x.harness.render();
+    assert.equal(control().props.activeTurn, true);
+    x.harness.unmount();
+  }
 });

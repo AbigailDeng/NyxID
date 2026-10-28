@@ -20,12 +20,30 @@ import {
   type AssistantTurnInput,
 } from "../../features/assistant/assistantTurnRequest";
 import { assistantHistoryRequestPath } from "../../features/assistant/assistantHistoryTarget";
+import { accessModeSchema } from "../../features/agents/agentContracts";
+import {
+  composerSettingsSchema,
+  type ComposerAccessMode,
+} from "../../features/assistant/composerSettings";
 
 const ROOT = "/assistant/nyxagent";
 const path = (id: string) =>
   `${ROOT}/conversations/${conversationIdSchema.parse(id)}`;
 
 export const assistantApi = {
+  async settings(signal?: AbortSignal) {
+    return composerSettingsSchema.parse(
+      await requestJson(`${ROOT}/settings`, { signal }),
+    );
+  },
+  async updateAccessMode(mode: ComposerAccessMode) {
+    return composerSettingsSchema.parse(
+      await requestJson(`${ROOT}/settings`, {
+        method: "PUT",
+        body: { access_mode: accessModeSchema.parse(mode) },
+      }),
+    );
+  },
   async decideApproval(id: string, approved: boolean, idempotencyKey: string) {
     const result = await submitChallengeDecisionRequest(
       id,
