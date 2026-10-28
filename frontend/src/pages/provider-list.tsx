@@ -475,6 +475,29 @@ export function ProviderListPage() {
                         </FormItem>
                       )}
                     />
+                    <FormField
+                      control={form.control}
+                      name="authorization_nonce_required"
+                      render={({ field }) => (
+                        <FormItem className="flex items-center justify-between rounded-lg border p-3">
+                          <div className="space-y-0.5">
+                            <FormLabel>Authorization nonce required</FormLabel>
+                            <p className="text-xs text-muted-foreground">
+                              Generate a fresh nonce for each hosted OAuth
+                              authorization attempt.
+                              Enable only when the provider requires it, after
+                              upgrading all backend replicas.
+                            </p>
+                          </div>
+                          <FormControl>
+                            <Switch
+                              checked={field.value ?? false}
+                              onCheckedChange={field.onChange}
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
                   </>
                 )}
 
@@ -770,7 +793,11 @@ export function ProviderListPage() {
               <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
                 <div className="flex items-center gap-3">
                   <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-                    <ServiceIcon slug={provider.slug} size="sm" />
+                    <ServiceIcon
+                      slug={provider.slug}
+                      iconUrl={provider.icon_url}
+                      size="sm"
+                    />
                   </div>
                   <div>
                     <CardTitle>{provider.name}</CardTitle>

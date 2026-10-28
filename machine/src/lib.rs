@@ -2,10 +2,12 @@
 
 pub mod authority;
 pub mod binary;
+pub mod bootstrap;
 pub mod config;
 pub mod context;
 pub mod desktop;
 pub mod gateway;
+pub mod managed;
 pub mod signing;
 pub mod text;
 pub mod update;
@@ -60,8 +62,16 @@ pub struct MachineProfile {
     pub computer: bool,
     pub browser: Option<bool>,
     pub authority_versions: Vec<u32>,
+    /// Conservative signed-timestamp lease timing; absent means ACK-only recovery.
+    pub authority_timing_v1: bool,
+    /// Exact turn/job cancellation; absent on older nodes.
+    pub exact_cancel: bool,
     /// Absent on old nodes; never inferred from protocol v2 alone.
     pub separated: Option<context::Support>,
+    /// Live mechanism evidence for new setup selection; absent on older nodes.
+    pub separation_evidence: Option<context::Evidence>,
+    /// Recorded setup intent for new assignments; absent on older profiles.
+    pub separation_choice: Option<context::Choice>,
     pub os: String,
     pub arch: String,
     pub roots: Vec<String>,
@@ -87,6 +97,10 @@ impl MachineProfile {
     }
     pub fn authority_v2(&self) -> bool {
         self.authority_versions.contains(&authority::VERSION)
+    }
+    pub fn authority_v3(&self) -> bool {
+        self.authority_versions
+            .contains(&authority::EXTERNAL_VERSION)
     }
     pub fn enabled(&self) -> bool {
         self.version == PROTOCOL_VERSION
@@ -114,6 +128,7 @@ pub enum Operation {
     Computer,
     Browser,
     Cancel,
+    CancelExact,
     Upgrade,
     UpgradeStatus,
     ContainerInspect,
@@ -133,6 +148,7 @@ impl Operation {
         match self {
             Self::ProxyUpload => false,
             Self::AuthorityRenew | Self::AuthorityRevoke => profile.authority_v2(),
+            Self::CancelExact => profile.enabled() && profile.exact_cancel,
             Self::Cancel | Self::Upgrade | Self::UpgradeStatus => profile.enabled(),
             Self::ContainerInspect
             | Self::ContainerMigrate
@@ -163,6 +179,8 @@ pub struct Request {
     pub version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authority: Option<Box<authority::Authority>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_authority: Option<Box<authority::ExternalAuthority>>,
     pub request_id: String,
     pub node_id: String,
     pub operation: Operation,
@@ -199,5 +217,33 @@ pub struct Response {
 impl std::fmt::Debug for Response {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("MachineResponse { [REDACTED] }")
+    }
+}
+
+#[cfg(test)]
+mod exact_cancel_tests {
+    use super::*;
+    #[test]
+    fn exact_cancel_is_explicit_and_preserves_old_operation_permissions() {
+        let mut old: MachineProfile =
+            serde_json::from_value(serde_json::json!({"version": PROTOCOL_VERSION, "shell": true}))
+                .unwrap();
+        assert!(!old.exact_cancel);
+        assert!(!Operation::CancelExact.allowed(&old));
+        for operation in [
+            Operation::Cancel,
+            Operation::Exec,
+            Operation::Job,
+            Operation::JobCancel,
+        ] {
+            assert!(operation.allowed(&old));
+        }
+        old.exact_cancel = true;
+        assert!(Operation::CancelExact.allowed(&old));
+        assert_eq!(
+            serde_json::to_value(Operation::CancelExact).unwrap(),
+            "cancel_exact"
+        );
+        assert_eq!(serde_json::to_value(Operation::Cancel).unwrap(), "cancel");
     }
 }

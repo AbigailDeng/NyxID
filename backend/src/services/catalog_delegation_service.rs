@@ -26,6 +26,7 @@ pub struct CatalogAuthority {
 impl CatalogAuthority {
     pub fn restriction_claims(&self) -> TokenRestrictionClaims {
         TokenRestrictionClaims {
+            oauth_lineage: None,
             resources: Some(self.resources.clone()),
             allowed_service_ids: Some(self.allowed_service_ids.clone()),
             allow_all_services: Some(self.allow_all_services),
@@ -72,9 +73,7 @@ pub async fn persist_grant(
         created_at: Utc::now(),
     };
 
-    db.collection::<CatalogDelegationGrant>(CATALOG_DELEGATION_GRANTS)
-        .insert_one(grant)
-        .await?;
+    super::erasure_admission::insert_owned(db, CATALOG_DELEGATION_GRANTS, user_id, &grant).await?;
     Ok(())
 }
 
@@ -116,6 +115,7 @@ pub async fn validate_live_grant(
         actor_client_id,
         receiving_client_id,
         &authority,
+        config,
     ) {
         return Err(invalid_catalog_authority());
     }
@@ -156,7 +156,7 @@ pub async fn validate_live_grant(
             canonical_resources.push(mcp_resource);
         }
         canonical_resources.sort();
-        if canonical_resources != authority.resources {
+        if canonical_resources != config.canonical_resources(&authority.resources) {
             return Err(invalid_catalog_authority());
         }
     }
@@ -240,6 +240,8 @@ pub fn authority_from_restriction_claims(
     restrictions: &TokenRestrictionClaims,
 ) -> AppResult<CatalogAuthority> {
     let claims = Claims {
+        delegation_origin: None,
+        oauth_lineage: None,
         sub: String::new(),
         iss: String::new(),
         aud: String::new(),
@@ -270,6 +272,7 @@ pub fn authority_from_restriction_claims(
         allow_all_services: restrictions.allow_all_services,
         allowed_node_ids: restrictions.allowed_node_ids.clone(),
         allow_all_nodes: restrictions.allow_all_nodes,
+        protected_consent: None,
         assistant_forward: None,
     };
     authority_from_claims(&claims)
@@ -316,12 +319,13 @@ fn grant_matches_claims(
     actor_client_id: &str,
     receiving_client_id: &str,
     authority: &CatalogAuthority,
+    config: &crate::config::AppConfig,
 ) -> bool {
     grant.user_id == claims.sub
         && grant.actor_client_id == actor_client_id
         && grant.receiving_client_id == receiving_client_id
         && grant.scope == claims.scope
-        && grant.resources == authority.resources
+        && config.resources_equal(&grant.resources, &authority.resources)
         && grant.allow_all_services == authority.allow_all_services
         && grant.allowed_service_ids == authority.allowed_service_ids
         && grant.allow_all_nodes == authority.allow_all_nodes
@@ -348,6 +352,8 @@ mod tests {
         let actor_client_id = "catalog-live-actor";
         let receiving_client_id = "catalog-live-receiver";
         let claims = Claims {
+            delegation_origin: None,
+            oauth_lineage: None,
             sub: uuid::Uuid::new_v4().to_string(),
             iss: config.jwt_issuer.clone(),
             aud: config.jwt_issuer.clone(),
@@ -380,6 +386,7 @@ mod tests {
             allow_all_services: Some(false),
             allowed_node_ids: Some(Vec::new()),
             allow_all_nodes: Some(false),
+            protected_consent: None,
             assistant_forward: None,
         };
 
@@ -451,6 +458,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn domain_alias_live_catalog_grant_accepts_old_resources_without_new_authority() {
+        let (db, mut config, mut claims) = live_grant_fixture().await.unwrap();
+        config.base_url = "https://new.example".into();
+        claims.resources = Some(vec!["https://new.example/mcp".into()]);
+        db.collection::<CatalogDelegationGrant>(CATALOG_DELEGATION_GRANTS)
+            .update_one(
+                doc! {"_id":&claims.jti},
+                doc! {"$set":{"resources":["https://old.example/mcp"]}},
+            )
+            .await
+            .unwrap();
+        assert_invalid(validate_live_grant(&db, &config, &claims).await);
+        config.domain_aliases.base_urls = vec!["https://old.example".into()];
+        validate_live_grant(&db, &config, &claims).await.unwrap();
+        claims.allow_all_nodes = Some(true);
+        assert_invalid(validate_live_grant(&db, &config, &claims).await);
+    }
+
+    #[tokio::test]
     async fn validate_live_grant_rejects_expired_grant() {
         let Some((db, config, claims)) = live_grant_fixture().await else {
             return;
@@ -518,6 +544,8 @@ mod tests {
 
     fn claims() -> Claims {
         Claims {
+            delegation_origin: None,
+            oauth_lineage: None,
             sub: uuid::Uuid::new_v4().to_string(),
             iss: "https://nyx.example".to_string(),
             aud: "https://nyx.example".to_string(),
@@ -550,6 +578,7 @@ mod tests {
             allow_all_services: Some(false),
             allowed_node_ids: Some(Vec::new()),
             allow_all_nodes: Some(false),
+            protected_consent: None,
             assistant_forward: None,
         }
     }
@@ -601,6 +630,7 @@ mod tests {
             "nyxid-assistant",
             "aevatar",
             &authority,
+            &crate::test_utils::test_app_config(),
         ));
         assert!(!grant_matches_claims(
             &grant,
@@ -608,6 +638,7 @@ mod tests {
             "wrong-actor",
             "aevatar",
             &authority,
+            &crate::test_utils::test_app_config(),
         ));
         assert!(!grant_matches_claims(
             &grant,
@@ -615,6 +646,7 @@ mod tests {
             "nyxid-assistant",
             "wrong-receiver",
             &authority,
+            &crate::test_utils::test_app_config(),
         ));
     }
 }

@@ -1,6 +1,24 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+/// Dedicated, server-managed Telnyx text-chat offering. Presence requires the
+/// managed execution runner; generic proxy settlement cannot price this contract.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedExecutionContract {
+    pub model: String,
+    /// Verified complete model context ceiling, used as the input reservation
+    /// bound rather than estimating tokens from request bytes.
+    pub max_input_tokens: u64,
+    pub max_output_tokens: u64,
+    pub max_request_bytes: u64,
+    pub max_response_bytes: u64,
+    pub tariff_version: String,
+    pub tariff_source: String,
+    #[serde(with = "bson::serde_helpers::chrono_datetime_as_bson_datetime")]
+    pub tariff_verified_at: chrono::DateTime<chrono::Utc>,
+}
+
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BillingMetric {
@@ -14,6 +32,7 @@ pub enum BillingMetric {
     CacheWriteTokens,
     Images,
     VoiceSeconds,
+    MachineRunningSeconds,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
@@ -52,6 +71,20 @@ pub struct LanePricing {
     pub sync_error: Option<String>,
     #[serde(default, deserialize_with = "deserialize_components")]
     pub components: Vec<LanePriceComponent>,
+    #[serde(default, deserialize_with = "deserialize_operations")]
+    pub operations: Vec<OperationPrice>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct OperationPrice {
+    pub operation: String,
+    pub credits_per_unit: String,
+    #[serde(default)]
+    pub lago_metric_code: String,
+    #[serde(default)]
+    pub sync_status: PricingSyncStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_error: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
@@ -66,6 +99,12 @@ pub struct LanePriceComponent {
     pub sync_error: Option<String>,
 }
 
+fn deserialize_operations<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Vec<OperationPrice>, D::Error> {
+    Ok(Option::<Vec<OperationPrice>>::deserialize(d)?.unwrap_or_default())
+}
+
 fn deserialize_components<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<Vec<LanePriceComponent>, D::Error> {
@@ -74,7 +113,7 @@ fn deserialize_components<'de, D: serde::Deserializer<'de>>(
 
 impl BillingMetric {
     /// Stable names enter ledger canonical encoding. Never rename existing units.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Tokens,
         Self::Requests,
         Self::Bytes,
@@ -84,6 +123,7 @@ impl BillingMetric {
         Self::CacheWriteTokens,
         Self::Images,
         Self::VoiceSeconds,
+        Self::MachineRunningSeconds,
     ];
 
     fn metadata(self) -> (&'static str, &'static str, bool) {
@@ -97,6 +137,9 @@ impl BillingMetric {
             Self::CacheWriteTokens => ("cache_write_tokens", "Cache-write tokens", true),
             Self::Images => ("images", "Images", false),
             Self::VoiceSeconds => ("voice_seconds", "Voice seconds", false),
+            Self::MachineRunningSeconds => {
+                ("machine_running_seconds", "Machine running seconds", false)
+            }
         }
     }
     pub fn as_str(self) -> &'static str {
@@ -115,6 +158,8 @@ impl BillingMetric {
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 pub struct ServiceBilling {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_execution: Option<ManagedExecutionContract>,
     /// Opt-in platform-layer charging. Services default to free (metered
     /// for observability, never charged); admins enable this on the
     /// platform-operated services that should bill wallet credits.
@@ -161,6 +206,7 @@ pub struct ServiceBilling {
 impl Default for ServiceBilling {
     fn default() -> Self {
         Self {
+            managed_execution: None,
             platform_billable: false,
             platform_charge_nyxid_credentials_only: false,
             platform_metric: None,
@@ -284,6 +330,10 @@ pub struct PlatformUsage {
     pub audio_tokens: Option<AudioTokens>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_tokens: Option<ImageTokens>,
+    /// Model the provider reported in the response (observability only; never
+    /// selects a rate and is not sent to Lago).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reported_model: Option<String>,
 }
 
 impl PlatformUsage {
@@ -319,6 +369,11 @@ impl PlatformUsage {
 
     pub fn with_image_tokens(mut self, images: Option<ImageTokens>) -> Self {
         self.image_tokens = images.filter(|images| !images.is_empty());
+        self
+    }
+
+    pub fn with_reported_model(mut self, model: Option<String>) -> Self {
+        self.reported_model = model;
         self
     }
 }
@@ -398,6 +453,7 @@ mod tests {
     #[test]
     fn active_resale_spec_requires_metric_code() {
         let mut billing = ServiceBilling {
+            managed_execution: None,
             platform_billable: false,
             platform_charge_nyxid_credentials_only: false,
             platform_metric: None,

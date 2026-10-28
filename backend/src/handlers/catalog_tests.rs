@@ -321,6 +321,10 @@ async fn list_catalog_endpoints_allows_org_shared_custom_services() {
 
 fn minimal_catalog_entry() -> crate::services::catalog_service::CatalogEntry {
     crate::services::catalog_service::CatalogEntry {
+        offering_kind: Default::default(),
+        topics: Vec::new(),
+        supplier: None,
+        import_source: None,
         recommended_skill_refs: None,
         skills_revision: 0,
         skills_manifest_digest: String::new(),
@@ -333,6 +337,7 @@ fn minimal_catalog_entry() -> crate::services::catalog_service::CatalogEntry {
         provider_config_id: None,
         provider_type: None,
         revokes_grant: None,
+        revocation_effect_scope: None,
         requires_gateway_url: false,
         api_key_instructions: None,
         api_key_url: None,

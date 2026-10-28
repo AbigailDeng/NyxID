@@ -1,11 +1,25 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
+import { withAccountPanelSearch } from "@/lib/assistant/account-panel-search";
+import { CAPACITY_ACKNOWLEDGEMENT } from "@/lib/assistant/capacity-wait";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as telemetry from "@/lib/telemetry";
+import { api } from "@/lib/api-client";
+import { toast } from "sonner";
 import {
   ChatMessageBubble,
   ChatMessageEntry,
   ChatMessageList,
 } from "@/components/assistant/chat-message";
+import {
+  AevatarAssistantMessageList,
+  ChannelUserEntry,
+  NyxAgentThreadMessageList,
+  NyxAgentAssistantEntry,
+} from "@/components/assistant/assistant-chat-page";
 import type { ChatMessage, ChatSessionState } from "@/lib/assistant/chat-types";
+import { messageTime } from "@/lib/assistant/message-time";
+import { describeToolActivity } from "@/lib/assistant/tool-activity-text";
 
 const BASE: ChatMessage = {
   id: "assistant-1",
@@ -16,18 +30,203 @@ const BASE: ChatMessage = {
 };
 
 describe("canonical chat presentation", () => {
+  it.each([
+    ["insufficient_credits", "Not enough credits", "Add credits in Billing & Usage"],
+    ["wallet_suspended", "Billing wallet suspended", "Contact support"],
+    ["plan_entitlement_required", "Service not included in your plan", "Check your plan"],
+    ["billing_not_configured", "Billing setup incomplete", "Contact support to complete the billing configuration"],
+    ["billing_provider_unavailable", "Billing service unavailable", "Try again shortly"],
+  ])("shows the billing cause and remedy before diagnostics for %s", (code, title, remedy) => {
+    render(<ChatMessageBubble message={{ ...BASE, content: "", status: "error", errorCode: code,
+      error: "Turn failed. Provide a trace.",
+      toolCalls: [{ id: "tool", name: "nyx__search_tools", status: "done", startedAt: 1 }],
+      errorDetail: { stage: "stream", turnId: "turn-billing", continuations: 0 },
+    }} />);
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(title);
+    expect(alert).toHaveTextContent(remedy);
+    expect(screen.queryByText("Turn failed. Provide a trace.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /1 action/ })).toHaveTextContent(title);
+    const details = screen.getByText("Details");
+    expect(alert.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("shows the panic stage in failure Details", () => {
+    render(<ChatMessageBubble message={{ ...BASE, status: "error", content: "",
+      errorCode: "internal_error",
+      error: "NyxBot hit an internal error on this turn. Check which actions completed before retrying.",
+      errorDetail: { stage: "panic", turnId: "turn-panic", occurredAt: "2026-10-15T00:00:00Z", continuations: 0 },
+    }} />);
+    expect(screen.getByText("Details")).toBeInTheDocument();
+    expect(screen.getByText("panic")).toBeInTheDocument();
+    expect(screen.getByText(/Check which actions completed/)).toBeInTheDocument();
+  });
+  it("shows feedback only in the page-owned NyxAgent message-list composition", () => {
+    const session: ChatSessionState = {
+      clientId: "test-client",
+      conversationId: "nyxagent-page",
+      status: "completed_text",
+      title: "Test",
+      messages: [BASE],
+      expectedTurnCount: 0,
+    };
+    const retry = vi.fn().mockResolvedValue(undefined);
+    const failed: ChatMessage = { ...BASE, id: "failed-1", status: "error", error: "Turn lost",
+      recovery: { status: "available", reason: "available", text: "Question", attachments: [] } };
+    // The page's own assistant renderer, as the thread page passes it.
+    const { rerender } = render(
+      <NyxAgentThreadMessageList
+        session={{ ...session, messages: [BASE, failed] }}
+        bottomInset={0}
+        renderMessage={(message) => (
+          <NyxAgentAssistantEntry message={message} conversationId={session.conversationId}
+            retry={retry} checkRecovery={vi.fn()} />
+        )}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Helpful" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalledWith("failed-1");
+
+    rerender(
+      <AevatarAssistantMessageList
+        session={{ ...session, conversationId: "aevatar-page" }}
+        bottomInset={0}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Helpful" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides feedback in replay and without a persisted conversation", () => {
+    const { rerender } = render(
+      <ChatMessageBubble
+        message={BASE}
+        conversationId="conversation-1"
+        feedbackEnabled={false}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Helpful" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Add feedback comment" }),
+    ).not.toBeInTheDocument();
+    rerender(<ChatMessageBubble message={BASE} />);
+    expect(
+      screen.queryByRole("group", { name: "Reply feedback" }),
+    ).not.toBeInTheDocument();
+  });
+  it("gates the entire feedback control block behind the page flag", () => {
+    render(
+      <ChatMessageBubble
+        message={BASE}
+        conversationId="conversation-1"
+        feedbackEnabled={false}
+      />,
+    );
+    expect(
+      screen.queryByRole("group", { name: "Reply feedback" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Helpful" }),
+    ).not.toBeInTheDocument();
+  });
+  it("renders stopped replies without an error banner or feedback controls", () => {
+    render(
+      <ChatMessageBubble
+        message={{ ...BASE, errorCode: "cancelled" }}
+        conversationId="conversation-1"
+      />,
+    );
+    expect(
+      screen.queryByText("The assistant could not complete this turn."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Helpful" }),
+    ).not.toBeInTheDocument();
+  });
+  it("keeps feedback controls visibly pressed and blocks duplicate pending clicks", () => {
+    render(
+      <ChatMessageBubble
+        message={{ ...BASE, feedback: { vote: "up" } }}
+        conversationId="conversation-1"
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Helpful" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+  it("does not capture telemetry when feedback submission fails", async () => {
+    const put = vi
+      .spyOn(api, "put")
+      .mockRejectedValueOnce(new Error("offline"));
+    const capture = vi.spyOn(telemetry, "capture");
+    render(
+      <ChatMessageBubble message={BASE} conversationId="conversation-1" />,
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Helpful" }));
+    });
+    expect(capture).not.toHaveBeenCalled();
+    capture.mockRestore();
+    put.mockRestore();
+  });
   afterEach(() => vi.useRealTimers());
 
+  it("offers no comment until the reader votes", () => {
+    render(
+      <ChatMessageBubble message={BASE} conversationId="conversation-1" />,
+    );
+    expect(screen.getByRole("button", { name: "Helpful" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /comment/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog"),
+    ).not.toBeInTheDocument();
+  });
+  it.each([
+    ["Helpful", "Give positive feedback", ["Useful", "Accurate", "Easy to understand"]],
+    ["Not helpful", "Give negative feedback", ["Not useful", "Not accurate", "Bad response", "Hard to understand"]],
+  ])("a %s vote saves at once and opens a details dialog", async (button, title, reasons) => {
+    const put = vi.spyOn(api, "put").mockResolvedValue({});
+    try {
+      render(<ChatMessageBubble message={BASE} conversationId="conversation-1" />);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: button }));
+      });
+      expect(put).toHaveBeenCalledTimes(1);
+      const dialog = screen.getByRole("dialog", { name: title });
+      expect(
+        within(within(dialog).getByRole("group", { name: "Reasons" }))
+          .getAllByRole("button", { pressed: false })
+          .map((pill) => pill.textContent),
+      ).toEqual(reasons);
+      expect(within(dialog).getByRole("textbox", { name: "Details (optional)" })).toBeVisible();
+      expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeEnabled();
+      expect(within(dialog).getByRole("button", { name: "Submit" })).toBeEnabled();
+    } finally {
+      put.mockRestore();
+    }
+  });
+
   it("renders an inline context reset as a system note without assistant controls", () => {
-    const content = "Conversation context was reset; the assistant was given a recap of this chat.";
-    render(<ChatMessageEntry message={{
-      ...BASE,
-      id: "nyxagent-context-reset:conversation",
-      role: "system",
-      content,
-    }} />);
-    expect(screen.getByRole("note", { name: "Conversation context reset" }))
-      .toHaveTextContent(content);
+    const content =
+      "Conversation context was reset; the assistant was given a recap of this chat.";
+    render(
+      <ChatMessageEntry
+        message={{
+          ...BASE,
+          id: "nyxagent-context-reset:conversation",
+          role: "system",
+          content,
+        }}
+      />,
+    );
+    expect(
+      screen.getByRole("note", { name: "Conversation context reset" }),
+    ).toHaveTextContent(content);
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
@@ -38,37 +237,158 @@ describe("canonical chat presentation", () => {
           ...BASE,
           content: "Before <function_calls>secret()</function_calls> **after**",
           thinking: "Checking state",
-          steps: [{
-            id: "step-1",
-            name: "Inspect",
-            status: "done",
-            startedAt: 1,
-            finishedAt: 2,
-          }],
-          toolCalls: [{
-            id: "tool-1",
-            name: "catalog.read",
-            status: "running",
-            startedAt: 1,
-          }],
+          steps: [
+            {
+              id: "step-1",
+              name: "Inspect",
+              status: "done",
+              startedAt: 1,
+              finishedAt: 2,
+            },
+          ],
+          toolCalls: [
+            {
+              id: "tool-1",
+              name: "catalog.read",
+              status: "running",
+              startedAt: 1,
+            },
+          ],
           status: "error",
           error: "Run failed",
         }}
       />,
     );
     expect(container.querySelector("[data-assistant-halo]")).toBeNull();
-    expect(screen.getByRole("status", { name: "Assistant reasoning" })).toBeVisible();
+    expect(
+      screen.getByRole("status", { name: "Assistant reasoning" }),
+    ).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: /2 actions/i }));
     expect(screen.getByText("Inspect")).toBeVisible();
-    expect(screen.getByText("catalog.read")).toBeVisible();
+    expect(screen.getAllByText("catalog.read")[0]).toBeVisible();
     expect(screen.queryByText(/secret/)).not.toBeInTheDocument();
     expect(screen.getByText("after").tagName).toBe("STRONG");
     expect(screen.getByText("Run failed")).toBeVisible();
   });
 
+  it("ChatMessageEntry keeps feedback controls and forwards Retry (page renderMessage contract)", () => {
+    const retry = vi.fn();
+    const { unmount } = render(
+      <ChatMessageEntry
+        message={{ ...BASE, authorName: "NyxBot" }}
+        conversationId="conversation-1"
+        feedbackEnabled
+        onRetry={undefined}
+      />,
+    );
+    expect(screen.getByText("NyxBot")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Helpful" })).toBeVisible();
+    unmount();
+    render(
+      <ChatMessageEntry
+        message={{ ...BASE, status: "error", error: "Turn lost" }}
+        conversationId="conversation-1"
+        feedbackEnabled
+        onRetry={retry}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes Retry for a failed reply", async () => {
+    const retry = vi.fn();
+    render(
+      <ChatMessageBubble
+        message={{ ...BASE, status: "error", error: "Turn lost" }}
+        onRetry={retry}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it("shows a rejected retry beside its Retry button", async () => {
+    const retry = vi.fn().mockRejectedValue(new Error("A turn is already active."));
+    render(
+      <ChatMessageBubble
+        message={{ ...BASE, status: "error", error: "Turn lost" }}
+        onRetry={retry}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("A turn is already active.");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+  });
+
+  it("checks temporary recovery status without posting and reports copy failure", async () => {
+    const check = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) }, configurable: true });
+    render(<ChatMessageBubble message={{ ...BASE, status: "error", recovery: {
+      status: "review", reason: "status_unavailable", text: "Original request", attachments: ["scan.txt"],
+    } }} onCheckRecovery={check} />);
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Check retry availability" }));
+    await screen.findByRole("button", { name: "Check retry availability" });
+    expect(check).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Review request" }));
+    expect(screen.getByText("Original request")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Copy request" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Copy failed");
+  });
+
+  it("shows every diagnostic field and copies the diagnostic ID", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(
+      <ChatMessageBubble
+        message={{
+          ...BASE,
+          status: "error",
+          error: "Stopped responding",
+          errorDetail: {
+            stage: "no_progress",
+            failureReason: { source: "nyxid", stage: "model_proxy", code: "api_key_scope_forbidden", http_status: 403, nyxid_error_code: 9000 },
+            upstreamCode: "turn_failed",
+            httpStatus: 503,
+            upstreamRequestId: "req-1",
+            responseId: "resp_1",
+            continuations: 2,
+            turnId: "turn-1",
+            occurredAt: "2026-01-01T00:00:00Z",
+          },
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByText("Details"));
+    for (const value of ["turn_failed", "no_progress", "503", "turn-1", "resp_1", "req-1", "2", "nyxid / model_proxy / api_key_scope_forbidden / HTTP 403 / NyxID 9000"]) {
+      expect(screen.getByText(value)).toBeInTheDocument();
+    }
+    expect(
+      within(screen.getByText("Details").closest("details")!).getByRole("time"),
+    ).toHaveAttribute("datetime", "2026-01-01T00:00:00Z");
+    fireEvent.click(screen.getByRole("button", { name: "Copy diagnostic ID" }));
+    expect(writeText).toHaveBeenCalledWith("turn turn-1 / upstream turn_failed / cause nyxid / model_proxy / api_key_scope_forbidden / HTTP 403 / NyxID 9000 / response resp_1 / request req-1");
+  });
+
+  it("explains a missing guest model route only in the owner's diagnostic details", () => {
+    render(<ChatMessageBubble message={{ ...BASE, status: "error",
+      error: "This assistant isn't available to guests yet.",
+      errorDetail: { stage: "stream", turnId: "turn-guest", continuations: 0, failureReason: {
+        source: "nyxid", stage: "model_proxy", code: "guest_model_route_required",
+        http_status: 403, nyxid_error_code: 9000,
+      } },
+    }} />);
+    expect(screen.getByText("This assistant isn't available to guests yet.")).toBeVisible();
+    fireEvent.click(screen.getByText("Details"));
+    expect(screen.getByText("Send one message to this agent as its owner using its configured model to record the route for guest replies.")).toBeVisible();
+  });
+
   it("shows thinking treatment only for a content-free streaming message", () => {
     const { container, rerender } = render(
-      <ChatMessageBubble message={{ ...BASE, content: "", status: "streaming" }} />,
+      <ChatMessageBubble
+        message={{ ...BASE, content: "", status: "streaming" }}
+      />,
     );
     expect(
       screen.getByRole("status", { name: "Assistant is thinking" }),
@@ -76,7 +396,9 @@ describe("canonical chat presentation", () => {
     expect(container.querySelector("[data-assistant-halo]")).not.toBeNull();
     expect(container.querySelector("[data-streaming-dots]")).not.toBeNull();
     rerender(
-      <ChatMessageBubble message={{ ...BASE, content: "Writing", status: "streaming" }} />,
+      <ChatMessageBubble
+        message={{ ...BASE, content: "Writing", status: "streaming" }}
+      />,
     );
     expect(
       screen.queryByRole("status", { name: "Assistant is thinking" }),
@@ -86,37 +408,244 @@ describe("canonical chat presentation", () => {
     expect(container.querySelector("[data-streaming-caret]")).not.toBeNull();
   });
 
+  it("shows each action's outcome and counts failures", () => {
+    render(
+      <ChatMessageBubble
+        message={{
+          ...BASE,
+          toolCalls: [
+            { id: "a", name: "nyx__search_tools", status: "done", startedAt: 1, finishedAt: 2 },
+            { id: "b", name: "api-github-4__get_issue", status: "error", startedAt: 2, finishedAt: 3 },
+            { id: "c", name: "api-github-4__get_file_contents", status: "running", startedAt: 3 },
+          ],
+        }}
+      />,
+    );
+    const header = screen.getByRole("button", { name: /3 actions/i });
+    expect(header).toHaveTextContent("· 1 failed");
+    fireEvent.click(header);
+    expect(screen.getByText("Searched for tools").closest("summary")).toHaveAttribute("data-tool-status", "done");
+    expect(screen.getByLabelText("Succeeded")).toBeInTheDocument();
+    expect(screen.getByText("Couldn't get issue on GitHub").closest("summary")).toHaveAttribute("data-tool-status", "error");
+    expect(screen.getByLabelText("Failed")).toBeInTheDocument();
+    expect(screen.getByText("Reading file contents on GitHub").closest("summary")).toHaveAttribute("data-tool-status", "running");
+    expect(screen.getByText("api-github-4__get_issue")).toBeInTheDocument();
+  });
+
   it("names the running tool beside the streaming dots until text arrives", () => {
     const running = {
       ...BASE,
       content: "",
       status: "streaming",
       toolCalls: [
-        { id: "t1", name: "nyx__search_tools", status: "done" as const, startedAt: 1, finishedAt: 2 },
-        { id: "t2", name: "github__list_issues", status: "running" as const, startedAt: 2 },
+        {
+          id: "t1",
+          name: "nyx__search_tools",
+          status: "done" as const,
+          startedAt: 1,
+          finishedAt: 2,
+        },
+        {
+          id: "t2",
+          name: "github__list_issues",
+          status: "running" as const,
+          startedAt: 2,
+        },
       ],
     };
-    const { container, rerender } = render(<ChatMessageBubble message={running} />);
-    expect(container.querySelector("[data-running-tool]")).toHaveTextContent("github__list_issues");
+    const { container, rerender } = render(
+      <ChatMessageBubble message={running} />,
+    );
+    expect(container.querySelector("[data-running-tool]")).toHaveTextContent(
+      "Listing issues on GitHub…",
+    );
     expect(screen.getByRole("button", { name: /2 actions/i })).toBeVisible();
-    rerender(<ChatMessageBubble message={{ ...running, content: "Found 3 issues" }} />);
+    rerender(
+      <ChatMessageBubble
+        message={{
+          ...running,
+          toolCalls: running.toolCalls.map((tool) => ({
+            ...tool,
+            status: "done" as const,
+          })),
+        }}
+      />,
+    );
     expect(container.querySelector("[data-running-tool]")).toBeNull();
-    rerender(<ChatMessageBubble message={{ ...running, status: "complete" }} />);
+    expect(container.querySelector("[data-last-tool]")).toHaveTextContent(
+      "Listed issues on GitHub",
+    );
+    rerender(
+      <ChatMessageBubble message={{ ...running, content: "Found 3 issues" }} />,
+    );
+    expect(container.querySelector("[data-running-tool]")).toBeNull();
+    rerender(
+      <ChatMessageBubble message={{ ...running, status: "complete" }} />,
+    );
     expect(container.querySelector("[data-running-tool]")).toBeNull();
   });
 
+  it("counts the seconds a reply has waited, as thinking and then beside a running tool", () => {
+    vi.useFakeTimers();
+    try {
+      const waiting = { ...BASE, content: "", status: "streaming" as const };
+      const { container, rerender } = render(<ChatMessageBubble message={waiting} />);
+      expect(container.querySelector("[data-waiting-status]")).toBeNull();
+      act(() => void vi.advanceTimersByTime(3000));
+      expect(container.querySelector("[data-waiting-status]")).toHaveTextContent("Thinking · 3s");
+      rerender(
+        <ChatMessageBubble
+          message={{
+            ...waiting,
+            toolCalls: [{ id: "t", name: "github__list_issues", status: "running", startedAt: 1 }],
+          }}
+        />,
+      );
+      act(() => void vi.advanceTimersByTime(4000));
+      expect(container.querySelector("[data-running-tool]")).toHaveTextContent(
+        `${describeToolActivity("github__list_issues", "running")}… · 7s`,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("re-renders only the rows whose message changed while a reply streams", () => {
+    const session: ChatSessionState = {
+      clientId: "client", conversationId: "nyxagent-page", status: "streaming", title: "Test",
+      messages: [], expectedTurnCount: 1,
+    };
+    const settled: ChatMessage = { ...BASE, id: "settled" };
+    const live: ChatMessage = { ...BASE, id: "live", content: "A", status: "streaming" };
+    const rendered: string[] = [];
+    const renderMessage = (message: ChatMessage) => {
+      rendered.push(message.id);
+      return <p>{message.content}</p>;
+    };
+    const { rerender } = render(
+      <ChatMessageList session={{ ...session, messages: [settled, live] }} bottomInset={0} renderMessage={renderMessage} />,
+    );
+    rendered.length = 0;
+    rerender(
+      <ChatMessageList
+        session={{ ...session, messages: [settled, { ...live, content: "AB" }] }}
+        bottomInset={0}
+        renderMessage={(message) => renderMessage(message)}
+      />,
+    );
+    expect(rendered).toEqual(["live"]);
+    expect(screen.getByText("AB")).toBeVisible();
+    rendered.length = 0;
+    rerender(
+      <ChatMessageList
+        session={{ ...session, messages: [settled, { ...live, content: "AB" }] }}
+        bottomInset={0}
+        renderMessage={renderMessage}
+        projectionVersion="card:1"
+      />,
+    );
+    expect(rendered).toEqual(["settled", "live"]);
+  });
+
+  it("mounts a bounded window of a long transcript, ending at the newest message", () => {
+    // happy-dom has no layout: give every element a 600px box.
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, top: 0, left: 0, right: 600, bottom: 600, width: 600, height: 600, toJSON: () => ({}),
+    } as DOMRect);
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(600);
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
+    const offsetWidth = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(600);
+    const offsetHeight = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(600);
+    try {
+      const messages = Array.from({ length: 200 }, (_, index): ChatMessage => ({
+        ...BASE, id: `m-${String(index)}`, content: `Message ${String(index)}`,
+        role: index % 2 ? "assistant" : "user",
+      }));
+      const { container } = render(
+        <ChatMessageList
+          session={{ clientId: "c", conversationId: "nyxagent-long", status: "completed_text", title: "Long", messages, expectedTurnCount: 100 }}
+          bottomInset={0}
+        />,
+      );
+      const rows = container.querySelectorAll("[id^=message-]");
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.length).toBeLessThan(20);
+      expect(container.querySelector("#message-m-199")).not.toBeNull();
+      expect(container.querySelector("#message-m-0")).toBeNull();
+    } finally {
+      rect.mockRestore();
+      width.mockRestore();
+      height.mockRestore();
+      offsetWidth.mockRestore();
+      offsetHeight.mockRestore();
+    }
+  });
+
+  it("starts windowing only while the reader follows the newest message", () => {
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(600);
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
+    try {
+      const session = (count: number): ChatSessionState => ({
+        clientId: "c", conversationId: "nyxagent-growing", status: "completed_text", title: "T",
+        expectedTurnCount: 0,
+        messages: Array.from({ length: count }, (_, index): ChatMessage => ({ ...BASE, id: `m-${String(index)}` })),
+      });
+      const { container, rerender } = render(<ChatMessageList session={session(30)} bottomInset={0} />);
+      const scroller = container.querySelector<HTMLDivElement>("[id^=message-]")!.closest<HTMLDivElement>(".overflow-y-auto")!;
+      let top = 0;
+      Object.defineProperty(scroller, "scrollHeight", { configurable: true, get: () => 5000 });
+      Object.defineProperty(scroller, "clientHeight", { configurable: true, get: () => 600 });
+      Object.defineProperty(scroller, "scrollTop", { configurable: true, get: () => top, set: (value: number) => { top = value; } });
+      const scrollTo = (value: number) => { top = value; fireEvent.scroll(scroller); };
+      scrollTo(4400);
+      scrollTo(1000); // the reader scrolls up
+      rerender(<ChatMessageList session={session(31)} bottomInset={0} />);
+      expect(container.querySelectorAll("[id^=message-]")).toHaveLength(31);
+      expect(top).toBe(1000);
+      scrollTo(4400); // back at the newest message
+      rerender(<ChatMessageList session={session(32)} bottomInset={0} />);
+      expect(container.querySelectorAll("[id^=message-]").length).toBeLessThan(32);
+    } finally {
+      width.mockRestore();
+      height.mockRestore();
+    }
+  });
+
+  it("shows a reply's images, and a message's attachments, above its text", () => {
+    // The image stays loading: only its position matters here.
+    globalThis.__nyxidAssistantHttpMock = () => new Promise<Response>(() => undefined);
+    const image = { id: "img", endpoint: "/assistant/nyxagent/conversations/c/attachments/img", contentType: "image/png", label: "chart.png" };
+    for (const role of ["assistant", "user"] as const) {
+      const { container, unmount } = render(
+        <ChatMessageBubble message={{ ...BASE, role, content: "Here is the chart.", images: [image] }} />,
+      );
+      const html = container.innerHTML;
+      expect(html.indexOf("Loading image from chart.png")).toBeGreaterThan(-1);
+      expect(html.indexOf("Loading image from chart.png")).toBeLessThan(html.indexOf("Here is the chart."));
+      unmount();
+    }
+    globalThis.__nyxidAssistantHttpMock = undefined;
+  });
+
   it("renders tool images from the authenticated client and reports failures", async () => {
-    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
     const seen: string[] = [];
     globalThis.__nyxidAssistantHttpMock = ({ endpoint }) => {
       seen.push(endpoint);
       return endpoint.endsWith("/missing")
-        ? new Response(JSON.stringify({ message: "Attachment not found" }), { status: 404 })
+        ? new Response(JSON.stringify({ message: "Attachment not found" }), {
+            status: 404,
+          })
         : new Response(png, { headers: { "content-type": "image/png" } });
     };
     const createObjectURL = vi.fn(() => "blob:tool-image");
     const revokeObjectURL = vi.fn();
-    const original = { createObjectURL: URL.createObjectURL, revokeObjectURL: URL.revokeObjectURL };
+    const original = {
+      createObjectURL: URL.createObjectURL,
+      revokeObjectURL: URL.revokeObjectURL,
+    };
     Object.assign(URL, { createObjectURL, revokeObjectURL });
     const image = (id: string) => ({
       id,
@@ -126,10 +655,16 @@ describe("canonical chat presentation", () => {
     });
     const { unmount } = render(
       <ChatMessageBubble
-        message={{ ...BASE, content: "Here is the lobby.", images: [image("ok"), image("missing")] }}
+        message={{
+          ...BASE,
+          content: "Here is the lobby.",
+          images: [image("ok"), image("missing")],
+        }}
       />,
     );
-    const img = await screen.findByRole("img", { name: "Image from lobby-camera__snapshot" });
+    const img = await screen.findByRole("img", {
+      name: "Image from lobby-camera__snapshot",
+    });
     expect(img).toHaveAttribute("src", "blob:tool-image");
     expect(await screen.findByText("Image unavailable")).toBeVisible();
     expect(seen).toEqual([
@@ -168,7 +703,9 @@ describe("canonical chat presentation", () => {
 
     expect(screen.queryByText("catalog.write")).not.toBeInTheDocument();
     expect(screen.queryByText("Supply workflow input")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /approve/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("renders accumulated media with the shipped artifact block", () => {
@@ -193,10 +730,9 @@ describe("canonical chat presentation", () => {
       />,
     );
     expect(screen.getByText("chart.png")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Download chart.png" })).toHaveAttribute(
-      "href",
-      "data:image/png;base64,aGVsbG8=",
-    );
+    expect(
+      screen.getByRole("link", { name: "Download chart.png" }),
+    ).toHaveAttribute("href", "data:image/png;base64,aGVsbG8=");
     expect(container.querySelector("[data-assistant-halo]")).toBeNull();
   });
 
@@ -210,7 +746,9 @@ describe("canonical chat presentation", () => {
         message={{ ...BASE, role: "auditor", authorName: "Policy agent" }}
       />,
     );
-    expect(screen.getByRole("article", { name: "Policy agent auditor message" })).toBeVisible();
+    expect(
+      screen.getByRole("article", { name: "Policy agent auditor message" }),
+    ).toBeVisible();
     expect(screen.getByText("Answer")).toBeVisible();
   });
 
@@ -253,7 +791,7 @@ describe("canonical chat presentation", () => {
     const { container, rerender } = render(
       <ChatMessageList session={first} bottomInset={0} />,
     );
-    const scroller = container.firstElementChild as HTMLDivElement;
+    const scroller = container.querySelector<HTMLDivElement>("[data-chat-transcript]")!;
     let scrollHeight = 1_000;
     Object.defineProperty(scroller, "scrollHeight", {
       configurable: true,
@@ -320,5 +858,642 @@ describe("canonical chat presentation", () => {
       />,
     );
     expect(scroller.scrollTop).toBe(1_200);
+  });
+});
+
+describe("turn status and action ledger", () => {
+  it("keeps total turn time across tool changes, remounts and returning to the tab", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-21T00:00:30Z"));
+      const startedAt = "2026-10-21T00:00:00Z";
+      const message = { ...BASE, status: "streaming" as const, turnStatus: { phase: "tool" as const, label: "Running first", startedAt, toolStartedAt: "2026-10-21T00:00:20Z" } };
+      const { container, rerender, unmount } = render(<ChatMessageBubble message={message} />);
+      expect(container.querySelector("[data-turn-status]")).toHaveTextContent("30s total");
+      rerender(<ChatMessageBubble message={{ ...message, turnStatus: { ...message.turnStatus, toolStartedAt: "2026-10-21T00:00:29Z", label: "Running second" } }} />);
+      expect(container.querySelector("[data-turn-status]")).toHaveTextContent("30s total");
+      rerender(<ChatMessageBubble message={{ ...message, turnStatus: { phase: "working", label: "Working…", startedAt } }} />);
+      expect(container.querySelector("[data-turn-status]")).toHaveTextContent("30s total");
+      // Browser background throttling skips ticks; visibility must catch up at once.
+      vi.setSystemTime(new Date("2026-10-21T00:01:05Z"));
+      fireEvent(document, new Event("visibilitychange"));
+      expect(container.querySelector("[data-turn-status]")).toHaveTextContent("1:05 total");
+      unmount();
+      const reopened = render(<ChatMessageBubble message={message} />);
+      expect(reopened.container.querySelector("[data-turn-status]")).toHaveTextContent("1:05 total");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps each tool's own duration beside the correct action", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-21T00:00:30Z"));
+      const from = Date.parse("2026-10-21T00:00:00Z");
+      const { container } = render(<ChatMessageBubble message={{ ...BASE, toolCalls: [
+        { id: "finished", name: "github__read", status: "done", startedAt: from, finishedAt: from + 8000 },
+        { id: "running", name: "github__search", status: "running", startedAt: from + 20000 },
+      ] }} />);
+      fireEvent.click(screen.getByRole("button", { name: /2 actions/ }));
+      const done = container.querySelector('[data-tool-status="done"]')!;
+      const running = container.querySelector('[data-tool-status="running"]')!;
+      expect(done).toHaveTextContent("8s");
+      expect(running).toHaveTextContent("10s");
+      act(() => vi.advanceTimersByTime(5000));
+      expect(done).toHaveTextContent("8s");
+      expect(running).toHaveTextContent("15s");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it.each(["approval", "retrying", "continuing", "working", "active"] as const)("keeps %s status visible after reply text", (phase) => {
+    const labels = { approval: "Waiting for approval", retrying: "Retrying…", continuing: "Continuing task…", working: "Working…", active: "Working — the reply appears when it is ready" };
+    const { container, rerender } = render(<ChatMessageBubble message={{ ...BASE, status: "streaming", turnStatus: { phase, label: labels[phase] } }} />);
+    const row = container.querySelector("[data-turn-status]")!;
+    expect(row).toHaveTextContent(labels[phase]);
+    expect(row.className).not.toContain("animate");
+    expect(row.querySelector("span")?.className ?? "").not.toContain("animate");
+    for (const status of ["stopped", "error", "complete"]) {
+      rerender(<ChatMessageBubble message={{ ...BASE, status }} />);
+      expect(container.querySelector("[data-turn-status]")).toBeNull();
+    }
+  });
+
+  it("shows elapsed tool time and the interruption notice", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-13T00:00:12Z"));
+    const { rerender } = render(<ChatMessageBubble message={{ ...BASE, status: "streaming", turnStatus: { phase: "tool", label: "Running github__list", toolStartedAt: "2026-10-13T00:00:00Z", interrupted: true } }} />);
+    expect(screen.getByText("· 12s")).toBeVisible();
+    expect(screen.getByText("Connection interrupted; checking every few seconds")).toBeVisible();
+    const phase = screen.getByRole("status");
+    expect(phase).toHaveTextContent("Connection interrupted; checking every few seconds");
+    const announcement = phase.textContent;
+    act(() => vi.advanceTimersByTime(48_000));
+    expect(screen.getByText("· 1:00")).toBeVisible();
+    expect(phase.textContent).toBe(announcement);
+    expect(phase).not.toHaveTextContent("1:00");
+    rerender(<ChatMessageBubble message={{ ...BASE, status: "streaming", turnStatus: { phase: "tool", label: "Running github__list", toolStartedAt: "2026-10-13T00:00:00Z", interrupted: false } }} />);
+    expect(phase).not.toHaveTextContent("Connection interrupted");
+    expect(screen.getByText("· 1:00")).toBeVisible();
+    vi.useRealTimers();
+  });
+
+  it.each(["streaming", "complete", "error", "stopped"])("renders %s with an earlier failed action truthfully", (status) => {
+    render(<ChatMessageBubble message={{ ...BASE, status, activityTotal: 41, turnStatus: { phase: "working", label: "Working…" }, toolCalls: [{ id: "f", name: "github__read", status: "error", startedAt: 1, failure: { kind: "service_status", status: 404 } }] }} />);
+    const button = screen.getByRole("button", { name: /action/ });
+    expect(button).toHaveTextContent("41 actions");
+    expect(button).toHaveTextContent("latest 1 of 41 shown");
+    if (status === "streaming") expect(screen.queryByLabelText("Turn failed")).toBeNull();
+    if (status === "complete") {
+      expect(button).toHaveTextContent("Completed");
+      expect(button).toHaveTextContent("1 failed");
+      expect(screen.getByText(/1 failed/).className).toContain("text-warning");
+    }
+    fireEvent.click(button);
+    expect(screen.getByLabelText("Failed")).toBeVisible();
+    expect(screen.getByText(/The service responded with HTTP 404/)).toHaveTextContent("The assistant can continue after a failed step.");
+  });
+  it.each(["complete", "error", "stopped"])("shows unknown details for legacy or turn-terminated steps in a %s turn", (status) => {
+    render(<ChatMessageBubble message={{ ...BASE, status, toolCalls: [{ id: "legacy", name: "tool", status: "error", startedAt: 1 }] }} />);
+    fireEvent.click(screen.getByRole("button", { name: /action/ }));
+    expect(screen.getByLabelText("Failed")).toBeVisible();
+    expect(screen.getByText(/This step did not complete/)).toHaveTextContent("No additional error details are available. The assistant can continue after a failed step.");
+    expect(screen.queryByText(/The tool reported an error/)).toBeNull();
+  });
+
+  it("uses tool-error copy only for an explicit tool error", () => {
+    render(<ChatMessageBubble message={{ ...BASE, status: "complete", toolCalls: [{ id: "error", name: "tool", status: "error", startedAt: 1, failure: { kind: "tool_error" } }] }} />);
+    fireEvent.click(screen.getByRole("button", { name: /action/ }));
+    expect(screen.getByText(/The tool reported an error/)).toBeVisible();
+  });
+
+});
+
+
+it.each(["", "Partial reply"])("shows a persistent stopped label without activities: %s", (content) => {
+  const message = { ...BASE, content, status: "stopped" };
+  const { container, rerender } = render(<ChatMessageBubble message={message} />);
+  expect(screen.getByRole("status", { name: "Turn stopped" })).toHaveTextContent("Stopped");
+  expect(container.querySelector("[data-turn-status]")).toBeNull();
+  rerender(<ChatMessageList session={{ clientId: "chat", conversationId: "chat", expectedTurnCount: 1, title: "Chat", status: "completed_text", messages: [message] }} bottomInset={0} />);
+  expect(screen.getByRole("status", { name: "Turn stopped" })).toBeVisible();
+  expect(container.querySelector("[data-empty-turn-error]")).toBeNull();
+});
+
+it("submits the chosen reasons ahead of the details, then thanks the reader", async () => {
+  const put = vi.spyOn(api, "put").mockResolvedValue({});
+  const thanks = vi.spyOn(toast, "success");
+  try {
+    render(<ChatMessageBubble message={BASE} conversationId="conversation-1" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Not helpful" }));
+    });
+    expect(put).toHaveBeenLastCalledWith(
+      "/assistant/nyxagent/conversations/conversation-1/messages/assistant-1/feedback",
+      { vote: "down", comment: undefined },
+    );
+    // Reasons keep their offered order, whatever order they were chosen in.
+    fireEvent.click(screen.getByRole("button", { name: "Bad response" }));
+    fireEvent.click(screen.getByRole("button", { name: "Not accurate" }));
+    expect(screen.getByRole("button", { name: "Not accurate" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.change(screen.getByRole("textbox", { name: "Details (optional)" }), {
+      target: { value: "  wrong date  " },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    });
+    expect(put).toHaveBeenLastCalledWith(
+      "/assistant/nyxagent/conversations/conversation-1/messages/assistant-1/feedback",
+      { vote: "down", comment: "Not accurate, Bad response — wrong date" },
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(thanks).toHaveBeenCalledWith("Thanks for the feedback.");
+  } finally {
+    put.mockRestore();
+    thanks.mockRestore();
+  }
+});
+
+it("submits details with Cmd/Ctrl+Enter and keeps plain Enter for new lines", async () => {
+  const put = vi.spyOn(api, "put").mockResolvedValue({});
+  try {
+    render(<ChatMessageBubble message={BASE} conversationId="conversation-1" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Helpful" }));
+    });
+    const field = screen.getByRole("textbox", { name: "Details (optional)" });
+    fireEvent.change(field, { target: { value: "clear steps" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(put).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      fireEvent.keyDown(field, { key: "Enter", ctrlKey: true });
+    });
+    expect(put).toHaveBeenLastCalledWith(
+      "/assistant/nyxagent/conversations/conversation-1/messages/assistant-1/feedback",
+      { vote: "up", comment: "clear steps" },
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  } finally {
+    put.mockRestore();
+  }
+});
+
+it("an empty Submit keeps the saved vote without another write", async () => {
+  const put = vi.spyOn(api, "put").mockResolvedValue({});
+  try {
+    render(<ChatMessageBubble message={BASE} conversationId="conversation-1" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Helpful" }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    });
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Helpful" })).toHaveAttribute("aria-pressed", "true");
+  } finally {
+    put.mockRestore();
+  }
+});
+
+it("keeps the dialog open with its text when the details fail to save", async () => {
+  const put = vi.spyOn(api, "put").mockResolvedValueOnce({}).mockRejectedValueOnce(new Error("offline"));
+  try {
+    render(<ChatMessageBubble message={BASE} conversationId="conversation-1" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Not helpful" }));
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Details (optional)" }), {
+      target: { value: "missed the point" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    });
+    const dialog = screen.getByRole("dialog", { name: "Give negative feedback" });
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Unable to save feedback");
+    expect(within(dialog).getByRole("textbox", { name: "Details (optional)" })).toHaveValue("missed the point");
+  } finally {
+    put.mockRestore();
+  }
+});
+
+it("Cancel and Escape close the dialog and keep the vote; clicking the vote again withdraws it", async () => {
+  const put = vi.spyOn(api, "put").mockResolvedValue({});
+  const remove = vi.spyOn(api, "delete").mockResolvedValue(undefined);
+  try {
+    render(<ChatMessageBubble message={BASE} conversationId="conversation-1" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Helpful" }));
+    });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Details (optional)" }), {
+      key: "Escape",
+    });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Helpful" })).toHaveAttribute("aria-pressed", "true");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Not helpful" }));
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Not helpful" })).toHaveAttribute("aria-pressed", "true");
+    expect(remove).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Not helpful" }));
+    });
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Not helpful" })).toHaveAttribute("aria-pressed", "false");
+  } finally {
+    put.mockRestore();
+    remove.mockRestore();
+  }
+});
+
+it("opens no dialog when the vote fails to save", async () => {
+  const put = vi.spyOn(api, "put").mockRejectedValue(new Error("offline"));
+  try {
+    render(<ChatMessageBubble message={BASE} conversationId="conversation-1" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Helpful" }));
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("Unable to save feedback");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Helpful" })).toHaveAttribute("aria-pressed", "false");
+  } finally {
+    put.mockRestore();
+  }
+});
+
+it("separates the described tool label from elapsed time without duplicate Thinking", () => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date("2026-10-13T00:00:12Z"));
+    const { container } = render(<ChatMessageBubble message={{
+      ...BASE,
+      content: "",
+      status: "streaming",
+      turnStatus: { phase: "tool", label: "Running github__read_issue", toolStartedAt: "2026-10-13T00:00:00Z" },
+      toolCalls: [{ id: "read", name: "github__read_issue", status: "running", startedAt: 1 }],
+    }} />);
+    const row = container.querySelector("[data-turn-status]")!;
+    expect(row).toHaveTextContent("Reading issue on GitHub… · 12s");
+    expect(row).not.toHaveTextContent("Thinking");
+    expect(container.querySelectorAll("[data-running-tool]")).toHaveLength(1);
+    const live = row.querySelector('[aria-live="polite"]')!;
+    const label = live.textContent;
+    act(() => vi.advanceTimersByTime(48000));
+    expect(live.textContent).toBe(label);
+    expect(row).toHaveTextContent("Reading issue on GitHub… · 1:00");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("shows one working label with elapsed time only after three seconds", () => {
+  vi.useFakeTimers();
+  try {
+    const { container } = render(<ChatMessageBubble message={{
+      ...BASE, status: "streaming", turnStatus: { phase: "working", label: "Working…" },
+    }} />);
+    const row = container.querySelector("[data-turn-status]")!;
+    expect(row).toHaveTextContent(/^Working…$/);
+    act(() => vi.advanceTimersByTime(2000));
+    expect(row).toHaveTextContent(/^Working…$/);
+    act(() => vi.advanceTimersByTime(1000));
+    expect(row).toHaveTextContent(/^Working… · 3s$/);
+    expect(row).not.toHaveTextContent("Thinking");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("does not invent an HTTP status when service failure metadata lacks it", () => {
+  render(<ChatMessageBubble message={{ ...BASE, status: "complete", toolCalls: [{
+    id: "failed", name: "tool", status: "error", startedAt: 1, failure: { kind: "service_status" },
+  }] }} />);
+  fireEvent.click(screen.getByRole("button", { name: /action/ }));
+  expect(screen.getByText(/The service returned an error/)).toHaveTextContent(
+    "No HTTP status is available. The assistant can continue after a failed step.",
+  );
+  expect(screen.queryByText(/HTTP undefined/)).toBeNull();
+});
+
+it("renders a decision continuation as a system status without the owner's instruction bubble", () => {
+  render(<ChatMessageBubble message={{ ...BASE, role: "user", content: "Confirmed: attach it now", continuation_of: "11111111-1111-4111-8111-111111111111" }} />);
+  expect(screen.getByRole("status")).toHaveTextContent("Continuing after your decision");
+  expect(screen.queryByText("Confirmed: attach it now")).not.toBeInTheDocument();
+});
+
+describe("message timestamps", () => {
+  const SENT = "2026-10-12T07:40:43.000Z";
+  const at = Date.parse(SENT);
+
+  function sentTime(container: HTMLElement) {
+    return container.querySelector(`time[datetime="${SENT}"]`);
+  }
+
+  it("stamps user messages and settled replies with their local send time", () => {
+    const expected = messageTime(at)!;
+    for (const message of [
+      { ...BASE, id: "user-1", role: "user", timestamp: at },
+      { ...BASE, timestamp: at },
+    ] satisfies ChatMessage[]) {
+      const { container, unmount } = render(
+        <ChatMessageEntry message={message} conversationId="conversation-1" />,
+      );
+      const time = sentTime(container);
+      expect(time).toHaveTextContent(expected.short);
+      expect(time).toHaveAttribute("title", expected.label);
+      unmount();
+    }
+  });
+
+  it("stamps a user message written in a chat app", () => {
+    const { container } = render(
+      <ChannelUserEntry
+        message={{ ...BASE, id: "user-1", role: "user", content: "From Telegram", timestamp: at, via: "telegram" }}
+        platform="telegram"
+      />,
+    );
+    expect(screen.getByText("From Telegram")).toBeInTheDocument();
+    expect(sentTime(container)).toHaveTextContent(messageTime(at)!.short);
+  });
+
+  it("puts a reply's time on its feedback line, and keeps it without feedback", () => {
+    const { container, rerender } = render(
+      <ChatMessageBubble message={{ ...BASE, timestamp: at }} conversationId="conversation-1" />,
+    );
+    const feedback = screen.getByRole("group", { name: "Reply feedback" });
+    expect(feedback.parentElement).toContainElement(sentTime(container) as HTMLElement);
+    rerender(
+      <ChatMessageBubble
+        message={{ ...BASE, timestamp: at, status: "error", error: "Turn lost" }}
+        conversationId="conversation-1"
+      />,
+    );
+    expect(screen.queryByRole("group", { name: "Reply feedback" })).not.toBeInTheDocument();
+    expect(sentTime(container)).toBeInTheDocument();
+  });
+
+  it("waits for a streaming reply to settle instead of stamping each update", () => {
+    const { container } = render(
+      <ChatMessageBubble message={{ ...BASE, timestamp: Date.now(), status: "streaming" }} />,
+    );
+    expect(container.querySelector("time")).toBeNull();
+  });
+
+  it("omits a missing or invalid time rather than inventing one", () => {
+    for (const timestamp of [Number.NaN, Date.parse("not a date")]) {
+      const { container, unmount } = render(
+        <>
+          <ChatMessageBubble message={{ ...BASE, id: "user-1", role: "user", timestamp }} />
+          <ChatMessageBubble message={{ ...BASE, timestamp }} />
+        </>,
+      );
+      expect(container.querySelector("time")).toBeNull();
+      expect(container).not.toHaveTextContent("Invalid Date");
+      unmount();
+    }
+  });
+
+  it("stamps every restored history row in a transcript", () => {
+    const earlier = "2026-10-11T22:05:00.000Z";
+    const session: ChatSessionState = {
+      clientId: "history",
+      conversationId: "conversation-1",
+      status: "completed_text",
+      title: "History",
+      expectedTurnCount: 2,
+      messages: [
+        { ...BASE, id: "user-1", role: "user", content: "Yesterday", timestamp: Date.parse(earlier) },
+        { ...BASE, id: "assistant-1", timestamp: Date.parse(earlier) + 1000 },
+        { ...BASE, id: "user-2", role: "user", content: "Today", timestamp: at },
+        { ...BASE, id: "assistant-2", timestamp: at + 1000 },
+      ],
+    };
+    const { container } = render(<ChatMessageList session={session} bottomInset={0} />);
+    const times = [...container.querySelectorAll("time")].map((time) => time.getAttribute("datetime"));
+    expect(times).toEqual([
+      earlier,
+      new Date(Date.parse(earlier) + 1000).toISOString(),
+      SENT,
+      new Date(at + 1000).toISOString(),
+    ]);
+  });
+});
+
+it("shows capacity waiting without an error and links billing remedies", () => {
+  const { rerender } = render(<ChatMessageBubble message={{ ...BASE, content: "", status: "streaming", waitingForCapacity: true }} />);
+  expect(screen.getByText(/Waiting for the assistant/)).toBeVisible();
+  rerender(<ChatMessageBubble message={{ ...BASE, status: "error", errorCode: "wallet_suspended", error: "Wallet suspended" }} />);
+  expect(screen.queryByRole("button", { name: "Open Billing & Usage" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Details")).not.toBeInTheDocument();
+});
+
+it("labels a queued reply with its queue clock", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-10-15T00:00:12Z"));
+  render(<ChatMessageBubble message={{ ...BASE, content: "", status: "streaming", waitingForCapacity: true, queued: true,
+    capacityWaitStartedAt: "2026-10-15T00:00:00Z", capacityWaitDeadline: "2026-10-15T00:10:00Z" }} />);
+  expect(screen.queryByText(/Waiting for the assistant/)).not.toBeInTheDocument();
+  expect(screen.getByText(/Queued until another reply finishes/).closest("[data-waiting-status]")).toHaveTextContent("0:12 of up to 10:00");
+  vi.useRealTimers();
+});
+
+it("restores the shared capacity clock after remount and clears it on acceptance", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-10-15T00:00:23Z"));
+  const message: ChatMessage = { ...BASE, content: "", status: "streaming", waitingForCapacity: true, systemNote: "capacity_wait",
+    capacityWaitStartedAt: "2026-10-15T00:00:00Z", capacityWaitDeadline: "2026-10-15T00:02:00Z",
+    turnStatus: { phase: "active", label: "Working — the reply appears when it is ready" } };
+  const first = render(<ChatMessageBubble message={message} />);
+  expect(screen.queryByText(/Working —/)).not.toBeInTheDocument();
+  expect(screen.getByText(/Waiting for the assistant/).closest("[data-waiting-status]")).toHaveTextContent("0:23 of up to 2:00");
+  act(() => vi.advanceTimersByTime(1000));
+  expect(screen.getByText(/Waiting for the assistant/).closest("[data-waiting-status]")).toHaveTextContent("0:24 of up to 2:00");
+  first.unmount();
+  vi.setSystemTime(new Date("2026-10-15T00:00:40Z"));
+  const second = render(<ChatMessageBubble message={message} />);
+  expect(screen.getByText(/Waiting for the assistant/).closest("[data-waiting-status]")).toHaveTextContent("0:40 of up to 2:00");
+  second.rerender(<ChatMessageBubble message={{ ...message, waitingForCapacity: false, systemNote: undefined }} />);
+  expect(screen.queryByText(/Waiting for the assistant/)).not.toBeInTheDocument();
+  expect(screen.getByText(/Working —/)).toBeVisible();
+  vi.useRealTimers();
+});
+
+it("shows attempt and capacity wait details for failed and successful replies", () => {
+  const { rerender } = render(<ChatMessageBubble message={{ ...BASE, status: "error", error: "Failed",
+    errorDetail: { stage: "stream", turnId: "turn", continuations: 0, attempts: 7, capacityWaitMs: 80_000 } }} />);
+  expect(screen.getByText("attempts").nextElementSibling).toHaveTextContent("7");
+  expect(screen.getByText("waited 1 minute 20 seconds for capacity")).toBeInTheDocument();
+  // A settled reply keeps them inside its turn summary.
+  rerender(<ChatMessageBubble message={{ ...BASE, turnMetadata: { attempts: 3, capacityWaitMs: 33_000 } }} />);
+  const summary = screen.getByRole("button", { name: /^Turn details: Completed, waited 33 seconds/ });
+  fireEvent.click(summary);
+  expect(screen.getByText("attempts").nextElementSibling).toHaveTextContent("3");
+  expect(screen.getByText("waited 33 seconds for capacity")).toBeInTheDocument();
+});
+
+it("renders the system acknowledgement in the pending agent bubble and replaces it on acceptance, exhaustion and Stop", () => {
+  const copy = CAPACITY_ACKNOWLEDGEMENT;
+  const pending: ChatMessage = { ...BASE, content: "", status: "streaming", systemNote: "capacity_wait", waitingForCapacity: false };
+  const { container, rerender } = render(<ChatMessageEntry message={{ ...pending, authorName: "Ada" }} conversationId="chat" feedbackEnabled />);
+  expect(screen.getByText("Ada")).toBeVisible();
+  expect(screen.getByRole("note")).toHaveTextContent(copy);
+  expect(container.querySelector('[data-system-note="capacity_wait"]')).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Good response|Bad response/ })).not.toBeInTheDocument();
+  rerender(<ChatMessageEntry message={{ ...BASE, content: "The real reply", status: "streaming", authorName: "Ada" }} />);
+  expect(screen.queryByText(copy)).not.toBeInTheDocument();
+  expect(screen.getByText("The real reply")).toBeVisible();
+  rerender(<ChatMessageEntry message={{ ...pending, status: "error", errorCode: "capacity_exceeded", error: "NyxBot is at capacity right now (waited 2 minutes). Try again shortly." }} />);
+  expect(screen.queryByText(copy)).not.toBeInTheDocument();
+  expect(screen.getByText(/waited 2 minutes/)).toBeVisible();
+  rerender(<ChatMessageEntry message={{ ...pending, status: "complete", errorCode: "cancelled" }} />);
+  expect(screen.queryByText(copy)).not.toBeInTheDocument();
+  expect(container.querySelector('[data-system-note]')).not.toBeInTheDocument();
+});
+
+it("hides ordinary successful turn details and shows retries without a wait", () => {
+  const { rerender } = render(<ChatMessageBubble message={{ ...BASE, turnMetadata: { attempts: 1, capacityWaitMs: 0 } }} />);
+  expect(screen.queryByRole("button", { name: /^Turn details/ })).not.toBeInTheDocument();
+  rerender(<ChatMessageBubble message={{ ...BASE, turnMetadata: { attempts: 2, capacityWaitMs: 0 } }} />);
+  fireEvent.click(screen.getByRole("button", { name: "Turn details: Completed" }));
+  expect(screen.getByText("attempts").nextElementSibling).toHaveTextContent("2");
+  expect(screen.queryByText(/waited/)).not.toBeInTheDocument();
+  rerender(<ChatMessageBubble message={{ ...BASE, status: "error", errorDetail: {
+    stage: "stream", turnId: "turn", continuations: 0, attempts: 1, capacityWaitMs: 0,
+  } }} />);
+  expect(screen.getByText("Details")).toBeInTheDocument();
+});
+
+it.each([
+  ["/assistant", "wallet_suspended"],
+  ["/assistant/automations", "wallet_suspended"],
+  ["/replay", "wallet_suspended"],
+  ["/assistant", "insufficient_credits"],
+  ["/assistant", "plan_entitlement_required"],
+])("opens billing over the current assistant shell only: %s (%s)", async (path, code) => {
+  const root = createRootRoute();
+  const route = createRoute({ getParentRoute: () => root, path,
+    validateSearch: withAccountPanelSearch((search) => ({ c: String(search.c ?? "") })),
+    component: () => <ChatMessageBubble message={{ ...BASE, status: "error", errorCode: code }} />,
+  });
+  const router = createRouter({ routeTree: root.addChildren([route]),
+    history: createMemoryHistory({ initialEntries: [`${path}?c=current-chat&panel=settings&panelTab=profile`] }),
+  });
+  await router.load();
+  render(<RouterProvider router={router} />);
+  if (path === "/replay") {
+    expect(screen.queryByRole("button", { name: "Open Billing & Usage" })).not.toBeInTheDocument();
+    return;
+  }
+  fireEvent.click(await screen.findByRole("button", { name: "Open Billing & Usage" }));
+  await vi.waitFor(() => expect(router.state.location.search).toEqual({ c: "current-chat", panel: "billing" }));
+  expect(router.state.location.pathname).toBe(path);
+});
+
+
+describe("message body copy integration", () => {
+  it("copies sanitized assistant Markdown without thinking, activities or controls", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const markdown = "**回答**\n\n```rust\n    let n = 1;\n```";
+    render(<ChatMessageBubble message={{ ...BASE, content: `${markdown}\n<function_calls><invoke>private-tool-input</invoke></function_calls>`, thinking: "private-thought" }} />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Copy message" })));
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(markdown);
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeVisible();
+  });
+  it("copies the user's original body including literal markup and whitespace", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const original = "  <function_calls>example</function_calls>\n```js\n  x()\n```  ";
+    render(<ChatMessageBubble message={{ ...BASE, role: "user", content: original }} />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Copy message" })));
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(original);
+  });
+  it.each([
+    { content: "", status: "complete" as const },
+    { content: "Streaming text", status: "streaming" as const },
+    { content: "<function_calls>hidden</function_calls>", status: "complete" as const },
+  ])("has no body copy control for $status / $content", (message) => {
+    render(<ChatMessageBubble message={{ ...BASE, ...message }} />);
+    expect(screen.queryByRole("button", { name: "Copy message" })).not.toBeInTheDocument();
+  });
+});
+
+describe("turn summary", () => {
+  const decision = (
+    id: string,
+    fields: Partial<import("@/schemas/assistant-nyxagent").NyxAgentAcknowledgement> = {},
+  ): import("@/schemas/assistant-nyxagent").NyxAgentAcknowledgement => ({
+    id,
+    kind: "action",
+    status: "allowed",
+    summary:
+      "Organization connection api-firecrawl (33dc1c9b-e1f3-4be8-a35e-fef09b999021) in ChronoAI: POST scrape on api-firecrawl",
+    decider: "user",
+    decided_by: "access_mode",
+    reason: null,
+    confirmation: { risk: "change", access_mode: "autopilot", reason: "policy" },
+    service_slug: null,
+    service_name: null,
+    tool_name: "nyxid.service_execution",
+    created_at: "2026-10-27T00:00:00Z",
+    decided_at: "2026-10-27T00:00:00Z",
+    expires_at: "2026-10-27T00:00:00Z",
+    ...fields,
+  });
+
+  it("folds permissions into one line: on their tool call, or grouped once with a count", () => {
+    const tool = (id: string) => ({ id, name: "api-firecrawl__scrape", status: "done" as const, startedAt: 1, finishedAt: 2 });
+    render(
+      <ChatMessageBubble
+        message={{
+          ...BASE,
+          toolCalls: [tool("act-1"), tool("act-2")],
+          decisions: [
+            decision("11111111-1111-4111-8111-111111111111", { activity_id: "act-1" }),
+            decision("22222222-2222-4222-8222-222222222222"),
+            decision("33333333-3333-4333-8333-333333333333"),
+            decision("44444444-4444-4444-8444-444444444444", {
+              decided_by: "user",
+              status: "denied",
+              summary: "Delete the page",
+              confirmation: null,
+            }),
+          ],
+        }}
+      />,
+    );
+    // Nothing is listed until asked for; the line carries the counts.
+    expect(screen.queryByText(/bypassed policy confirmation/)).not.toBeInTheDocument();
+    const summary = screen.getByRole("button", {
+      name: "Turn details: Completed, 2 actions, 1 denied, 3 allowed by Full access",
+    });
+    expect(within(summary).getByText("1 denied")).toHaveClass("text-warning");
+    fireEvent.click(summary);
+    // The receipt that knows its tool call sits on it, the full text on hover.
+    const pill = screen.getAllByText("Full access")[0]!;
+    expect(pill.closest("summary")).toHaveTextContent("api-firecrawl__scrape");
+    expect(pill).toHaveAttribute("title", expect.stringContaining("bypassed policy confirmation"));
+    // The rest collapse to one line each, without record IDs.
+    const list = screen.getByRole("list", { name: "Permissions used" });
+    const rows = within(list).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("Full access · Organization connection api-firecrawl in ChronoAI: POST scrape on api-firecrawl×2");
+    expect(rows[0]).not.toHaveTextContent("33dc1c9b");
+    expect(rows[1]).toHaveTextContent("You denied · Delete the page");
+  });
+
+  it("keeps channel delivery inside the summary, flagging a failure on the line", () => {
+    const { rerender } = render(
+      <ChatMessageBubble message={{ ...BASE, channelDelivery: { status: "delivered", heard_prefix_matches_sent: false } }} />,
+    );
+    expect(screen.queryByText("Provider confirmed message delivery.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Turn details: Completed" }));
+    expect(screen.getByText("Provider confirmed message delivery.")).toBeInTheDocument();
+    rerender(<ChatMessageBubble message={{ ...BASE, id: "assistant-2", channelDelivery: { status: "failed", heard_prefix_matches_sent: false } }} />);
+    expect(screen.getByRole("button", { name: "Turn details: Completed, delivery failed" })).toHaveTextContent("delivery failed");
   });
 });

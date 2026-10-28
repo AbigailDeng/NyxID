@@ -94,6 +94,10 @@ export class NyxIdVoiceClient {
       this.media = media;
       media.getAudioTracks().forEach((track) => {
         track.enabled = false;
+        track.onended = () =>
+          this.fail(
+            "麦克风已断开或访问权限已撤销，请检查系统设置后重新开始通话。",
+          );
       });
       this.audio = document.createElement("audio");
       this.audio.autoplay = true;
@@ -372,6 +376,7 @@ export class NyxIdVoiceClient {
     if (this.heartbeat) clearInterval(this.heartbeat);
     if (this.startupTimer) clearTimeout(this.startupTimer);
     this.media?.getTracks().forEach((track) => {
+      track.onended = null;
       track.enabled = false;
       track.stop();
     });

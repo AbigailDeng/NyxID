@@ -12,6 +12,29 @@ pub const RUNS_COLLECTION_NAME: &str = "assistant_agent_learning_runs";
 pub const PROPOSALS_COLLECTION_NAME: &str = "assistant_agent_learning_proposals";
 pub const REJECTIONS_COLLECTION_NAME: &str = "assistant_agent_learning_rejections";
 pub const ROOTS_COLLECTION_NAME: &str = "assistant_agent_learning_skill_roots";
+pub const PUBLICATION_TARGETS_COLLECTION_NAME: &str = "assistant_learning_publication_targets";
+pub const MIGRATIONS_COLLECTION_NAME: &str = "assistant_learning_migrations";
+pub const AUTHORED_CLAIMS_COLLECTION_NAME: &str = "assistant_authored_draft_claims";
+
+/// A generation's original review surface, retained across interrupted preparation.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct AuthoredDraftClaim {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invocation_id: Option<String>,
+    pub proposal_id: String,
+    pub conversation_id: String,
+    pub api_key_id: String,
+    pub turn_id: String,
+    pub requested_turn_id: Option<String>,
+    /// Presentation only; never used to authorize or retry an action.
+    #[serde(default)]
+    pub creation_turn_id: Option<String>,
+    pub voice_request_id: Option<String>,
+    pub trigger_run_id: Option<String>,
+    /// Absent on claims written before the snapshot existed: unproven.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<super::assistant_acknowledgement::CardRouting>,
+}
 
 pub const DEFAULT_THRESHOLD: i64 = 15;
 #[allow(dead_code)]
@@ -176,6 +199,12 @@ pub struct AssistantAgentLearningProposal {
     #[serde(default)]
     pub failure_code: Option<String>,
     #[serde(default)]
+    pub failure_rules: Vec<String>,
+    #[serde(default, with = "crate::models::bson_bytes::optional")]
+    pub scope_encrypted: Option<Vec<u8>>,
+    #[serde(default)]
+    pub scope_digest: Option<String>,
+    #[serde(default)]
     pub evidence: Vec<LearningEvidence>,
     #[serde(default, with = "crate::models::bson_bytes::required")]
     pub body_encrypted: Vec<u8>,
@@ -230,8 +259,10 @@ pub struct AssistantAgentLearningSkillRoot {
 
 /// Metadata only; the reviewed archive is deterministically regenerated from
 /// the encrypted draft. A started write is never issued a second time.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct LearningPublication {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invocation_id: Option<String>,
     pub operation_id: String,
     pub name: String,
     pub version: String,
@@ -245,4 +276,93 @@ pub struct LearningPublication {
     pub lease_id: Option<String>,
     #[serde(default, with = "crate::models::bson_datetime::optional")]
     pub lease_expires_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub attempt: i64,
+    #[serde(default)]
+    pub last_stage: Option<String>,
+    #[serde(default)]
+    pub last_registry_status: Option<i32>,
+    #[serde(default)]
+    pub uncertain_dispatch: bool,
+    #[serde(default, with = "crate::models::bson_datetime::optional")]
+    pub verified_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub target_kind: Option<String>,
+    #[serde(default)]
+    pub target_skill_id: Option<String>,
+    #[serde(default, with = "crate::models::bson_bytes::optional")]
+    pub interface_encrypted: Option<Vec<u8>>,
+    /// 2: prepared by snapshot-aware NyxID (an update carries the base
+    /// interface snapshot). Absent (0) on packages prepared before it existed;
+    /// such updates are never dispatched.
+    #[serde(default)]
+    pub package_format: i64,
+    /// First dispatch of this operation; never moved by later attempts.
+    #[serde(default, with = "crate::models::bson_datetime::optional")]
+    pub dispatched_at: Option<DateTime<Utc>>,
+    /// When startup first saw this dispatched legacy update. Stale-release age
+    /// counts from here, because legacy rows have no `dispatched_at`.
+    #[serde(default, with = "crate::models::bson_datetime::optional")]
+    pub legacy_classified_at: Option<DateTime<Utc>>,
+    /// A rebuilt package awaits its review card (second recovery phase).
+    #[serde(default)]
+    pub review_card_pending: bool,
+    #[serde(default)]
+    pub reduced_scope_acceptance: Option<ScopeAcceptance>,
+    #[serde(default)]
+    pub release_evidence: Option<ReleaseEvidence>,
+}
+
+/// Absence evidence an admin stale release relied on, read from Ornn during
+/// that apply (never from a dry run).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ReleaseEvidence {
+    #[serde(with = "bson::serde_helpers::chrono_datetime_as_bson_datetime")]
+    pub checked_at: DateTime<Utc>,
+    pub exact_version_status: i32,
+    pub latest_version: String,
+    pub package_sha256: String,
+    pub min_age_hours: i64,
+    pub batch_id: String,
+}
+
+impl std::fmt::Debug for LearningPublication {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LearningPublication")
+            .field("started", &self.started)
+            .field("attempt", &self.attempt)
+            .field("uncertain_dispatch", &self.uncertain_dispatch)
+            .field("verified", &self.verified_at.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LearningPublicationTarget {
+    #[serde(rename = "_id")]
+    pub id: String,
+    pub agent_id: String,
+    pub owner_id: String,
+    pub proposal_id: String,
+    pub operation_id: String,
+    pub package_sha256: String,
+    pub state: String,
+    #[serde(with = "bson::serde_helpers::chrono_datetime_as_bson_datetime")]
+    pub created_at: DateTime<Utc>,
+    #[serde(with = "bson::serde_helpers::chrono_datetime_as_bson_datetime")]
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DraftScope {
+    pub status: String,
+    pub omissions: Vec<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ScopeAcceptance {
+    pub revision: i64,
+    pub approval_digest: String,
+    pub omission_count: usize,
 }

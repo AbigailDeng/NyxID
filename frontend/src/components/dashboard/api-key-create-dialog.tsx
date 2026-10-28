@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   createApiKeySchema,
+  newApiKeyDefaults,
   type CreateApiKeyFormData,
 } from "@/schemas/api-keys";
 import { PLATFORM_OPTIONS } from "@/schemas/agent-bindings";
@@ -95,10 +96,11 @@ export function ApiKeyCreateDialog({
   const setOpen = onExternalOpenChange ?? setInternalOpen;
   const [createdKey, setCreatedKey] = useState<string | null>(null);
   const [createdKeyId, setCreatedKeyId] = useState<string | null>(null);
+  const [createdExpiry, setCreatedExpiry] = useState<string | null | undefined>();
   const [copied, setCopied] = useState(false);
   const createMutation = useCreateApiKey();
 
-  const { data: services } = useKeys();
+  const { data: services } = useKeys({ includeTools: true });
   const { data: nodes } = useNodes();
   const { data: orgs } = useOrgs();
 
@@ -112,21 +114,10 @@ export function ApiKeyCreateDialog({
 
   const form = useAppForm<CreateApiKeyFormData>({
     resolver: zodResolver(createApiKeySchema),
-    defaultValues: {
-      name: "",
-      scopes: [],
-      expires_at: null,
-      description: null,
-      allow_all_services: true,
-      allow_all_nodes: true,
-      allowed_service_ids: [],
-      allowed_node_ids: [],
-      callback_url: null,
-      target_org_id: undefined,
-    },
+    defaultValues: newApiKeyDefaults(),
   });
 
-  const watchAllServices = form.watch("allow_all_services") ?? true;
+  const watchAllServices = form.watch("allow_all_services") ?? false;
   const watchAllowedServices = form.watch("allowed_service_ids") ?? [];
   const watchTargetOrg = form.watch("target_org_id");
   const setupRequiresServiceSelection =
@@ -146,7 +137,9 @@ export function ApiKeyCreateDialog({
 
     initializedSetupRef.current = true;
     const initialService = (services ?? []).find(
-      (service) => service.id === initialServiceId,
+      (service) =>
+        service.id === initialServiceId ||
+        service.catalog_service_id === initialServiceId,
     );
     const serviceSource = initialService?.credential_source;
     const targetOrgId =
@@ -155,15 +148,16 @@ export function ApiKeyCreateDialog({
         ? serviceSource.org_id
         : undefined;
     form.reset({
+      ...newApiKeyDefaults(),
       name: "Claude Code Agent",
       scopes: ["proxy", "services:read"],
-      expires_at: null,
       description: initialService
         ? `Isolated Agent Key for ${initialService.label}`
         : "Isolated Agent Key",
       allow_all_services: false,
-      allow_all_nodes: true,
-      allowed_service_ids: initialService ? [initialService.id] : [],
+      allow_all_nodes: false,
+      allowed_service_ids: initialService && serviceCanBeScopedToKey(initialService, targetOrgId)
+        ? [initialService.id] : [],
       allowed_node_ids: [],
       callback_url: null,
       platform: "claude-code",
@@ -176,6 +170,7 @@ export function ApiKeyCreateDialog({
       const result = await createMutation.mutateAsync(data);
       setCreatedKey(result.full_key);
       setCreatedKeyId(result.id);
+      setCreatedExpiry(result.expires_at);
       toast.success("API key created successfully");
     } catch (error) {
       if (error instanceof ApiError) {
@@ -197,8 +192,9 @@ export function ApiKeyCreateDialog({
     setOpen(false);
     setCreatedKey(null);
     setCreatedKeyId(null);
+    setCreatedExpiry(undefined);
     setCopied(false);
-    form.reset();
+    form.reset(newApiKeyDefaults());
   }
 
   return (
@@ -219,7 +215,10 @@ export function ApiKeyCreateDialog({
                 {setupMode ? "Agent Key Created" : "API Key Created"}
               </DialogTitle>
               <DialogDescription>
-                Copy your API key now. You will not be able to see it again.
+                Copy your API key now. You will not be able to see it again. {createdExpiry === undefined
+                  ? "Refresh key details to confirm its expiry."
+                  : createdExpiry === null ? "This key has no expiry."
+                  : `Expires ${new Date(createdExpiry).toLocaleString()}.`}
                 {setupMode
                   ? " Open the Agent Key detail page next to review service scope, add credential bindings only when this agent needs overrides, and verify proxy access."
                   : ""}
@@ -330,6 +329,8 @@ export function ApiKeyCreateDialog({
                             value={field.value ?? null}
                             onChange={(next) => {
                               field.onChange(next ?? undefined);
+                              form.setValue("never_expires", false);
+                              form.setValue("expires_at", newApiKeyDefaults().expires_at);
                               // Reset service scope selections when owner
                               // changes so stale selections do not
                               // round-trip to the backend.
@@ -339,8 +340,8 @@ export function ApiKeyCreateDialog({
                               );
                               form.setValue("allowed_service_ids", []);
                               form.setValue("allowed_node_ids", []);
-                              form.setValue("allow_all_services", true);
-                              form.setValue("allow_all_nodes", true);
+                              form.setValue("allow_all_services", false);
+                              form.setValue("allow_all_nodes", false);
                             }}
                             label="Owner"
                           />

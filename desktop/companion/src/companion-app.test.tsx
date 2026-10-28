@@ -344,6 +344,7 @@ class TestRuntime implements CompanionRuntime {
 describe("CompanionApp", () => {
   it("keeps queued voice work pending without an active chat turn and cancels the voice request", async () => {
     const user = userEvent.setup();
+    const settledRequestId = "123e4567-e89b-42d3-a456-426614174001";
     const runtime = new TestRuntime(
       onboardedSnapshot(),
       Promise.resolve(false),
@@ -354,8 +355,19 @@ describe("CompanionApp", () => {
       conversation: { id: CHAT_CONVERSATION_ID, activeTurn: false },
       messages: [
         {
-          id: "voice-user",
+          id: "settled-voice-user",
           seq: 1,
+          turnId: "settled-voice-turn",
+          role: "user",
+          text: "之前的任务",
+          status: "completed",
+          errorCode: null,
+          requestId: settledRequestId,
+          executionPending: true,
+        },
+        {
+          id: "voice-user",
+          seq: 2,
           turnId: "voice-turn",
           role: "user",
           text: "帮我处理这件事",
@@ -366,12 +378,23 @@ describe("CompanionApp", () => {
         },
       ],
     });
-    vi.spyOn(runtime, "nyxIdVoiceRequest").mockResolvedValue({
-      id: CHAT_RECOVERY_REQUEST_ID,
-      state: "queued",
-      turn_id: "voice-turn",
-      pending_acknowledgement_ids: [],
-    });
+    vi.spyOn(runtime, "nyxIdVoiceRequest").mockImplementation(
+      async (_conversationId, requestId) =>
+        requestId === settledRequestId
+          ? {
+              id: settledRequestId,
+              state: "completed",
+              turn_id: "settled-voice-turn",
+              pending_acknowledgement_ids: [],
+              result_message_id: "settled-voice-result",
+            }
+          : {
+              id: CHAT_RECOVERY_REQUEST_ID,
+              state: "queued",
+              turn_id: "voice-turn",
+              pending_acknowledgement_ids: [],
+            },
+    );
     render(<CompanionApp runtime={runtime} />);
     await user.click(
       await screen.findByRole("button", { name: "和 NyxID 语音通话" }),
@@ -387,6 +410,20 @@ describe("CompanionApp", () => {
         CHAT_RECOVERY_REQUEST_ID,
       ),
     );
+    await waitFor(
+      () =>
+        expect(
+          vi
+            .mocked(runtime.nyxIdVoiceRequest)
+            .mock.calls.filter(([, id]) => id === CHAT_RECOVERY_REQUEST_ID),
+        ).toHaveLength(2),
+      { timeout: 3000 },
+    );
+    expect(
+      vi
+        .mocked(runtime.nyxIdVoiceRequest)
+        .mock.calls.filter(([, id]) => id === settledRequestId),
+    ).toHaveLength(1);
     expect(
       screen.getByRole("textbox", { name: "给 NyxID 发送消息" }),
     ).toBeDisabled();
@@ -474,6 +511,98 @@ describe("CompanionApp", () => {
       expect(
         screen.getByRole("textbox", { name: "给 NyxID 发送消息" }),
       ).toBeEnabled();
+    } finally {
+      timer.mockRestore();
+      dateNow.mockRestore();
+    }
+  });
+
+  it("unlocks chat when a voice result is durably published outside the latest history page", async () => {
+    const user = userEvent.setup();
+    const runtime = new TestRuntime(
+      onboardedSnapshot(),
+      Promise.resolve(false),
+      Promise.resolve(),
+      Promise.resolve(connectedNyxIdView()),
+    );
+    const history: NyxIdChatHistory = {
+      conversation: { id: CHAT_CONVERSATION_ID, activeTurn: false },
+      messages: [
+        {
+          id: "voice-user",
+          seq: 1,
+          turnId: "voice-turn",
+          role: "user",
+          text: "帮我处理这件事",
+          status: "completed",
+          errorCode: null,
+          requestId: CHAT_RECOVERY_REQUEST_ID,
+          executionPending: true,
+        },
+      ],
+    };
+    vi.spyOn(runtime, "nyxIdChatHistory").mockImplementation(async () =>
+      structuredClone(history),
+    );
+    const request = {
+      id: CHAT_RECOVERY_REQUEST_ID,
+      state: "completed" as const,
+      turn_id: "voice-turn",
+      pending_acknowledgement_ids: [],
+      result_message_id: null as string | null,
+    };
+    vi.spyOn(runtime, "nyxIdVoiceRequest").mockImplementation(
+      async () => request,
+    );
+    let now = Date.now();
+    const dateNow = vi.spyOn(Date, "now").mockImplementation(() => now);
+    let poll: (() => void) | undefined;
+    const schedule = window.setTimeout.bind(window);
+    const timer = vi
+      .spyOn(window, "setTimeout")
+      .mockImplementation((callback, delay, ...args) => {
+        if (delay === 2000 && typeof callback === "function") {
+          poll = callback;
+          return 987654;
+        }
+        return schedule(callback, delay, ...args);
+      });
+    try {
+      render(<CompanionApp runtime={runtime} />);
+      await user.click(
+        await screen.findByRole("button", { name: "和 NyxID 语音通话" }),
+      );
+      await screen.findByText(/当前账号没有可用的语音服务/);
+      await user.click(
+        screen.getAllByRole("button", { name: "返回文字对话" })[0]!,
+      );
+      await waitFor(() => expect(runtime.nyxIdVoiceRequest).toHaveBeenCalled());
+      now += 7000;
+      await act(async () => poll?.());
+      expect(
+        screen.getByRole("textbox", { name: "给 NyxID 发送消息" }),
+      ).toBeDisabled();
+
+      vi.mocked(runtime.nyxIdVoiceRequest).mockImplementationOnce(async () => {
+        // Publication and later replies commit between history and task reads.
+        history.messages = Array.from({ length: 50 }, (_, index) => ({
+          id: `recent-message-${index}`,
+          seq: 100 + index,
+          turnId: `recent-turn-${index}`,
+          role: "assistant",
+          text: `最近的回复 ${index + 1}`,
+          status: "completed",
+          errorCode: null,
+        }));
+        request.result_message_id = "voice-result-before-latest-page";
+        return request;
+      });
+      await act(async () => poll?.());
+
+      expect(
+        screen.getByRole("textbox", { name: "给 NyxID 发送消息" }),
+      ).toBeEnabled();
+      expect(screen.getByText("最近的回复 50")).toBeInTheDocument();
     } finally {
       timer.mockRestore();
       dateNow.mockRestore();

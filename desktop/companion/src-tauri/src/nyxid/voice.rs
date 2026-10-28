@@ -36,6 +36,7 @@ pub struct NyxIdVoiceRequest {
     state: String,
     turn_id: String,
     pending_acknowledgement_ids: Vec<String>,
+    result_message_id: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 pub struct VoiceName {
@@ -661,6 +662,32 @@ fn parse_server_text(text: &str, sid: &str, generation: i64) -> Result<ServerEve
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn projects_durable_publication_without_execution_metadata() {
+        let request: NyxIdVoiceRequest = serde_json::from_value(json!({
+            "id": uuid::Uuid::new_v4().to_string(),
+            "state": "completed",
+            "turn_id": "turn-1",
+            "pending_acknowledgement_ids": [],
+            "result_message_id": "published-visible-result",
+            "execution_result_message_id": "hidden-execution-result",
+            "provider_credential": "must-not-leak",
+        }))
+        .unwrap();
+        let value = serde_json::to_value(request).unwrap();
+        assert_eq!(value["result_message_id"], "published-visible-result");
+        assert!(value.get("execution_result_message_id").is_none());
+        assert!(value.get("provider_credential").is_none());
+
+        let legacy: NyxIdVoiceRequest = serde_json::from_value(json!({
+            "id": uuid::Uuid::new_v4().to_string(),
+            "state": "completed",
+            "turn_id": "turn-1",
+            "pending_acknowledgement_ids": [],
+        }))
+        .unwrap();
+        assert!(legacy.result_message_id.is_none());
+    }
     #[test]
     fn rejects_untrusted_commands_and_stale_audio() {
         assert!(

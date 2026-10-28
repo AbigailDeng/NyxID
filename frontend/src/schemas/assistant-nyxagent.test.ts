@@ -13,7 +13,9 @@ import {
   nyxAgentChannelListSchema,
   nyxAgentConversationSchema,
   nyxAgentHistorySchema,
+  nyxAgentEventSchema,
   nyxAgentMessageSchema,
+  nyxAgentModelSchema,
   nyxAgentSettingsFormSchema,
 } from "./assistant-nyxagent";
 
@@ -146,6 +148,14 @@ describe("NyxBot message and card schemas", () => {
     ).toMatchObject({ decider: "orchestrator", decided_by: "orchestrator" });
   });
 
+  it("accepts automatic receipts and tolerates future deciders and bypass reasons", () => {
+    const row = { id: "12345678-1234-4123-8123-123456789012", kind: "action", status: "allowed", summary: "Run the action", service_slug: null, service_name: null, tool_name: "tool", created_at: at, decided_at: at, expires_at: at,
+      decided_by: "access_mode", confirmation: { risk: "change", access_mode: "autopilot", reason: "approval" } };
+    expect(nyxAgentAcknowledgementSchema.parse(row)).toMatchObject({ decided_by: "access_mode", confirmation: { reason: "approval" } });
+    expect(nyxAgentAcknowledgementSchema.parse({ ...row, decided_by: "future", confirmation: { ...row.confirmation, reason: "future" } })).toMatchObject({ decided_by: "future", confirmation: { reason: "access_mode" } });
+    expect(nyxAgentMessageSchema.parse({ ...message, role: "user", continuation_of: row.id }).continuation_of).toBe(row.id);
+  });
+
   it("parses a history with team members", () => {
     const page = nyxAgentHistorySchema.parse({
       conversation: { ...legacyConversation, members: [] },
@@ -154,6 +164,16 @@ describe("NyxBot message and card schemas", () => {
     });
     expect(page.messages[0]?.role).toBe("event");
     expect(page.acknowledgements).toEqual([]);
+  });
+
+  it.each(["machine", "saved_login"] as const)("keeps routed %s requests in parsed history", (kind) => {
+    const request = { id: "12345678-1234-4123-8123-123456789012", kind, status: "pending",
+      decider: "orchestrator", summary: "Requested machine authority", service_slug: "owner-vm",
+      service_name: "Owner VM", tool_name: null, created_at: at, decided_at: null, expires_at: at };
+    const page = nyxAgentHistorySchema.parse({ conversation: legacyConversation, messages: [],
+      before_seq: null, acknowledgements: [request] });
+    expect(page.acknowledgements).toHaveLength(1);
+    expect(page.acknowledgements[0]).toMatchObject({ kind, decider: "orchestrator", status: "pending" });
   });
 });
 
@@ -271,12 +291,14 @@ describe("NyxBot team, settings and channel schemas", () => {
   it("validates settings form values against the server limits", () => {
     const schema = nyxAgentSettingsFormSchema(limits);
     const valid = {
+      access_mode: "nyxmode" as const,
       confirm_destructive: true,
       max_live_subagents: 0,
       max_concurrent_subagent_turns: 1,
       max_group_handoffs: 0,
       max_group_handoffs_per_hour: 0,
       max_auto_continuations: 8,
+      specialist_access_requests: "denied",
     };
     expect(schema.safeParse(valid).success).toBe(true);
     expect(schema.safeParse({ ...valid, max_auto_continuations: 0 }).success).toBe(true);
@@ -290,6 +312,33 @@ describe("NyxBot team, settings and channel schemas", () => {
     expect(schema.safeParse({ ...valid, max_concurrent_subagent_turns: 9 }).success).toBe(false);
     expect(schema.safeParse({ ...valid, max_live_subagents: 2.5 }).success).toBe(false);
     expect(schema.safeParse({ ...valid, max_live_subagents: Number.NaN }).success).toBe(false);
+  });
+
+  it("accepts each persisted access mode", () => {
+    const schema = nyxAgentSettingsFormSchema(limits);
+    const base = { specialist_access_requests: "denied" as const, max_live_subagents: 0, max_concurrent_subagent_turns: 1, max_group_handoffs: 0, max_group_handoffs_per_hour: 0, max_auto_continuations: 8 };
+    for (const access_mode of ["autopilot", "nyxmode", "ask_every_time"] as const) {
+      expect(schema.parse({ ...base, access_mode }).access_mode).toBe(access_mode);
+    }
+  });
+
+  it("parses action card confirmations and the model list", () => {
+    const card = {
+      id: "12345678-1234-4123-8123-123456789012", kind: "action", status: "pending",
+      summary: "Delete agent key", service_slug: null, service_name: null, tool_name: "nyxid__delete_agent_key",
+      created_at: at, decided_at: null, expires_at: at,
+    };
+    expect(nyxAgentAcknowledgementSchema.parse(card).confirmation).toBeUndefined();
+    expect(
+      nyxAgentAcknowledgementSchema.parse({
+        ...card,
+        confirmation: { risk: "destructive", access_mode: "ask_every_time", reason: "access_mode" },
+      }).confirmation,
+    ).toEqual({ risk: "destructive", access_mode: "ask_every_time", reason: "access_mode" });
+    expect(() =>
+      nyxAgentAcknowledgementSchema.parse({ ...card, confirmation: { risk: "unknown", reason: "access_mode" } }),
+    ).toThrow();
+    expect(nyxAgentModelSchema.parse({ id: "nyxagent/chat", label: "chat", available: false }).available).toBe(false);
   });
 
   it("treats missing and future channel follow readiness as unavailable", () => {
@@ -458,4 +507,28 @@ describe("agent display name and persona", () => {
       nyxbot.safeParse({ name: "NyxBot", display_name: " Nyx ", description: "", persona: "" }).data,
     ).toEqual({ name: "NyxBot", display_name: "Nyx", description: "", persona: "" });
   });
+});
+
+it("parses tool-image continuation events with the legacy required counter", () => {
+  const event = {
+    cursor: 1,
+    event: "turn.continuing",
+    turn_id: "turn",
+    continuation: 1,
+    reason: "tool_images",
+    image_round: 1,
+  };
+  expect(nyxAgentEventSchema.parse(event)).toMatchObject({ event: "turn.continuing", continuation: 1 });
+});
+
+it("retains optional personal Telegram thread and turn provenance, including null for web turns", () => {
+  const thread = { platform: "telegram", manager_id: "profile-id", binding_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", binding_generation: 2 };
+  const origin = { binding_id: thread.binding_id, binding_generation: 2, manager_authority_epoch: 3, personal_control_revision: 4 };
+  const conversation = nyxAgentConversationSchema.parse({ ...legacyConversation, platform_thread: thread, active_turn: { turn_id: "turn", started_at: at, platform_origin: origin } });
+  expect(conversation.platform_thread).toEqual(thread);
+  expect(conversation.active_turn?.platform_origin).toEqual(origin);
+  const message = { id: "message", seq: 1, turn_id: "turn", role: "user", text: "Telegram work", status: "completed", error_code: null, created_at: at };
+  expect(nyxAgentMessageSchema.parse({ ...message, platform_origin: origin }).platform_origin).toEqual(origin);
+  expect(nyxAgentMessageSchema.parse({ ...message, platform_origin: null }).platform_origin).toBeNull();
+  expect(nyxAgentConversationSchema.parse(legacyConversation).platform_thread).toBeUndefined();
 });

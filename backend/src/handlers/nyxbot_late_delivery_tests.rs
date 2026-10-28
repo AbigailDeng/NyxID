@@ -6,6 +6,12 @@ use wiremock::{
     matchers::{method, path},
 };
 
+#[path = "nyxbot_image_delivery_tests.rs"]
+mod image_delivery_tests;
+
+#[path = "nyxbot_source_queue_tests.rs"]
+mod source_queue_tests;
+
 struct Fixture {
     state: AppState,
     channel: NyxbotChannel,
@@ -35,7 +41,11 @@ async fn fixture(name: &str) -> Fixture {
     state
         .db
         .collection::<bson::Document>(crate::models::channel_bot::COLLECTION_NAME)
-        .insert_one(bot)
+        .replace_one(
+            doc! {"_id": bot.get_str("_id").unwrap().to_owned()},
+            bot.clone(),
+        )
+        .upsert(true)
         .await
         .unwrap();
     let gateway = MockServer::start().await;
@@ -86,6 +96,7 @@ async fn fixture(name: &str) -> Fixture {
             .unwrap(),
     );
     event.delivery = Some(ChannelTurnDelivery {
+        sender_kind: None,
         version: 1,
         state: "waiting".into(),
         origin: ChannelOrigin {
@@ -98,6 +109,8 @@ async fn fixture(name: &str) -> Fixture {
         guest: false,
         addressed: true,
         transport: "gateway".into(),
+        source_route_id: channel.route_id.clone(),
+        source_route_api_key_id: Some(channel.route_api_key_id.clone()),
         stream_deadline: now + ChronoDuration::seconds(570),
         checked_at: now,
         claim_id: None,
@@ -161,7 +174,7 @@ async fn patch(f: &Fixture, fields: bson::Document) {
 }
 
 #[tokio::test]
-async fn long_turn_deadline_notice_then_durable_late_answer_once() {
+async fn long_turn_deadline_is_quiet_then_durable_late_answer_once() {
     let f = fixture("channel_late_deadline").await;
     f.state.db.collection::<bson::Document>(CONVERSATIONS).update_one(doc! {"_id": &f.event.conversation_id}, doc! {"$set": {"active_turn": {
         "turn_id": &f.event.turn_id, "origin": "channel", "started_at": bson::DateTime::now(), "stop_requested": false,
@@ -176,8 +189,9 @@ async fn long_turn_deadline_notice_then_durable_late_answer_once() {
         Utc::now() - ChronoDuration::seconds(late_delivery::STREAM_SECS + 1),
     );
     let text = body_text(response).await;
-    assert!(text.contains("still working"));
-    assert!(text.contains("post the answer here"));
+    assert!(!text.contains("response.output_text"));
+    assert!(!text.contains("response.output_item"));
+    assert!(text.contains("response.completed"));
     assert!(!text.contains("response.failed"));
     late_delivery::sweep(&f.state).await.unwrap();
     assert!(sends(&f).await.is_empty());
@@ -238,12 +252,9 @@ async fn partial_failure_survives_both_stream_and_late_delivery() {
     assert_eq!(requests.len(), 1);
     let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
     assert_eq!(body["text"], partial);
-    assert!(
-        late_delivery::answer(&"界".repeat(9000), true)
-            .chars()
-            .count()
-            <= MAX_CHANNEL_REPLY_CHARS
-    );
+    let long = "界".repeat(9000);
+    assert!(late_delivery::answer(&long, true).starts_with(&long));
+    assert_eq!(late_delivery::answer(&long, false), long);
 }
 
 #[tokio::test]
@@ -656,4 +667,208 @@ async fn event_binding_rolls_back_with_admission_and_stale_claim_cannot_finish()
         .await
         .unwrap();
     assert_eq!(status(&f).await, "sent");
+}
+
+#[tokio::test]
+async fn external_bot_delayed_answer_keeps_guest_authority_despite_owner_id_overlap() {
+    let f = fixture("external_bot_delayed_guest").await;
+    // This ID is intentionally already present in owner_sender_ids. The
+    // authenticated bot actor classification must survive stream detachment.
+    f.state.db.collection::<bson::Document>(THREADS).update_one(
+        doc! {"channel_id":&f.channel.id},
+        doc! {"$set":{"kind":"group","members":"everyone","owner_seen":false,"owner_chat":false}},
+    ).await.unwrap();
+    patch(
+        &f,
+        doc! {"delivery.guest":true,"delivery.sender_kind":"bot","delivery.state":"pending"},
+    )
+    .await;
+    f.state
+        .db
+        .collection::<bson::Document>(CONVERSATIONS)
+        .update_one(
+            doc! {"_id":&f.event.conversation_id},
+            doc! {"$set":{"guest_turn":true}},
+        )
+        .await
+        .unwrap();
+    settled(&f, false).await;
+    late_delivery::sweep(&f.state).await.unwrap();
+    late_delivery::sweep(&f.state).await.unwrap();
+    assert_eq!(
+        status(&f).await,
+        "sent",
+        "a bot stays an admitted guest through delayed delivery"
+    );
+    assert_eq!(
+        sends(&f).await.len(),
+        1,
+        "settlement cannot duplicate an effect"
+    );
+    f.state.db.drop().await.unwrap();
+}
+
+#[tokio::test]
+async fn late_capacity_failure_preserves_complete_partial_reply_and_wait_copy() {
+    let f = fixture("channel_late_capacity_complete").await;
+    settled(&f, true).await;
+    let text = "界".repeat(9000);
+    f.state
+        .db
+        .collection::<bson::Document>(crate::models::assistant_message::COLLECTION_NAME)
+        .update_one(
+            doc! {"conversation_id": &f.event.conversation_id, "turn_id": &f.event.turn_id},
+            doc! {"$set": {"text": &text, "error_code": "capacity_exceeded"}},
+        )
+        .await
+        .unwrap();
+    delivery::detach(&f.state.db, &f.event.id).await.unwrap();
+    late_delivery::sweep(&f.state).await.unwrap();
+    late_delivery::sweep(&f.state).await.unwrap();
+    let requests = sends(&f).await;
+    assert_eq!(requests.len(), 1);
+    let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(
+        body["text"],
+        format!(
+            "{text}\n\n{}",
+            crate::services::assistant_turn_observability::capacity_message(None)
+        )
+    );
+}
+
+/// The real progress adapter sends after the threshold while leaving the
+/// event's final-delivery claim available, then the durable answer sends once.
+#[tokio::test]
+async fn checking_notice_arrives_after_five_seconds_without_consuming_final_answer() {
+    use crate::services::assistant_checking_notice as notice;
+    let mut f = fixture("channel_checking_notice_delivery").await;
+    Mock::given(method("POST"))
+        .and(path("/events/cmaeg1.ev.original/replies"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+        .expect(1)
+        .mount(&f.gateway)
+        .await;
+    let request = serde_json::from_value::<engine::TurnRequest>(json!({
+        "text": "Check current availability", "conversation_id": &f.event.conversation_id,
+    }))
+    .unwrap();
+    let mut row = engine::begin_turn(&f.state.db, OWNER, &request, &f.state.encryption_keys)
+        .await
+        .unwrap();
+    let origin = f.event.delivery.as_ref().unwrap().origin.clone();
+    let turn = row.active_turn.as_mut().unwrap();
+    turn.origin = crate::models::assistant_conversation::TurnOrigin::Channel;
+    turn.asked_from = Some(origin.clone());
+    turn.channel_event_id = Some(f.event.id.clone());
+    turn.external_check_started = true;
+    let began = std::time::Instant::now();
+    turn.started_at = Utc::now();
+    f.event.turn_id = Some(turn.turn_id.clone());
+    f.state
+        .db
+        .collection::<bson::Document>(CONVERSATIONS)
+        .update_one(
+            doc! {"_id": &row.id},
+            doc! {"$set": {"active_turn": bson::to_bson(turn).unwrap()}},
+        )
+        .await
+        .unwrap();
+    patch(&f, doc! {"turn_id": &f.event.turn_id}).await;
+    let reference = f
+        .state
+        .encryption_keys
+        .encrypt(b"cmaeg1.ev.original")
+        .await
+        .unwrap();
+    f.state.db.collection::<bson::Document>(THREADS).update_one(
+        doc! {"channel_id": &f.channel.id, "partition": PARTITION},
+        doc! {"$set": {"event_ref_ciphertext": bson::Binary {subtype: bson::spec::BinarySubtype::Generic, bytes: reference}, "event_ref_expires_at": bson::DateTime::from_chrono(Utc::now() + ChronoDuration::hours(1))}},
+    ).await.unwrap();
+    let egress = crate::handlers::assistant_nyxagent::http_egress(
+        f.state.clone(),
+        crate::test_utils::test_auth_user(OWNER),
+    );
+    let task = tokio_util::task::AbortOnDropHandle::new(egress.checking_notice(&row).unwrap());
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert!(f.gateway.received_requests().await.unwrap().is_empty());
+    tokio::time::timeout(std::time::Duration::from_secs(8), task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(began.elapsed() >= std::time::Duration::from_millis(4900));
+    let progress = f.gateway.received_requests().await.unwrap();
+    assert_eq!(progress.len(), 1);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&progress[0].body).unwrap()["text"],
+        notice::TEXT
+    );
+    assert_eq!(status(&f).await, "waiting");
+    assert!(!notice::claim(&f.state.db, &row, Utc::now()).await.unwrap());
+    assert!(
+        Box::pin(engine::finish_turn(
+            &f.state.db,
+            &row,
+            &row.credential_api_key_id,
+            &Uuid::new_v4().to_string(),
+            &engine::TurnResult {
+                text: "Useful answer".into(),
+                session_id: None,
+                response_id: None,
+                error: None,
+            },
+        ))
+        .await
+        .unwrap()
+        .is_none()
+    );
+    delivery::detach(&f.state.db, &f.event.id).await.unwrap();
+    late_delivery::sweep(&f.state).await.unwrap();
+    late_delivery::sweep(&f.state).await.unwrap();
+    assert_eq!(sends(&f).await.len(), 1);
+    assert_eq!(status(&f).await, "sent");
+    let messages = engine::messages(&f.state.db, OWNER, &row.id, 20, None)
+        .await
+        .unwrap();
+    assert!(
+        !messages
+            .iter()
+            .any(|message| message.text.contains(notice::TEXT))
+    );
+}
+
+#[tokio::test]
+async fn guest_1995_route_refusal_is_safe_chat_text_for_stream_and_late_delivery() {
+    const SAFE: &str = "This assistant isn't available to guests yet.";
+    for streamed in [true, false] {
+        let f = fixture("guest_1995_channel_refusal").await;
+        settled(&f, false).await;
+        f.state.db.collection::<AssistantMessage>(crate::models::assistant_message::COLLECTION_NAME)
+            .update_one(doc!{"conversation_id":f.event.conversation_id.as_deref(),"turn_id":f.event.turn_id.as_deref(),"role":"assistant"},
+                doc!{"$set":{"text":"","status":"failed","error_code":"guest_model_route_required"}}).await.unwrap();
+        if streamed {
+            let (sender, receiver) = broadcast::channel(8);
+            sender.send(json!({"event":"turn.completed","status":"failed","error":{"code":"guest_model_route_required"}})).unwrap();
+            let response = late_delivery::provider_stream(
+                f.state.clone(),
+                f.event.id.clone(),
+                "response".into(),
+                json!({"type":"response.created"}),
+                receiver,
+                Utc::now(),
+            );
+            let text = body_text(response).await;
+            assert!(text.contains(SAFE));
+            assert!(!text.contains("response.failed"));
+            assert_eq!(status(&f).await, "streamed");
+        } else {
+            delivery::detach(&f.state.db, &f.event.id).await.unwrap();
+            late_delivery::sweep(&f.state).await.unwrap();
+            let requests = sends(&f).await;
+            assert_eq!(requests.len(), 1);
+            let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+            assert_eq!(body["text"], SAFE);
+        }
+        assert!(engine::TurnError::new("guest_model_route_required").message == SAFE);
+    }
 }

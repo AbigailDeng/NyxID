@@ -1,3 +1,6 @@
+import { ToolManagerEditor } from "@/components/services/tool-manager-editor";
+import { canManageCatalog, canWriteTool } from "@/types/api";
+import { ServiceToolFields } from "@/components/services/service-tool-fields";
 import { ServiceConcurrency } from "@/components/services/service-concurrency";
 import { PlatformServiceFields } from "@/components/services/platform-service-fields";
 import {
@@ -77,6 +80,7 @@ export function ServiceEditPage() {
   const { serviceId } = useParams({ strict: false }) as { serviceId: string };
   const { data: service, isLoading, error, refetch } = useService(serviceId);
   useBreadcrumbLabel(service?.name);
+  const user = useAuthStore((state) => state.user);
   if (isLoading && !service) return <Skeleton className="h-96 w-full" />;
   if (!service)
     return (
@@ -87,6 +91,15 @@ export function ServiceEditPage() {
         onRetry={refetch}
       />
     );
+  if (!user?.is_admin && service.offering_kind === "tool") {
+    return canWriteTool(user, service) ? (
+      <ToolManagerEditor service={service} />
+    ) : (
+      <ErrorBanner message="Tool write authority required" />
+    );
+  }
+  if (!canManageCatalog(user))
+    return <ErrorBanner message="Catalog write authority required" />;
   return <ServiceEditForm key={serviceId} source={service} />;
 }
 
@@ -98,6 +111,12 @@ function ServiceEditForm({ source }: { readonly source: DownstreamService }) {
   const navigate = useNavigate();
   const updateMutation = useUpdateService();
   const user = useAuthStore((s) => s.user);
+  const canEditAuthScheme = !!user?.is_admin || (
+    service.offering_kind !== "tool" &&
+    canManageCatalog(user) &&
+    service.catalog_manager_created === true &&
+    service.created_by === user?.id
+  );
   const { data: appsData } = useDeveloperApps();
   const form = useAppForm<UpdateServiceFormData>({
     resolver: zodResolver(updateServiceSchema),
@@ -127,6 +146,7 @@ function ServiceEditForm({ source }: { readonly source: DownstreamService }) {
     if (stale) return;
     const before = serviceFormPayload(serviceFormValues(service), service);
     const patch = serviceFormPatch(data, service);
+    if (!canEditAuthScheme) delete patch.auth_scheme;
     if (service.service_type !== "ssh") {
       try {
         delete patch.recommended_skills;
@@ -137,6 +157,9 @@ function ServiceEditForm({ source }: { readonly source: DownstreamService }) {
       }
     }
     if (!user?.is_admin) {
+      delete patch.offering_kind;
+      delete patch.topics;
+      delete patch.supplier;
       delete patch.inference;
       delete patch.platform_key;
       delete patch.credential;
@@ -223,6 +246,15 @@ function ServiceEditForm({ source }: { readonly source: DownstreamService }) {
       <div className="max-w-2xl">
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <fieldset
+            className="space-y-4"
+            disabled={service.offering_kind === "tool" && !user?.is_admin}
+            title={
+              service.offering_kind === "tool" && !user?.is_admin
+                ? "Tool settings require platform admin authority."
+                : undefined
+            }
+          >
             {form.formState.errors.root && (
               <div className="rounded-lg bg-destructive/10 p-3 text-12 text-destructive">
                 {form.formState.errors.root.message}
@@ -239,6 +271,10 @@ function ServiceEditForm({ source }: { readonly source: DownstreamService }) {
                   service.service_category}
               </Badge>
             </div>
+
+            {user?.is_admin && service.service_type === "http" && (
+              <ServiceToolFields form={form} service={service} />
+            )}
 
             <FormField
               control={form.control}
@@ -610,6 +646,31 @@ function ServiceEditForm({ source }: { readonly source: DownstreamService }) {
                     </div>
 
                     <Separator className="my-2" />
+                    {service.auth_method === "bearer" &&
+                      canEditAuthScheme && (
+                        <FormField
+                          control={form.control}
+                          name="auth_scheme"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Authorization scheme</FormLabel>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  value={field.value ?? ""}
+                                  placeholder="Bearer"
+                                  maxLength={64}
+                                />
+                              </FormControl>
+                              <p className="text-12 text-muted-foreground">
+                                Leave blank for Bearer. Use the scheme
+                                documented by the vendor.
+                              </p>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      )}
                     <div className="space-y-4">
                       <div className="space-y-1">
                         <h3 className="text-13 font-semibold">
@@ -1140,6 +1201,7 @@ function ServiceEditForm({ source }: { readonly source: DownstreamService }) {
                 Cancel
               </Button>
             </div>
+          </fieldset>
           </form>
         </Form>
         {user?.is_admin && <ServiceConcurrency key={serviceId} serviceId={serviceId} />}

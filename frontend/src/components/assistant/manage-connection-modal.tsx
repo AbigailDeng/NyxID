@@ -340,7 +340,7 @@ function ConnectionPanel({
         toast.success(
           response?.upstream_revocation_scheduled === true
             ? "Removed from NyxID. Upstream revocation scheduled."
-            : "Removed from NyxID. Upstream access remains active.",
+            : "Removed from NyxID. Upstream revocation is not confirmed.",
         );
         setCascadeDetails(null);
         // A service with other connections keeps the modal open on what's
@@ -593,11 +593,14 @@ export function ManageConnectionModal({
   keyIds,
   serviceName,
   iconSlug,
+  iconUrl,
   onClose,
 }: {
   readonly keyIds: readonly string[];
   readonly serviceName: string;
   readonly iconSlug?: string | null;
+  /** Uploaded icon; preferred over the slug glyph when present. */
+  readonly iconUrl?: string | null;
   readonly onClose: () => void;
 }) {
   const multiple = keyIds.length > 1;
@@ -608,8 +611,8 @@ export function ManageConnectionModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2.5">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-12 font-semibold text-muted-foreground">
-              {iconSlug ? (
-                <ServiceIcon slug={iconSlug} size="md" />
+              {iconSlug || iconUrl ? (
+                <ServiceIcon slug={iconSlug} iconUrl={iconUrl} size="md" />
               ) : (
                 connectorInitial(serviceName)
               )}

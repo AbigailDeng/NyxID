@@ -1,4 +1,4 @@
-//! Per-person NyxBot preferences: destructive-action confirmation and team limits.
+//! Per-person NyxBot preferences: access mode, specialist requests and team limits.
 use chrono::Utc;
 use mongodb::{
     Database,
@@ -9,7 +9,7 @@ use mongodb::{
 use crate::{
     errors::{AppError, AppResult},
     models::assistant_settings::{
-        AssistantSettings, COLLECTION_NAME, DEFAULT_SCHEDULE_MINIMUM_MINUTES,
+        AccessMode, AssistantSettings, COLLECTION_NAME, DEFAULT_SCHEDULE_MINIMUM_MINUTES,
         MAX_CONCURRENT_SUBAGENT_TURNS_LIMIT, MAX_GROUP_HANDOFFS_LIMIT,
         MAX_GROUP_HANDOFFS_PER_HOUR_LIMIT, MAX_LIVE_SUBAGENTS_LIMIT,
         SCHEDULE_MINIMUM_MINUTES_LIMIT, TRIGGER_RUNS_PER_DAY_LIMIT, TRIGGER_RUNS_PER_HOUR_LIMIT,
@@ -18,11 +18,27 @@ use crate::{
 
 /// Settings for `user_id`, or the defaults when none were saved.
 pub async fn get(db: &Database, user_id: &str) -> AppResult<AssistantSettings> {
-    Ok(db
-        .collection::<AssistantSettings>(COLLECTION_NAME)
+    Ok(stored(db, user_id).await?.0)
+}
+
+/// The settings and whether the row stores an access mode. Legacy rows
+/// predate access modes: an explicit destructive-action opt-out reads as
+/// Full access until the next write stores it.
+async fn stored(db: &Database, user_id: &str) -> AppResult<(AssistantSettings, bool)> {
+    let Some(raw) = db
+        .collection::<bson::Document>(COLLECTION_NAME)
         .find_one(doc! {"_id": user_id})
         .await?
-        .unwrap_or_else(|| AssistantSettings::defaults(user_id)))
+    else {
+        return Ok((AssistantSettings::defaults(user_id), false));
+    };
+    let stored_mode = raw.contains_key("access_mode");
+    let mut row: AssistantSettings = bson::from_document(raw)
+        .map_err(|_| AppError::Internal("Assistant settings unavailable".into()))?;
+    if !stored_mode && row.skip_destructive_confirmation {
+        row.access_mode = AccessMode::Autopilot;
+    }
+    Ok((row, stored_mode))
 }
 
 #[derive(Clone, Debug, Default)]
@@ -34,10 +50,13 @@ pub struct Update {
     pub trigger_runs_per_hour: Option<i32>,
     pub trigger_runs_per_day: Option<i32>,
     pub skip_destructive_confirmation: Option<bool>,
+    pub access_mode: Option<crate::models::assistant_settings::AccessMode>,
     pub max_live_subagents: Option<i32>,
     pub max_concurrent_subagent_turns: Option<i32>,
     pub max_group_handoffs: Option<i32>,
     pub max_group_handoffs_per_hour: Option<i32>,
+    pub specialist_access_requests:
+        Option<crate::models::assistant_settings::SpecialistAccessRequests>,
 }
 
 pub async fn update(db: &Database, user_id: &str, update: Update) -> AppResult<AssistantSettings> {
@@ -113,6 +132,23 @@ pub async fn update(db: &Database, user_id: &str, update: Update) -> AppResult<A
     if let Some(Some(voice)) = &update.voice {
         super::assistant_voice::validate_preferences(voice)?;
     }
+    // Rows written before access modes carry only the destructive-action
+    // switch; `get` reads an opted-out owner as Full access. Every write
+    // materializes that mode, so the stored row and what `get` returns agree.
+    let (current, stored_mode) = stored(db, user_id).await?;
+    let mode = match (update.access_mode, update.skip_destructive_confirmation) {
+        (Some(mode), _) => Some(mode),
+        // The legacy switch is a view of the mode: turning confirmations off
+        // is Full access, and turning them back on leaves Full access for Auto.
+        (None, Some(true)) => Some(AccessMode::Autopilot),
+        (None, Some(false)) if current.access_mode == AccessMode::Autopilot => {
+            Some(AccessMode::Nyxmode)
+        }
+        (None, _) if !stored_mode && current.access_mode == AccessMode::Autopilot => {
+            Some(AccessMode::Autopilot)
+        }
+        (None, _) => None,
+    };
     let mut set = doc! {"updated_at":mongodb::bson::DateTime::from_chrono(Utc::now())};
     let mut defaults = mongodb::bson::to_document(&AssistantSettings::defaults(user_id))
         .map_err(|_| AppError::Internal("Settings serialization failed".into()))?;
@@ -146,7 +182,20 @@ pub async fn update(db: &Database, user_id: &str, update: Update) -> AppResult<A
         set.insert("trigger_runs_per_day", value);
         defaults.remove("trigger_runs_per_day");
     }
-    if let Some(value) = update.skip_destructive_confirmation {
+    if let Some(value) = mode {
+        set.insert(
+            "access_mode",
+            bson::to_bson(&value)
+                .map_err(|_| AppError::Internal("Access mode serialization failed".into()))?,
+        );
+        // Keep the legacy field synchronized for replicas that predate modes.
+        set.insert(
+            "skip_destructive_confirmation",
+            value == AccessMode::Autopilot,
+        );
+        defaults.remove("access_mode");
+        defaults.remove("skip_destructive_confirmation");
+    } else if let Some(value) = update.skip_destructive_confirmation {
         set.insert("skip_destructive_confirmation", value);
         defaults.remove("skip_destructive_confirmation");
     }
@@ -166,7 +215,16 @@ pub async fn update(db: &Database, user_id: &str, update: Update) -> AppResult<A
         set.insert("max_group_handoffs_per_hour", value);
         defaults.remove("max_group_handoffs_per_hour");
     }
-    db.collection::<AssistantSettings>(COLLECTION_NAME)
+    if let Some(value) = update.specialist_access_requests {
+        set.insert(
+            "specialist_access_requests",
+            bson::to_bson(&value)
+                .map_err(|_| AppError::Internal("Settings serialization failed".into()))?,
+        );
+        defaults.remove("specialist_access_requests");
+    }
+    let updated = db
+        .collection::<AssistantSettings>(COLLECTION_NAME)
         .find_one_and_update(
             doc! {"_id":user_id},
             doc! {"$set":set,"$setOnInsert":defaults},
@@ -174,7 +232,16 @@ pub async fn update(db: &Database, user_id: &str, update: Update) -> AppResult<A
         .upsert(true)
         .return_document(ReturnDocument::After)
         .await?
-        .ok_or_else(|| AppError::Internal("Assistant settings unavailable".into()))
+        .ok_or_else(|| AppError::Internal("Assistant settings unavailable".into()))?;
+    if updated.access_mode == AccessMode::Autopilot && current.access_mode != updated.access_mode {
+        super::assistant_acknowledgement_service::retire_full_access_confirmations(
+            db,
+            Some(user_id),
+            None,
+        )
+        .await?;
+    }
+    Ok(updated)
 }
 
 /// Audit a settings change without free-form values.
@@ -206,6 +273,37 @@ pub async fn audit(
             "max_concurrent_subagent_turns": after.max_concurrent_subagent_turns,
             "max_group_handoffs": after.max_group_handoffs,
             "max_group_handoffs_per_hour": after.max_group_handoffs_per_hour,
+            "access_mode": after.access_mode,
+            "previous_access_mode": before.access_mode,
+            "specialist_access_requests": after.specialist_access_requests,
+            "previous_specialist_access_requests": before.specialist_access_requests,
+        })),
+    )
+    .await;
+}
+
+/// Audit a change of the access mode governing NyxBot actions: the owner's
+/// workspace mode (`agent_id` absent) or one agent's override (`None` means
+/// it inherits the workspace mode). No-op when nothing changed.
+pub async fn audit_access_mode(
+    db: &Database,
+    actor: &super::audit_service::AuditActor,
+    agent_id: Option<&str>,
+    old: Option<AccessMode>,
+    new: Option<AccessMode>,
+) {
+    if old == new {
+        return;
+    }
+    let _ = super::audit_service::log_actor_event(
+        db.clone(),
+        actor,
+        "assistant_access_mode_changed",
+        Some(serde_json::json!({
+            "scope": if agent_id.is_some() {"agent"} else {"workspace"},
+            "agent_id": agent_id,
+            "old": old,
+            "new": new,
         })),
     )
     .await;

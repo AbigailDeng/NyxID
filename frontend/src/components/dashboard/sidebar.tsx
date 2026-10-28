@@ -16,6 +16,7 @@ import {
   Bell,
   WalletCards,
   Coins,
+  ReceiptText,
   ClipboardList,
   ChartNoAxesCombined,
   Lock,
@@ -43,17 +44,25 @@ import { useFeature } from "@/hooks/use-feature-flag";
 import { useAuthStore } from "@/stores/auth-store";
 import { useThemeStore, type SidebarMode } from "@/stores/theme-store";
 import { SidebarResizeHandle } from "@/components/layout/sidebar-resize-handle";
-import { canAdminWrite, hasAdminRead, isBillingAvailable } from "@/types/api";
-
+import {
+  canAdminWrite,
+  canManageTools,
+  canReadAdminUsage,
+  canReadFeatureFlags,
+  hasAdminRead,
+  isBillingAvailable,
+} from "@/types/api";
 
 export const MAIN_NAV = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/keys", icon: Cable, label: "AI Services" },
+  { to: "/tools", icon: Sparkles, label: "Tools" },
   { to: "/billing", icon: WalletCards, label: "Billing & Usage" },
   { to: "/orgs", icon: Building2, label: "Organizations" },
   { to: "/nodes", icon: HardDrive, label: "Nodes" },
   { to: "/devices/onboard", icon: QrCode, label: "Device Onboard" },
   { to: "/channel-bots", icon: Radio, label: "Channel Bots" },
+  { to: "/onboarding/setups", icon: Bot, label: "Bot Setups" },
   { to: "/settings", icon: Settings, label: "Settings" },
   { to: "/settings/consents", icon: KeyRound, label: "Authorized Apps" },
   { to: "/docs", icon: BookOpen, label: "Docs" },
@@ -72,16 +81,24 @@ export const DEVELOPER_NAV = [
   { to: "/integration-guide", icon: BookMarked, label: "Integration Guide" },
 ] as const;
 
+const ADMIN_USAGE_PATH = "/admin/usage";
+
 export const ADMIN_NAV = [
+  { to: "/admin/platform-bots", icon: Bot, label: "Platform BotFather" },
   { to: "/admin/users", icon: Users, label: "Users" },
   { to: "/admin/invite-codes", icon: Ticket, label: "Invite Codes" },
   { to: "/admin/feature-flags", icon: Flag, label: "Feature Flags" },
   { to: "/admin/upload-retention", icon: HardDrive, label: "Upload retention" },
-  { to: "/admin/platform-credentials", icon: KeyRound, label: "Platform Credentials" },
+  {
+    to: "/admin/platform-credentials",
+    icon: KeyRound,
+    label: "Platform Credentials",
+  },
   { to: "/admin/audit-log", icon: ClipboardList, label: "Audit Log" },
   { to: "/admin/usage", icon: ChartNoAxesCombined, label: "Usage" },
   { to: "/admin/integrity", icon: ShieldCheck, label: "Integrity" },
   { to: "/admin/credits", icon: Coins, label: "Credits" },
+  { to: "/admin/billing", icon: ReceiptText, label: "Billing" },
   { to: "/admin/service-accounts", icon: Bot, label: "Service Accounts" },
   { to: "/admin/oauth-clients", icon: KeyRound, label: "OAuth Clients" },
   { to: "/admin/roles", icon: ShieldCheck, label: "Roles" },
@@ -89,6 +106,7 @@ export const ADMIN_NAV = [
   { to: "/admin/nodes", icon: HardDrive, label: "Node Registry" },
   { to: "/admin/ownership", icon: Server, label: "Ownership transfers" },
   { to: "/services", icon: Server, label: "Services" },
+  { to: "/admin/tools", icon: Sparkles, label: "Tools" },
   { to: "/providers", icon: Plug, label: "Providers" },
 ] as const;
 
@@ -106,12 +124,29 @@ export function getVisibleMainNav(
   );
 }
 
-function getVisibleAdminNav(
-  user: Parameters<typeof canAdminWrite>[0],
+/// Admin nav entries permitted by platform roles or scoped capabilities.
+export function getVisibleAdminNav(
+  user: Parameters<typeof canReadAdminUsage>[0],
 ): readonly NavItemDef[] {
+  if (!hasAdminRead(user)) {
+    return ADMIN_NAV.filter(
+      (item) =>
+        (item.to === ADMIN_USAGE_PATH && canReadAdminUsage(user)) ||
+        (item.to === "/admin/tools" && canManageTools(user)) ||
+        (item.to === "/admin/feature-flags" && canReadFeatureFlags(user)),
+    );
+  }
   return ADMIN_NAV.filter(
     (item) =>
-      !["/admin/platform-credentials", "/admin/ownership", "/admin/upload-retention"].includes(item.to) || canAdminWrite(user),
+      ![
+        "/admin/platform-credentials",
+        "/admin/platform-bots",
+        "/admin/ownership",
+        "/admin/tools",
+        "/admin/upload-retention",
+      ].includes(item.to) ||
+      canAdminWrite(user) ||
+      (item.to === "/admin/tools" && canManageTools(user)),
   );
 }
 
@@ -334,7 +369,7 @@ export function Sidebar({
           ))}
         </div>
 
-        {hasAdminRead(user) && (
+        {adminNav.length > 0 && (
           <>
             <div className="px-3 my-2 flex items-center">
               {isCollapsed ? (
@@ -449,7 +484,9 @@ export function Sidebar({
       )}
       style={mode === "collapsed" ? undefined : { width }}
     >
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{sidebarContent}</div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {sidebarContent}
+      </div>
       {mode === "expanded" && (
         <SidebarResizeHandle
           sidebar="dashboard"

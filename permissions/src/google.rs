@@ -30,7 +30,7 @@ pub struct ApiOperation {
     pub body: Option<JsonShape>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueryParameter {
     #[serde(default)]
@@ -40,7 +40,7 @@ pub struct QueryParameter {
 
 /// Small, bounded schema vocabulary. Object properties are always closed,
 /// including objects nested in arrays (such as Workspace batchUpdate requests).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum JsonShape {
     Object {
@@ -59,6 +59,14 @@ pub enum JsonShape {
         minimum: i64,
         maximum: i64,
     },
+    /// Finite JSON numbers, bounded inclusively. Precision uses serde_json's
+    /// canonical decimal text, expanded from exponent notation and with trailing
+    /// fractional zeros removed; integer-valued floats therefore have scale zero.
+    Number {
+        minimum: i64,
+        maximum: i64,
+        max_fraction_digits: u8,
+    },
     Boolean,
     Exact {
         value: Value,
@@ -69,7 +77,7 @@ pub enum JsonShape {
 }
 
 impl JsonShape {
-    fn validate(&self, depth: usize, remaining: &mut usize) -> Result<(), Error> {
+    pub(crate) fn validate(&self, depth: usize, remaining: &mut usize) -> Result<(), Error> {
         if depth > 12 || *remaining == 0 {
             return Err(Error::Policy("body schema exceeds depth or node limit"));
         }
@@ -104,6 +112,13 @@ impl JsonShape {
             Self::Integer { minimum, maximum } if minimum > maximum => {
                 return Err(Error::Policy("invalid integer bounds"));
             }
+            Self::Number {
+                minimum,
+                maximum,
+                max_fraction_digits,
+            } if minimum > maximum || *max_fraction_digits > 12 => {
+                return Err(Error::Policy("invalid number bounds or fraction limit"));
+            }
             Self::OneOf { values } if values.is_empty() || values.len() > 100 => {
                 return Err(Error::Policy("one_of requires 1–100 values"));
             }
@@ -112,7 +127,7 @@ impl JsonShape {
         Ok(())
     }
 
-    fn accepts(&self, value: &Value) -> bool {
+    pub(crate) fn accepts(&self, value: &Value) -> bool {
         match self {
             Self::Object {
                 properties,
@@ -132,6 +147,11 @@ impl JsonShape {
             Self::Integer { minimum, maximum } => value
                 .as_i64()
                 .is_some_and(|n| (*minimum..=*maximum).contains(&n)),
+            Self::Number {
+                minimum,
+                maximum,
+                max_fraction_digits,
+            } => crate::values::number_in_bounds(value, *minimum, *maximum, *max_fraction_digits),
             Self::Boolean => value.is_boolean(),
             Self::Exact { value: expected } => value == expected,
             Self::OneOf { values } => values.contains(value),
@@ -187,7 +207,7 @@ fn identifier(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
 }
 
-fn path_is_canonical(path: &str, template: bool) -> bool {
+pub(crate) fn path_is_canonical(path: &str, template: bool) -> bool {
     path.starts_with('/')
         && path.len() <= 2048
         && path.len() > 1
@@ -230,7 +250,7 @@ fn variable(segment: &str) -> Option<(&str, &str)> {
     Some((name, suffix))
 }
 
-fn exact_strings(rule: &ValueRule) -> Option<Vec<&str>> {
+pub(crate) fn exact_strings(rule: &ValueRule) -> Option<Vec<&str>> {
     match rule {
         ValueRule::Exact { value } => Some(vec![value.as_str()?]),
         ValueRule::OneOf { values } if !values.is_empty() && values.len() <= 100 => {
@@ -240,7 +260,7 @@ fn exact_strings(rule: &ValueRule) -> Option<Vec<&str>> {
     }
 }
 
-fn reserved_query(name: &str) -> bool {
+pub(crate) fn reserved_query(name: &str) -> bool {
     !identifier(name)
         || name.to_ascii_lowercase().starts_with("_nyxid")
         || matches!(
@@ -292,28 +312,8 @@ impl ApiOperation {
                 "every path variable requires an exact or one_of rule",
             ));
         }
-        for rule in self.path_parameters.values() {
-            if exact_strings(rule).is_none_or(|values| {
-                values.iter().any(|value| {
-                    value.contains('/') || !path_is_canonical(&format!("/{value}"), false)
-                })
-            }) {
-                return Err(Error::Policy(
-                    "path variables require literal exact or one_of strings",
-                ));
-            }
-        }
-        for (name, parameter) in &self.query_parameters {
-            if reserved_query(name)
-                || matches!(&parameter.rule, ValueRule::Exact { value } if !value.is_string())
-                || matches!(&parameter.rule, ValueRule::OneOf { values } if values.is_empty() || values.len() > 100 || values.iter().any(|v| !v.is_string()))
-                || (name.eq_ignore_ascii_case("alt")
-                    && exact_strings(&parameter.rule)
-                        .is_none_or(|values| values.iter().any(|v| *v != "json")))
-            {
-                return Err(Error::Policy("invalid or reserved query parameter rule"));
-            }
-        }
+        crate::values::validate_path_rules(self.path_parameters.values())?;
+        crate::values::validate_query_rules(&self.query_parameters)?;
         if let Some(body) = &self.body {
             if matches!(self.method.as_str(), "GET" | "HEAD") {
                 return Err(Error::Policy("read operations cannot declare a body"));
@@ -344,38 +344,15 @@ impl ApiOperation {
     }
 
     fn check_inputs(&self, request: &Request) -> Result<(), Error> {
-        if request
-            .query
-            .keys()
-            .any(|name| !self.query_parameters.contains_key(name))
-        {
-            return Err(Error::Denied("query parameter is not allowed"));
-        }
-        for (name, parameter) in &self.query_parameters {
-            match request.query.get(name) {
-                Some(value) if matches_value(&parameter.rule, &Value::String(value.clone())) => {}
-                None if !parameter.required => {}
-                _ => return Err(Error::Denied("query parameter violates its rule")),
-            }
-        }
-        match (&self.body, request.body.is_empty()) {
-            (None, true) => Ok(()),
-            (Some(shape), false) => {
-                if request
-                    .content_type
-                    .as_deref()
-                    .and_then(|s| s.split(';').next())
-                    .map(str::trim)
-                    != Some("application/json")
-                {
-                    return Err(Error::Denied("body requires application/json"));
-                }
-                if !shape.accepts(&parse_json(&request.body)?) {
-                    return Err(Error::Denied("body violates its closed schema"));
-                }
-                Ok(())
-            }
-            _ => Err(Error::Denied("body is missing or forbidden")),
+        crate::values::check_query(&self.query_parameters, &request.query)?;
+        match &self.body {
+            None if request.body.is_empty() => Ok(()),
+            None => Err(Error::Denied("body is missing or forbidden")),
+            Some(shape) => crate::values::check_json_body(
+                shape,
+                &request.body,
+                request.content_type.as_deref(),
+            ),
         }
     }
 }

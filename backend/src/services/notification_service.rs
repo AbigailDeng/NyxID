@@ -20,12 +20,42 @@ pub struct NotificationResult {
     pub telegram_message_id: Option<i64>,
 }
 
-/// Return whether at least one notification channel can currently receive an
-/// approval request. This is a delivery fact, separate from the user's stored
-/// approval preference.
+/// Whether the user has enabled a registered channel. This does not establish
+/// provider configuration, delivery success, or approval enforcement.
 pub fn has_active_notification_channel(channel: &NotificationChannel) -> bool {
     (channel.telegram_enabled && channel.telegram_chat_id.is_some())
         || (channel.push_enabled && !channel.push_devices.is_empty())
+}
+
+/// Configuration readiness only; a provider may still reject a token or fail
+/// transiently. Actual send results remain on each persisted approval request.
+pub fn approval_delivery_configured(
+    channel: &NotificationChannel,
+    config: &AppConfig,
+    fcm_initialized: bool,
+    apns_initialized: bool,
+) -> bool {
+    if !has_active_notification_channel(channel) {
+        return false;
+    }
+    let nonempty = |value: Option<&str>| value.is_some_and(|v| !v.trim().is_empty());
+    (channel.telegram_enabled
+        && channel.telegram_chat_id.is_some()
+        && nonempty(config.telegram_bot_token.as_deref()))
+        || (channel.push_enabled
+            && channel.push_devices.iter().any(|device| {
+                !device.token.trim().is_empty()
+                    && match device.platform.as_str() {
+                        "fcm" => fcm_initialized && nonempty(config.fcm_project_id.as_deref()),
+                        "apns" => {
+                            apns_initialized
+                                && nonempty(
+                                    device.app_id.as_deref().or(config.apns_topic.as_deref()),
+                                )
+                        }
+                        _ => false,
+                    }
+            }))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -227,6 +257,155 @@ pub async fn send_connection_expired_notification(
     user_id: &str,
     context: &ConnectionExpiredNotificationContext,
 ) -> AppResult<NotificationResult> {
+    let rendered = render_connection_expired_notification(config, context);
+    deliver_best_effort(
+        db,
+        config,
+        http_client,
+        fcm_auth,
+        apns_auth,
+        user_id,
+        &rendered,
+        "connection expiry",
+    )
+    .await
+}
+
+/// Metadata-only notice that a channel bot stopped working.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChannelBotFailedNotificationContext {
+    pub bot_id: String,
+    pub bot_label: String,
+    pub platform_name: String,
+    /// Stable recovery action (`reconnect`, `resubscribe`, ...).
+    pub recommended_action: String,
+    pub recommended_action_text: String,
+}
+
+/// Send a channel-bot failure notice through the recipient's enabled
+/// channels. Missing channels and delivery failures are a no-op.
+#[allow(clippy::too_many_arguments)]
+pub async fn send_channel_bot_failed_notification(
+    db: &Database,
+    config: &AppConfig,
+    http_client: &Client,
+    fcm_auth: Option<&FcmAuth>,
+    apns_auth: Option<&ApnsAuth>,
+    user_id: &str,
+    context: &ChannelBotFailedNotificationContext,
+) -> AppResult<NotificationResult> {
+    let rendered = render_channel_bot_failed_notification(config, context);
+    deliver_best_effort(
+        db,
+        config,
+        http_client,
+        fcm_auth,
+        apns_auth,
+        user_id,
+        &rendered,
+        "channel bot failure",
+    )
+    .await
+}
+
+/// Security notice contains no credential, recovery code or challenge token.
+pub async fn send_mfa_recovery_notification(
+    state: &crate::AppState,
+    user_id: &str,
+) -> AppResult<NotificationResult> {
+    let rendered = RenderedConnectionExpiredNotification {
+        title: "MFA recovery code used".into(),
+        body: "A single-use recovery code accessed your account. Review your sessions and replace your authenticator if it was lost. If this was unexpected, secure your account immediately.".into(),
+        data: HashMap::from([("type".into(), "mfa_recovery_used".into())]),
+    };
+    deliver_best_effort(
+        &state.db,
+        &state.config,
+        &state.http_client,
+        state.fcm_auth.as_deref(),
+        state.apns_auth.as_deref(),
+        user_id,
+        &rendered,
+        "MFA recovery",
+    )
+    .await
+}
+
+pub async fn send_mfa_disabled_notification(
+    state: &crate::AppState,
+    user_id: &str,
+) -> AppResult<NotificationResult> {
+    let rendered = RenderedConnectionExpiredNotification {
+        title: "MFA disabled".into(),
+        body: "Multi-factor authentication was disabled on your account. If this was unexpected, sign in and secure your account immediately.".into(),
+        data: HashMap::from([("type".into(), "mfa_disabled".into())]),
+    };
+    deliver_best_effort(
+        &state.db,
+        &state.config,
+        &state.http_client,
+        state.fcm_auth.as_deref(),
+        state.apns_auth.as_deref(),
+        user_id,
+        &rendered,
+        "MFA disabled",
+    )
+    .await
+}
+
+/// Deliver metadata-only lifecycle notices through existing configured channels.
+/// The durable in-site timeline remains the authoritative owner notification.
+#[allow(clippy::too_many_arguments)]
+pub async fn send_machine_lifecycle_notification(
+    db: &Database,
+    config: &AppConfig,
+    http_client: &Client,
+    fcm_auth: Option<&FcmAuth>,
+    apns_auth: Option<&ApnsAuth>,
+    user_id: &str,
+    machine_id: &str,
+    operation_id: &str,
+    message: &str,
+) -> AppResult<NotificationResult> {
+    let url = format!(
+        "{}/machines?machine={}",
+        config.frontend_url.trim_end_matches('/'),
+        machine_id
+    );
+    let mut data = HashMap::new();
+    data.insert("type".into(), "machine_lifecycle".into());
+    data.insert("machine_id".into(), machine_id.into());
+    data.insert("operation_id".into(), operation_id.into());
+    data.insert("url".into(), url.clone());
+    let rendered = RenderedConnectionExpiredNotification {
+        title: "Machine lifecycle update".into(),
+        body: format!("{message} Open {url}."),
+        data,
+    };
+    deliver_best_effort(
+        db,
+        config,
+        http_client,
+        fcm_auth,
+        apns_auth,
+        user_id,
+        &rendered,
+        "machine lifecycle",
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn deliver_best_effort(
+    db: &Database,
+    config: &AppConfig,
+    http_client: &Client,
+    fcm_auth: Option<&FcmAuth>,
+    apns_auth: Option<&ApnsAuth>,
+    user_id: &str,
+    rendered: &RenderedConnectionExpiredNotification,
+    kind: &str,
+) -> AppResult<NotificationResult> {
     let Some(channel) = db
         .collection::<NotificationChannel>(COLLECTION_NAME)
         .find_one(doc! { "user_id": user_id })
@@ -238,7 +417,6 @@ pub async fn send_connection_expired_notification(
             telegram_message_id: None,
         });
     };
-    let rendered = render_connection_expired_notification(config, context);
     let mut channels_used = Vec::new();
     let mut telegram_chat_id = None;
     let mut tokens_to_remove = Vec::new();
@@ -261,8 +439,9 @@ pub async fn send_connection_expired_notification(
             }
             Err(error) => tracing::warn!(
                 user_id = %user_id,
+                kind,
                 error = %error,
-                "Telegram connection expiry notification failed"
+                "Telegram best-effort notification failed"
             ),
         }
     }
@@ -302,7 +481,7 @@ pub async fn send_connection_expired_notification(
                     user_id = %user_id,
                     device_id = %unique_devices[index].device_id,
                     error = %error,
-                    "Push connection expiry notification failed"
+                    "Push best-effort notification failed"
                 ),
             }
         }
@@ -816,9 +995,9 @@ pub async fn get_or_create_channel(db: &Database, user_id: &str) -> AppResult<No
         telegram_enabled: false,
         telegram_link_code: None,
         telegram_link_code_expires_at: None,
-        approval_timeout_secs: 30,
+        approval_timeout_secs: 300,
         grant_expiry_days: 30,
-        approval_required: false,
+        approval_required: None,
         push_enabled: false,
         push_devices: vec![],
         created_at: now,
@@ -914,6 +1093,33 @@ fn render_connection_expired_notification(
     RenderedConnectionExpiredNotification {
         title: "Connection expired".to_string(),
         body,
+        data,
+    }
+}
+
+fn render_channel_bot_failed_notification(
+    config: &AppConfig,
+    context: &ChannelBotFailedNotificationContext,
+) -> RenderedConnectionExpiredNotification {
+    let bots_url = format!(
+        "{}/channel-bots/{}",
+        config.frontend_url.trim_end_matches('/'),
+        context.bot_id
+    );
+    let mut data = HashMap::new();
+    data.insert("type".to_string(), "channel_bot_failed".to_string());
+    data.insert("bot_id".to_string(), context.bot_id.clone());
+    data.insert(
+        "recommended_action".to_string(),
+        context.recommended_action.clone(),
+    );
+    data.insert("url".to_string(), bots_url.clone());
+    RenderedConnectionExpiredNotification {
+        title: format!("{} channel needs attention", context.platform_name),
+        body: format!(
+            "{} stopped working. {} Open {}.",
+            context.bot_label, context.recommended_action_text, bots_url
+        ),
         data,
     }
 }
@@ -1235,9 +1441,9 @@ mod tests {
         assert!(channel.telegram_chat_id.is_none());
         assert!(!channel.push_enabled);
         assert!(channel.push_devices.is_empty());
-        assert_eq!(channel.approval_timeout_secs, 30);
+        assert_eq!(channel.approval_timeout_secs, 300);
         assert_eq!(channel.grant_expiry_days, 30);
-        assert!(!channel.approval_required);
+        assert_eq!(channel.approval_required, None);
     }
 
     #[tokio::test]
@@ -1316,9 +1522,9 @@ mod tests {
         assert!(channel.telegram_username.is_none());
         assert!(channel.telegram_link_code.is_none());
         assert!(channel.telegram_link_code_expires_at.is_none());
-        assert_eq!(channel.approval_timeout_secs, 30);
+        assert_eq!(channel.approval_timeout_secs, 300);
         assert_eq!(channel.grant_expiry_days, 30);
-        assert!(!channel.approval_required);
+        assert_eq!(channel.approval_required, None);
         assert!(!channel.push_enabled);
         assert!(channel.push_devices.is_empty());
     }
@@ -1366,7 +1572,7 @@ mod tests {
 
         // Create the channel
         let channel = get_or_create_channel(&db, &user_id).await.unwrap();
-        assert!(!channel.approval_required);
+        assert_eq!(channel.approval_required, None);
 
         // Manually update approval_required in DB
         let now = bson::DateTime::from_chrono(Utc::now());
@@ -1384,7 +1590,7 @@ mod tests {
 
         // Fetch again -- should return the modified state
         let updated = get_or_create_channel(&db, &user_id).await.unwrap();
-        assert!(updated.approval_required);
+        assert_eq!(updated.approval_required, Some(true));
         assert_eq!(updated.approval_timeout_secs, 60);
         assert_eq!(updated.id, channel.id);
     }
@@ -1590,13 +1796,17 @@ mod tests {
         remove_stale_device_tokens(&db, &channel.id, &["dev-only".to_string()]).await;
 
         let updated = get_or_create_channel(&db, &user_id).await.unwrap();
-        assert!(updated.approval_required);
+        assert_eq!(updated.approval_required, Some(true));
         assert!(updated.push_devices.is_empty());
         assert!(!updated.push_enabled);
         assert!(
-            !crate::services::approval_service::user_requires_approval(&db, &user_id)
-                .await
-                .unwrap()
+            crate::services::approval_service::user_requires_approval(
+                &db,
+                &user_id,
+                &crate::models::service_approval_config::ApprovalVerb::Write
+            )
+            .await
+            .unwrap()
         );
     }
 

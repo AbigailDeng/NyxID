@@ -1,26 +1,46 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 import { useAgentLearningReview } from "@/hooks/use-agent-learning-review";
 import { useFeature } from "@/hooks/use-feature-flag";
 import { FEATURE_FLAG } from "@/lib/feature-flags";
+import { publicationFailureText } from "@/lib/assistant/skill-publication-copy";
+import { learningDraftEditable } from "@/schemas/agent-skills";
+import { AuthoredSkillScopePreview } from "./authored-skill-scope-preview";
+import { LearningDraftEditor } from "./learning-draft-editor";
+
+function requestFailure(cause: unknown): string {
+  return cause instanceof Error && cause.message
+    ? cause.message
+    : "The request could not be completed. Check the proposal and try again.";
+}
 
 export function AgentLearningReview({
   agentId,
+  proposalId,
   readOnly = false,
 }: {
   readonly agentId: string;
+  readonly proposalId?: string;
   readonly readOnly?: boolean;
 }) {
   const enabled = useFeature(FEATURE_FLAG.AGENT_LEARNING);
   const review = useAgentLearningReview(agentId, enabled);
-  const [open, setOpen] = useState<string>();
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [open, setOpen] = useState<string | undefined>(proposalId);
+  useEffect(() => {
+    if (proposalId && review.data) document.getElementById(`learning-proposal-${proposalId}`)?.scrollIntoView?.({ block: "nearest" });
+  }, [proposalId, review.data]);
   const [cards, setCards] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [threshold, setThreshold] = useState(15);
+
+  const serverThreshold = review.status.data?.threshold;
+  useEffect(() => {
+    if (serverThreshold !== undefined) setThreshold(serverThreshold);
+  }, [serverThreshold]);
 
   if (!enabled || (readOnly && !review.data)) {
     return null;
@@ -37,7 +57,7 @@ export function AgentLearningReview({
         </h3>
         <p className="text-12 text-muted-foreground">
           Completed work can produce private, untrusted Ornn skill drafts.
-          Publishing and attaching always requires your confirmation.
+          Full access publishes and attaches automatically; other modes require your confirmation.
         </p>
       </div>
       {review.error ? (
@@ -45,6 +65,37 @@ export function AgentLearningReview({
           Automatic learning is unavailable.
         </p>
       ) : null}
+      {review.status.data?.publication_blocked ? (
+        <p role="alert" className="text-12 text-warning">
+          Publishing is unavailable for this organization because it has no
+          owner binding. Organization members may consent to learning, but only
+          the bound owner can publish private Ornn skills. Contact an
+          organization owner to publish.
+        </p>
+      ) : null}
+      {review.status.data?.org_owned && !readOnly ? (
+        <label className="flex items-center gap-2 text-12">
+          <Switch
+            checked={review.status.data.opted_in ?? false}
+            disabled={review.consent?.isPending}
+            onCheckedChange={(checked) => review.consent?.mutate(checked)}
+          />
+          I consent to learning proposals for this organization
+        </label>
+      ) : null}
+      {/* Draft edit failures render inside the editor, beside their fields. */}
+      {[
+        review.run.error,
+        review.configure.error,
+        review.consent?.error,
+        review.reject.error,
+      ]
+        .filter(Boolean)
+        .map((error, index) => (
+          <p key={index} role="alert" className="text-12 text-destructive">
+            {requestFailure(error)}
+          </p>
+        ))}
 
       {!readOnly ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/50 p-3">
@@ -87,19 +138,39 @@ export function AgentLearningReview({
       ) : null}
 
       {proposals.length === 0 ? (
-        <p className="text-12 text-text-tertiary">
-          No pending proposals.
-        </p>
+        <p className="text-12 text-text-tertiary">No pending proposals.</p>
       ) : null}
 
       {proposals.map((proposal) => {
         const draft = proposal.draft;
-        const draftText = drafts[proposal.id] ?? draft?.skill_md ?? "";
         const isOpen = open === proposal.id;
         const card = cards[proposal.id];
+        const checkOnly = proposal.evidence_available === false;
+        // An older NyxID prepared this package; it is rebuilt, never published.
+        const legacyPackage =
+          proposal.failure_code === "legacy_package_requires_reprepare";
+        // A verified version NyxID refused to attach is settled; the server
+        // refuses to check it again.
+        const settled =
+          proposal.status === "published_unpinned" &&
+          (proposal.failure_code === "evidence_unavailable" ||
+            proposal.failure_code === "base_changed");
+        // A publication that reached Ornn but is not attached yet resumes
+        // through the same confirmed approve route.
+        const recovering =
+          !settled &&
+          (proposal.status === "published_unpinned" ||
+            proposal.status === "publishing");
+        const approvable =
+          !settled &&
+          (checkOnly ||
+            recovering ||
+            proposal.status === "pending" ||
+            proposal.status === "publication_failed");
         return (
           <article
             key={proposal.id}
+            id={`learning-proposal-${proposal.id}`}
             className="space-y-3 rounded-lg border border-border/50 p-3"
           >
             <div className="flex items-center justify-between gap-2">
@@ -115,49 +186,41 @@ export function AgentLearningReview({
               {proposal.evidence_count} evidence items ·{" "}
               {proposal.body_bytes.toLocaleString()} bytes
             </p>
+            {proposal.published_version ? (
+              <p className="text-11 text-success">
+                Published version: {proposal.published_version}
+              </p>
+            ) : null}
+            {proposal.failure_code ? (
+              <p role="alert" className="text-11 text-destructive">
+                {publicationFailureText(proposal.failure_code, proposal.status, proposal.source)}
+              </p>
+            ) : null}
+            {errors[proposal.id] ? (
+              <p role="alert" className="text-11 text-destructive">
+                {errors[proposal.id]}
+              </p>
+            ) : null}
+            {checkOnly ? (
+              <p role="status" className="text-11 text-warning">
+                Learning evidence or consent is no longer available. NyxID can
+                only check whether this publication reached Ornn; it will not
+                attach it to the agent.
+              </p>
+            ) : null}
 
+            {isOpen && proposal.source === "authored" && proposal.auto_allowed ? (
+              <AuthoredSkillScopePreview agentId={agentId} proposalId={proposal.id} />
+            ) : null}
             {isOpen && draft ? (
-              <div className="space-y-2">
-                <p className="text-11 text-text-tertiary">
-                  Generated guidance is untrusted and is shown as plain text.
-                </p>
-                <Textarea
-                  aria-label="Skill draft"
-                  className="min-h-40 font-mono text-11"
-                  value={draftText}
-                  readOnly={readOnly}
-                  onChange={(event) =>
-                    setDrafts((current) => ({
-                      ...current,
-                      [proposal.id]: event.target.value,
-                    }))
-                  }
-                />
-                <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded-md bg-muted/30 p-2 text-11">
-                  {draft.safety_notes}
-                </pre>
-                {!readOnly &&
-                drafts[proposal.id] !== undefined &&
-                drafts[proposal.id] !== draft.skill_md ? (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    disabled={review.edit.isPending}
-                    onClick={() =>
-                      review.edit.mutate({
-                        proposalId: proposal.id,
-                        draft: {
-                          ...draft,
-                          revision: proposal.revision,
-                          skill_md: drafts[proposal.id],
-                        },
-                      })
-                    }
-                  >
-                    Save draft
-                  </Button>
-                ) : null}
-              </div>
+              <LearningDraftEditor
+                key={`${proposal.id}:${proposal.revision}`}
+                agentId={agentId}
+                proposal={{ ...proposal, draft }}
+                readOnly={readOnly || !learningDraftEditable(proposal.status)}
+                edit={review.edit}
+                validate={review.validate}
+              />
             ) : null}
 
             <div className="flex flex-wrap gap-2">
@@ -167,44 +230,121 @@ export function AgentLearningReview({
               >
                 {isOpen ? "Hide draft" : "Review draft"}
               </Button>
-              <Button
-                size="sm"
-                disabled={readOnly || review.approve.isPending}
-                onClick={async () => {
-                  const result = await review.approve.mutateAsync({
-                    proposalId: proposal.id,
-                    acknowledgementId: card,
-                  });
-                  const acknowledgementId =
-                    result.acknowledgement?.acknowledgement_id;
-                  if (
-                    result.status === "confirmation_required" &&
-                    acknowledgementId
-                  ) {
-                    setCards((current) => ({
-                      ...current,
-                      [proposal.id]: acknowledgementId,
-                    }));
-                  }
-                }}
-              >
-                {card
-                  ? "Confirm publish & attach"
-                  : "Publish & request confirmation"}
-              </Button>
-              <Button
-                size="sm"
-                disabled={readOnly || review.reject.isPending}
-                onClick={() => review.reject.mutate(proposal.id)}
-              >
-                Reject
-              </Button>
+              {proposal.source === "authored" && proposal.status !== "pinned" ? (
+                proposal.card_conversation_id ? (
+                  <Link
+                    to="/assistant"
+                    search={{ c: proposal.card_conversation_id, card: proposal.acknowledgement_id ?? undefined }}
+                    className="text-11 text-primary hover:underline"
+                  >
+                    Open the confirmation card
+                  </Link>
+                ) : (
+                  <p className="text-11 text-muted-foreground">
+                    Confirm this authored skill from its conversation card.
+                  </p>
+                )
+              ) : legacyPackage ? (
+                <Button
+                  size="sm"
+                  disabled={readOnly || review.reprepare.isPending}
+                  onClick={async () => {
+                    setErrors((current) => ({ ...current, [proposal.id]: "" }));
+                    try {
+                      await review.reprepare.mutateAsync({
+                        proposalId: proposal.id,
+                      });
+                    } catch (cause) {
+                      setErrors((current) => ({
+                        ...current,
+                        [proposal.id]: requestFailure(cause),
+                      }));
+                    }
+                  }}
+                >
+                  Review updated package
+                </Button>
+              ) : !approvable ? null : (
+                <Button
+                  size="sm"
+                  disabled={readOnly || review.approve.isPending}
+                  onClick={async () => {
+                    setErrors((current) => ({ ...current, [proposal.id]: "" }));
+                    try {
+                      const result = await review.approve.mutateAsync({
+                        proposalId: proposal.id,
+                        acknowledgementId: card,
+                      });
+                      const acknowledgementId =
+                        result.acknowledgement?.acknowledgement_id;
+                      if (
+                        result.status === "confirmation_required" &&
+                        acknowledgementId
+                      ) {
+                        setCards((current) => ({
+                          ...current,
+                          [proposal.id]: acknowledgementId,
+                        }));
+                      }
+                    } catch (cause) {
+                      setErrors((current) => ({
+                        ...current,
+                        [proposal.id]: requestFailure(cause),
+                      }));
+                    }
+                  }}
+                >
+                  {checkOnly
+                    ? card
+                      ? "Confirm check"
+                      : "Check publication"
+                    : recovering
+                      ? card
+                        ? "Confirm finish publishing"
+                        : "Finish publishing"
+                      : proposal.status === "publication_failed"
+                        ? "Retry publication"
+                        : card
+                          ? "Confirm publish & attach"
+                          : "Publish & request confirmation"}
+                </Button>
+              )}
+              {/* The server rejects only pending or failed drafts. A failed
+                  publication that may have reached Ornn is refused, and the
+                  reason appears in the error line above. */}
+              {proposal.status === "pending" ||
+              proposal.status === "publication_failed" || (proposal.auto_allowed && proposal.status === "pinned") ? (
+                <Button
+                  size="sm"
+                  disabled={readOnly || review.reject.isPending}
+                  onClick={async () => {
+                    setErrors((current) => ({ ...current, [proposal.id]: "" }));
+                    try {
+                      await review.reject.mutateAsync({
+                        proposalId: proposal.id,
+                        revision: proposal.revision,
+                      });
+                    } catch (cause) {
+                      setErrors((current) => ({
+                        ...current,
+                        [proposal.id]: requestFailure(cause),
+                      }));
+                    }
+                  }}
+                >
+                  {proposal.auto_allowed && proposal.status === "pinned" ? "Discard and detach" : "Reject"}
+                </Button>
+              ) : null}
             </div>
-            {card ? (
+            {approvable &&
+            proposal.source !== "authored" &&
+            !legacyPackage &&
+            !checkOnly &&
+            !readOnly ? (
               <p className="text-11 text-warning">
-                Confirming this exact card will publish the private skill and
-                attach its pinned version. The card expires if the draft or
-                agent changes.
+                {card
+                  ? "Step 2 of 2: Confirming this exact card publishes the private skill and attaches its pinned version. The card expires if the draft or agent changes."
+                  : "Publishing takes two steps: this button first asks for an owner confirmation card, then you confirm that exact card here. Nothing is published until you confirm."}
               </p>
             ) : null}
           </article>

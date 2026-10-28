@@ -6,18 +6,19 @@ import type {
   OidcCredentials,
   RedirectUrisResponse,
   RegenerateSecretResponse,
+  ResyncIdentityResponse,
   UpdateServicePayload,
   UserServiceConnection,
 } from "@/types/api";
 import type { SshAuthMode } from "@/schemas/services";
 
-export function useServices() {
+export function useServices(includeInactive = false) {
   return useQuery({
-    queryKey: ["services"],
+    queryKey: ["services", { includeInactive }],
     queryFn: async (): Promise<readonly DownstreamService[]> => {
       const res = await api.get<{
         readonly services: readonly DownstreamService[];
-      }>("/services");
+      }>(includeInactive ? "/services?include_inactive=true" : "/services");
       return res.services;
     },
   });
@@ -82,6 +83,22 @@ export function useDeleteService() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["services"] });
       void queryClient.invalidateQueries({ queryKey: ["provider-services"] });
+    },
+  });
+}
+
+export function useResyncServiceIdentity() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (serviceId: string): Promise<ResyncIdentityResponse> => {
+      return api.post<ResyncIdentityResponse>(
+        `/services/${serviceId}/resync-identity`,
+      );
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["keys"] });
+      void queryClient.invalidateQueries({ queryKey: ["user-services"] });
     },
   });
 }
@@ -265,7 +282,12 @@ export function useDisconnectService() {
 export function useProviderServices(providerId: string) {
   return useQuery({
     queryKey: ["provider-services", providerId],
-    queryFn: async () => (await api.get<{ services: readonly DownstreamService[] }>(`/providers/${providerId}/services`)).services,
+    queryFn: async () =>
+      (
+        await api.get<{ services: readonly DownstreamService[] }>(
+          `/providers/${providerId}/services`,
+        )
+      ).services,
     enabled: Boolean(providerId),
   });
 }
@@ -273,8 +295,17 @@ export function useProviderServices(providerId: string) {
 export function useLinkProviderService() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ providerId, serviceId }: { providerId: string; serviceId: string }) =>
-      api.put<DownstreamService>(`/providers/${providerId}/services/${serviceId}`, {}),
+    mutationFn: ({
+      providerId,
+      serviceId,
+    }: {
+      providerId: string;
+      serviceId: string;
+    }) =>
+      api.put<DownstreamService>(
+        `/providers/${providerId}/services/${serviceId}`,
+        {},
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["provider-services"] });
       void queryClient.invalidateQueries({ queryKey: ["services"] });

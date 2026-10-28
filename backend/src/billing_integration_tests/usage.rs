@@ -19,13 +19,16 @@ fn meter(owner: &str, quantity: i64) -> UsageMeterRow {
         wallet_id: Some("wallet".into()),
         actor_user_id: owner.to_string(),
         api_key_id: None,
+        assistant_source: None,
         user_service_id: None,
         service_id: Some("service".into()),
         service_slug: Some("llm-test".into()),
         metric: BillingMetric::Tokens,
         lago_metric_code: "platform_tokens".into(),
+        operation: None,
         credential_class: CredentialClass::NyxidManagedMaster,
         model: Some("test-model".into()),
+        reported_model: None,
         token_breakdown: None,
         audio_tokens: None,
         image_tokens: None,
@@ -35,6 +38,7 @@ fn meter(owner: &str, quantity: i64) -> UsageMeterRow {
         pending_resale_quantity: None,
         pending_platform_usage: None,
         pool_attempt: None,
+        machine_usage: None,
         status: UsageStatus::Finalized,
         forwarded: true,
         released: false,
@@ -55,6 +59,8 @@ async fn read_usage(state: &crate::AppState, actor: &str) -> BillingUsageRespons
         State(state.clone()),
         test_auth_user(actor),
         Query(UsageQuery {
+            machine_id: None,
+            job_id: None,
             period: None,
             bucket: None,
         }),
@@ -177,6 +183,9 @@ async fn exact_funding_costs_survive_retries_repricing_and_missing_rates() {
         if grant_micros > 0 {
             db.collection::<CreditGrant>(GRANTS)
                 .insert_one(CreditGrant {
+                    service_limits: Vec::new(),
+                    revoke_requested_at: None,
+                    revoke_requested_by: None,
                     id: grant_id.clone(),
                     batch_id: Uuid::new_v4().to_string(),
                     schedule_origin: None,
@@ -337,6 +346,7 @@ async fn historical_funding_uses_model_rate_and_sums_with_exact_and_free_rows() 
             quantity: 20,
         }],
         grant_consumptions: vec![GrantConsumptionAllocation {
+            service_limit_key: None,
             operation_id: "g".into(),
             grant_id: "g".into(),
             amount: crate::models::credits::Credits::from_micros(50),
@@ -442,6 +452,7 @@ fn reservation_priced(quantity: i64, pico: Option<i64>, micros: i64, owner: &str
 
 fn grant_consumption(amount: Credits) -> crate::models::usage_meter::GrantConsumptionAllocation {
     crate::models::usage_meter::GrantConsumptionAllocation {
+        service_limit_key: None,
         operation_id: Uuid::new_v4().to_string(),
         grant_id: Uuid::new_v4().to_string(),
         amount,
@@ -743,6 +754,9 @@ async fn org_credential_request(platform_key: bool) {
     create_usage_index(&db).await;
     insert_fresh_rates(&db).await;
     let actor = insert_owner(&db).await;
+    // Keep payer/rollout assertions independent of the actor approval preference.
+    crate::test_utils::set_test_approval_preference(&db, &actor, false).await;
+
     let org = Uuid::new_v4().to_string();
     db.collection::<User>(USERS)
         .insert_one(test_user(&org, UserType::Org))
@@ -999,6 +1013,8 @@ async fn day_buckets_split_usage_by_utc_day_without_changing_totals() {
         State(state.clone()),
         test_auth_user(&owner),
         Query(UsageQuery {
+            machine_id: None,
+            job_id: None,
             period: Some("7d".into()),
             bucket: Some("day".into()),
         }),
@@ -1026,10 +1042,146 @@ async fn day_buckets_split_usage_by_utc_day_without_changing_totals() {
         State(state),
         test_auth_user(&owner),
         Query(UsageQuery {
+            machine_id: None,
+            job_id: None,
             period: None,
             bucket: Some("hour".into()),
         }),
     )
     .await;
     assert!(matches!(invalid, Err(AppError::ValidationError(_))));
+}
+
+#[tokio::test]
+async fn operation_rows_report_the_operation_and_keep_pricing_from_retired_rates() {
+    let Some(db) = connect_test_database("billing_usage_operations").await else {
+        return;
+    };
+    let owner = insert_owner(&db).await;
+    let state = billing_route_state(db.clone(), Arc::new(FakeLago::default()), 0);
+    let code = "platform_svc_x_byok_op_get_me";
+    let now = Utc::now();
+    // Removing the operation price retired its rate; history must still price.
+    for (rate_code, micros, retired_at) in [
+        (code, 3_000_000, Some(now)),
+        ("platform_svc_x_byok", 1_000_000, None),
+    ] {
+        db.collection::<BillingRateCache>(BILLING_RATE_CACHE)
+            .insert_one(BillingRateCache {
+                id: BillingRateCache::cache_id(rate_code, None),
+                lago_metric_code: rate_code.into(),
+                model: None,
+                credits_per_unit_micros: micros,
+                credits_per_unit_pico: None,
+                synced_at: now,
+                retired_at,
+            })
+            .await
+            .unwrap();
+    }
+    for (lago_metric_code, operation, quantity) in
+        [(code, Some("get_me"), 2), ("platform_svc_x_byok", None, 1)]
+    {
+        let mut row = meter(&owner, quantity);
+        row.service_slug = Some("x".into());
+        row.metric = BillingMetric::Requests;
+        row.lago_metric_code = lago_metric_code.into();
+        row.operation = operation.map(str::to_string);
+        row.model = None;
+        db.collection::<UsageMeterRow>(USAGE_METER)
+            .insert_one(row)
+            .await
+            .unwrap();
+    }
+    let result = read_usage(&state, &owner).await;
+    assert_eq!(result.rows.len(), 2);
+    let priced = result
+        .rows
+        .iter()
+        .find(|row| row.operation.as_deref() == Some("get_me"))
+        .unwrap();
+    assert_eq!(priced.lago_metric_code, code);
+    assert_eq!(priced.quantity, 2);
+    assert_eq!(priced.estimated_credits_micros, Some(6_000_000));
+    let base = result
+        .rows
+        .iter()
+        .find(|row| row.operation.is_none())
+        .unwrap();
+    assert_eq!(base.estimated_credits_micros, Some(1_000_000));
+    db.drop().await.unwrap();
+}
+
+#[tokio::test]
+async fn machine_job_usage_filters_are_applied_before_totals_and_keep_owner_scope() {
+    let Some(db) = connect_test_database("billing_machine_filters").await else {
+        return;
+    };
+    let owner = insert_owner(&db).await;
+    let foreign_owner = Uuid::new_v4().to_string();
+    let state = billing_route_state(db.clone(), Arc::new(FakeLago::default()), 0);
+    let machine = Uuid::new_v4().to_string();
+    let other_machine = Uuid::new_v4().to_string();
+    let job = Uuid::new_v4().to_string();
+    let other_job = Uuid::new_v4().to_string();
+    for (actor, node, job_id, quantity) in [
+        (&owner, &machine, &job, 7),
+        (&owner, &machine, &other_job, 11),
+        (&owner, &other_machine, &job, 100),
+        (&foreign_owner, &machine, &job, 1000),
+    ] {
+        let mut row = meter(actor, quantity);
+        row.wallet_id = None;
+        row.machine_usage = Some(crate::models::usage_meter::MachineUsageAttribution {
+            node_id: node.clone(),
+            job_id: job_id.clone(),
+            runtime_id: Uuid::new_v4().to_string(),
+            runtime_generation: Some(1),
+            grant_id: None,
+            principal_kind: "api_key".into(),
+        });
+        db.collection::<UsageMeterRow>(USAGE_METER)
+            .insert_one(row)
+            .await
+            .unwrap();
+    }
+    for (job_filter, expected) in [(None, 18), (Some(job.clone()), 7)] {
+        let result = billing::get_usage(
+            State(state.clone()),
+            test_auth_user(&owner),
+            Query(UsageQuery {
+                period: None,
+                bucket: None,
+                machine_id: Some(machine.clone()),
+                job_id: job_filter.clone(),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(result.machine_id.as_deref(), Some(machine.as_str()));
+        assert_eq!(result.job_id, job_filter);
+        assert_eq!(result.totals.quantity, expected);
+        assert!(
+            result
+                .rows
+                .iter()
+                .all(|row| row.machine_usage.as_ref().unwrap().node_id == machine)
+        );
+    }
+    assert!(
+        billing::get_usage(
+            State(state),
+            test_auth_user(&owner),
+            Query(UsageQuery {
+                period: None,
+                bucket: None,
+                machine_id: Some("not-a-uuid".into()),
+                job_id: None,
+            })
+        )
+        .await
+        .is_err()
+    );
+    db.drop().await.unwrap();
 }

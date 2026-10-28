@@ -7,12 +7,17 @@ use crate::models::billing_rate_cache::BillingRateCache;
 use crate::models::downstream_service::{
     COLLECTION_NAME as DOWNSTREAM_SERVICES, DownstreamService,
 };
-use crate::models::service_billing::{LanePriceComponent, PricingSyncStatus, ServiceBilling};
+use crate::models::service_billing::{
+    LanePriceComponent, LanePricing, PricingSyncStatus, ServiceBilling,
+};
 
 use super::lago_client::{LagoApi, ServicePriceSync};
 
 use super::amounts::{MAX_PRICE_PICO, PRICE_FRACTIONAL_DIGITS, decimal_to_pico, format_pico};
 const MAX_PENDING_SYNC_BATCH: i64 = 100;
+/// Lago billable metric codes are stored as bounded strings; operation keys
+/// that would exceed this fail validation instead of being truncated.
+const MAX_LAGO_METRIC_CODE_LEN: usize = 255;
 
 pub fn normalize_platform_pricing(
     service_slug: &str,
@@ -132,6 +137,23 @@ pub fn normalize_lane_pricing(
         ),
     ] {
         if let Some(lane) = lane {
+            if lane.metric == crate::models::service_billing::BillingMetric::MachineRunningSeconds
+                || lane.components.iter().any(|component| {
+                    component.metric
+                        == crate::models::service_billing::BillingMetric::MachineRunningSeconds
+                })
+            {
+                return Err(AppError::ValidationError(
+                    "Machine runtime prices use the accepted runtime contract, not service credential lanes".into(),
+                ));
+            }
+            if !lane.operations.is_empty()
+                && lane.metric != crate::models::service_billing::BillingMetric::Requests
+            {
+                return Err(AppError::ValidationError(
+                    "Operation prices require a requests primary metric".into(),
+                ));
+            }
             lane.credits_per_unit = normalize_price(&lane.credits_per_unit)?;
             if let Some(previous) = previous.filter(|p| {
                 p.metric == lane.metric
@@ -171,8 +193,66 @@ pub fn normalize_lane_pricing(
                     *component = old.clone();
                 }
             }
+            let mut operation_keys = std::collections::HashSet::new();
+            let mut operation_codes = std::collections::HashSet::new();
+            for operation in &mut lane.operations {
+                let key = operation.operation.trim().to_string();
+                if key.is_empty() || !operation_keys.insert(key.clone()) {
+                    return Err(AppError::ValidationError(
+                        "Operation prices must have unique operation keys".into(),
+                    ));
+                }
+                operation.operation = key.clone();
+                operation.credits_per_unit = normalize_price(&operation.credits_per_unit)?;
+                let code = operation_metric_code(slug, suffix, &key)?;
+                if !operation_codes.insert(code.clone()) {
+                    return Err(AppError::ValidationError(
+                        "Operation prices must have unique metric codes".into(),
+                    ));
+                }
+                let old = previous.and_then(|p| p.operations.iter().find(|o| o.operation == key));
+                operation.lago_metric_code = code;
+                operation.sync_status = PricingSyncStatus::Pending;
+                operation.sync_error = None;
+                if let Some(old) = old.filter(|p| {
+                    p.credits_per_unit == operation.credits_per_unit
+                        && p.lago_metric_code == operation.lago_metric_code
+                }) {
+                    *operation = old.clone();
+                }
+            }
+            if let Some(previous) = previous {
+                for old in &previous.operations {
+                    if !old.lago_metric_code.is_empty()
+                        && !lane
+                            .operations
+                            .iter()
+                            .any(|o| o.lago_metric_code == old.lago_metric_code)
+                        && !requested
+                            .component_cleanup_metric_codes
+                            .contains(&old.lago_metric_code)
+                    {
+                        requested
+                            .component_cleanup_metric_codes
+                            .push(old.lago_metric_code.clone());
+                    }
+                }
+            }
             *cleanup = None;
         } else {
+            if let Some(previous) = previous {
+                for old in &previous.operations {
+                    if !old.lago_metric_code.is_empty()
+                        && !requested
+                            .component_cleanup_metric_codes
+                            .contains(&old.lago_metric_code)
+                    {
+                        requested
+                            .component_cleanup_metric_codes
+                            .push(old.lago_metric_code.clone());
+                    }
+                }
+            }
             *cleanup = previous
                 .map(|p| &p.lago_metric_code)
                 .filter(|c| !c.is_empty())
@@ -197,6 +277,86 @@ pub fn normalize_lane_pricing(
         }
     }
     Ok(())
+}
+
+/// Rejects added operation prices whose key is neither an active endpoint of
+/// the service nor a channel operation declared for it. Keys already priced on
+/// the same lane stay valid, so deactivating an endpoint never blocks later
+/// billing edits. Endpoints are read only when keys are added.
+pub async fn validate_operation_keys(
+    db: &mongodb::Database,
+    service_id: &str,
+    slug: &str,
+    current: Option<&ServiceBilling>,
+    billing: &ServiceBilling,
+) -> AppResult<()> {
+    fn lanes(billing: Option<&ServiceBilling>) -> [Option<&LanePricing>; 2] {
+        [
+            billing.and_then(|b| b.byok_pricing.as_ref()),
+            billing.and_then(|b| b.platform_key_pricing.as_ref()),
+        ]
+    }
+    let keys: Vec<&str> = lanes(Some(billing))
+        .into_iter()
+        .zip(lanes(current))
+        .flat_map(|(lane, previous)| {
+            lane.into_iter()
+                .flat_map(|lane| lane.operations.iter())
+                .filter(move |price| {
+                    !previous.is_some_and(|previous| {
+                        previous
+                            .operations
+                            .iter()
+                            .any(|old| old.operation == price.operation)
+                    })
+                })
+                .map(|price| price.operation.as_str())
+        })
+        .collect();
+    if keys.is_empty() {
+        return Ok(());
+    }
+    let declared = crate::services::channel_billing_service::declared_operations(slug);
+    let endpoints: Vec<String> =
+        crate::services::service_endpoint_service::list_endpoints(db, service_id)
+            .await?
+            .into_iter()
+            .map(|endpoint| endpoint.name)
+            .collect();
+    if keys.iter().all(|key| {
+        endpoints.iter().any(|name| name == key)
+            || declared.iter().any(|(declared, _)| declared == key)
+    }) {
+        Ok(())
+    } else {
+        Err(AppError::ValidationError(
+            "Operation prices must reference an active endpoint or a declared channel operation of this service"
+                .into(),
+        ))
+    }
+}
+
+/// `platform_svc_{slug}_{lane}_op_{key}`, with the key lower-cased and every
+/// character outside `[a-z0-9_]` replaced by `_`.
+pub fn operation_metric_code(slug: &str, suffix: &str, operation: &str) -> AppResult<String> {
+    let normalized: String = operation
+        .chars()
+        .map(|c| {
+            let c = c.to_ascii_lowercase();
+            if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let code = format!("platform_svc_{slug}_{suffix}_op_{normalized}");
+    if code.len() > MAX_LAGO_METRIC_CODE_LEN {
+        return Err(AppError::ValidationError(
+            "Operation price key is too long for a Lago metric code".into(),
+        ));
+    }
+    Ok(code)
 }
 
 async fn sync_lane_price(
@@ -226,7 +386,10 @@ async fn sync_lane_price(
         let Some(code) = cleanup.as_deref().filter(|c| !c.is_empty()) else {
             return Ok(false);
         };
-        if lago.remove_standard_charge(plan_code, code).await.is_err() {
+        if super::taxes::remove_charge(db, lago, plan_code, code)
+            .await
+            .is_err()
+        {
             return Ok(false);
         }
         retire_rate(db, code).await?;
@@ -252,8 +415,17 @@ async fn sync_lane_price(
         sync_status: lane.sync_status,
         sync_error: lane.sync_error.clone(),
     };
-    let mut changed =
-        sync_lane_component(db, lago, plan_code, service, field, &path, &primary).await?;
+    let mut changed = sync_lane_component(
+        db,
+        lago,
+        plan_code,
+        service,
+        field,
+        &path,
+        &primary,
+        primary.metric.label(),
+    )
+    .await?;
     for (index, component) in lane.components.iter().enumerate() {
         changed |= sync_lane_component(
             db,
@@ -263,6 +435,28 @@ async fn sync_lane_price(
             field,
             &format!("{path}.components.{index}"),
             component,
+            component.metric.label(),
+        )
+        .await?;
+    }
+    // Operation prices reuse the component charge lifecycle under their own codes.
+    for (index, operation) in lane.operations.iter().enumerate() {
+        let component = LanePriceComponent {
+            metric: crate::models::service_billing::BillingMetric::Requests,
+            credits_per_unit: operation.credits_per_unit.clone(),
+            lago_metric_code: operation.lago_metric_code.clone(),
+            sync_status: operation.sync_status,
+            sync_error: operation.sync_error.clone(),
+        };
+        changed |= sync_lane_component(
+            db,
+            lago,
+            plan_code,
+            service,
+            field,
+            &format!("{path}.operations.{index}"),
+            &component,
+            &format!("{} requests", operation.operation),
         )
         .await?;
     }
@@ -278,21 +472,31 @@ async fn sync_lane_component(
     field: &str,
     path: &str,
     lane: &LanePriceComponent,
+    label: &str,
 ) -> AppResult<bool> {
     let collection = db.collection::<DownstreamService>(DOWNSTREAM_SERVICES);
+    let operation = path.contains(".operations.");
     let input = ServicePriceSync {
         metric_code: lane.lago_metric_code.clone(),
-        metric_name: format!("{} {field} {}", service.name, lane.metric.label()),
+        metric_name: format!("{} {field} {label}", service.name),
         metric_description: format!("NyxID {field} usage for {}", service.slug),
         credits_per_unit: lane.credits_per_unit.clone(),
     };
-    let synced = lago.sync_standard_charge(plan_code, &input).await.is_ok();
+    let synced = super::taxes::sync_charge(db, lago, plan_code, &input)
+        .await
+        .is_ok();
     // Include the unit: identical prices in a different unit are different charges.
-    let filter = doc! { "_id": &service.id,
+    let mut filter = doc! { "_id": &service.id,
         format!("{path}.lago_metric_code"): &lane.lago_metric_code,
         format!("{path}.credits_per_unit"): &lane.credits_per_unit,
-        format!("{path}.metric"): bson::to_bson(&lane.metric).expect("metric serialization"),
     };
+    // Operation rows carry no unit field; every operation price is per request.
+    if !operation {
+        filter.insert(
+            format!("{path}.metric"),
+            bson::to_bson(&lane.metric).expect("metric serialization"),
+        );
+    }
     if synced {
         let pico = decimal_to_pico(&lane.credits_per_unit)
             .ok_or_else(|| AppError::Internal("stored lane price is invalid".to_string()))?;
@@ -319,9 +523,12 @@ async fn sync_lane_component(
     if result.matched_count == 0 {
         // A stale upstream write cannot activate a newer price. If removed, keep
         // cleanup durable even when a previous cleanup completed during sync.
-        if path.contains(".components.") {
+        if let Some(array) = [".components.", ".operations."]
+            .into_iter()
+            .find(|array| path.contains(array))
+        {
             collection.update_one(doc! { "_id": &service.id,
-                format!("billing.{field}.components"): { "$not": { "$elemMatch": { "lago_metric_code": &lane.lago_metric_code } } },
+                format!("billing.{field}{}", array.trim_end_matches('.')): { "$not": { "$elemMatch": { "lago_metric_code": &lane.lago_metric_code } } },
             }, doc! { "$addToSet": { "billing.component_cleanup_metric_codes": &lane.lago_metric_code } }).await?;
         } else {
             collection.update_one(doc! { "_id": &service.id, path: bson::Bson::Null },
@@ -346,9 +553,11 @@ async fn mark_live_price_pending(
                 doc! { "$set": { format!("billing.{field}.sync_status"): "pending" } },
             )
             .await?;
-        collection.update_one(doc! { "_id": service_id, format!("billing.{field}.components.lago_metric_code"): code },
-            doc! { "$set": { format!("billing.{field}.components.$[component].sync_status"): "pending" } })
-            .array_filters(vec![doc! { "component.lago_metric_code": code }]).await?;
+        for array in ["components", "operations"] {
+            collection.update_one(doc! { "_id": service_id, format!("billing.{field}.{array}.lago_metric_code"): code },
+                doc! { "$set": { format!("billing.{field}.{array}.$[row].sync_status"): "pending" } })
+                .array_filters(vec![doc! { "row.lago_metric_code": code }]).await?;
+        }
     }
     Ok(())
 }
@@ -364,7 +573,10 @@ async fn cleanup_components(
     };
     let mut changed = false;
     for code in &billing.component_cleanup_metric_codes {
-        if lago.remove_standard_charge(plan_code, code).await.is_err() {
+        if super::taxes::remove_charge(db, lago, plan_code, code)
+            .await
+            .is_err()
+        {
             continue;
         }
         retire_rate(db, code).await?;
@@ -397,7 +609,7 @@ async fn sync_legacy_price(
         else {
             return Ok(false);
         };
-        match lago.remove_standard_charge(plan_code, metric_code).await {
+        match super::taxes::remove_charge(db, lago, plan_code, metric_code).await {
             Ok(()) => {
                 complete_price_removal(db, &service.id, metric_code).await?;
                 return Ok(true);
@@ -424,7 +636,7 @@ async fn sync_legacy_price(
         credits_per_unit: pricing.credits_per_unit.clone(),
     };
 
-    match lago.sync_standard_charge(plan_code, &input).await {
+    match super::taxes::sync_charge(db, lago, plan_code, &input).await {
         Ok(()) => {
             let pico = decimal_to_pico(&pricing.credits_per_unit)
                 .ok_or_else(|| AppError::Internal("stored service price is invalid".to_string()))?;
@@ -544,6 +756,8 @@ pub async fn retry_pending_service_prices(
                 { "billing.component_cleanup_metric_codes.0": { "$exists": true } },
                 { "billing.byok_pricing.components.sync_status": { "$in": ["pending", "failed"] } },
                 { "billing.platform_key_pricing.components.sync_status": { "$in": ["pending", "failed"] } },
+                { "billing.byok_pricing.operations.sync_status": { "$in": ["pending", "failed"] } },
+                { "billing.platform_key_pricing.operations.sync_status": { "$in": ["pending", "failed"] } },
                 { "billing.byok_pricing.sync_status": { "$in": ["pending", "failed"] } },
                 { "billing.platform_key_pricing.sync_status": { "$in": ["pending", "failed"] } },
                 { "billing.byok_pricing_cleanup_metric_code": { "$type": "string", "$ne": "" } },
@@ -623,6 +837,40 @@ mod tests {
         DOWNSTREAM_SERVICES, complete_price_removal, metric_code_for_service,
         normalize_platform_pricing, normalize_price,
     };
+
+    #[test]
+    fn machine_runtime_cannot_be_authored_as_a_service_lane() {
+        use crate::models::service_billing::{BillingMetric, LanePriceComponent, LanePricing};
+        for component in [false, true] {
+            let mut billing = ServiceBilling {
+                byok_pricing: Some(LanePricing {
+                    metric: if component {
+                        BillingMetric::Requests
+                    } else {
+                        BillingMetric::MachineRunningSeconds
+                    },
+                    credits_per_unit: "0.00004".into(),
+                    lago_metric_code: String::new(),
+                    sync_status: PricingSyncStatus::Pending,
+                    sync_error: None,
+                    operations: vec![],
+                    components: if component {
+                        vec![LanePriceComponent {
+                            metric: BillingMetric::MachineRunningSeconds,
+                            credits_per_unit: "0.00004".into(),
+                            lago_metric_code: String::new(),
+                            sync_status: PricingSyncStatus::Pending,
+                            sync_error: None,
+                        }]
+                    } else {
+                        vec![]
+                    },
+                }),
+                ..Default::default()
+            };
+            assert!(super::normalize_lane_pricing("service", None, &mut billing).is_err());
+        }
+    }
 
     #[test]
     fn prices_above_the_cap_have_one_validation_message_even_on_overflow() {

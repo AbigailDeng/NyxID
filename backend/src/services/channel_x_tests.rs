@@ -373,6 +373,11 @@ async fn polling_backoff_and_error_threshold_release_lease_and_audit_failure() {
             .await
             .unwrap();
         assert_eq!(current.poll_error_count, count);
+        assert_eq!(current.diagnostics.consecutive_errors, count);
+        assert_eq!(
+            current.diagnostics.failure_reason.as_deref(),
+            Some(crate::services::channel_bot_health::codes::PROVIDER_UNAVAILABLE)
+        );
         assert!(current.poll_lease_until.is_none());
         assert_eq!(current.poll_cursor, bot.poll_cursor);
         assert_eq!(current.status, if count == 5 { "failed" } else { "active" });
@@ -387,6 +392,15 @@ async fn polling_backoff_and_error_threshold_release_lease_and_audit_failure() {
         .unwrap();
     assert!(!format!("{audit:?}").contains("UPSTREAM-SECRET"));
     assert!(audit.contains_key("seq"));
+    assert_eq!(
+        audit
+            .get_document("event_data")
+            .unwrap()
+            .get_str("recommended_action")
+            .unwrap(),
+        "verify",
+        "a provider outage is retried, not a reason to reconnect"
+    );
 }
 
 #[tokio::test]
@@ -645,19 +659,27 @@ async fn admin_lists_all_providers_and_updates_only_the_shared_provider_config()
         .unwrap()
         .unwrap();
     assert_eq!(
-        state
-            .encryption_keys
-            .decrypt(provider.client_id_encrypted.as_ref().unwrap())
+        crate::services::credential_record_service::CredentialRecord::provider(&provider)
+            .decrypt(
+                &state.encryption_keys,
+                "client_id_encrypted",
+                provider.client_id_encrypted.as_deref().unwrap()
+            )
             .await
-            .unwrap(),
+            .unwrap()
+            .as_slice(),
         b"new-client"
     );
     assert_eq!(
-        state
-            .encryption_keys
-            .decrypt(provider.client_secret_encrypted.as_ref().unwrap())
+        crate::services::credential_record_service::CredentialRecord::provider(&provider)
+            .decrypt(
+                &state.encryption_keys,
+                "client_secret_encrypted",
+                provider.client_secret_encrypted.as_deref().unwrap()
+            )
             .await
-            .unwrap(),
+            .unwrap()
+            .as_slice(),
         b"new-secret"
     );
     assert_eq!(
@@ -738,9 +760,14 @@ async fn reconnect_requires_same_identity_and_fences_stale_failure() {
     )
     .await
     .unwrap();
-    channel_credentials::fail_bot(&state.db, &bot, "stale failure")
-        .await
-        .unwrap();
+    channel_credentials::fail_bot(
+        &state.db,
+        &bot,
+        crate::services::channel_bot_health::codes::RECONNECT_REQUIRED,
+        "stale failure",
+    )
+    .await
+    .unwrap();
     let current = channel_bot_service::get_bot(&state.db, &bot.id)
         .await
         .unwrap();

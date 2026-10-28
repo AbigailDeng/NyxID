@@ -98,6 +98,24 @@ describe("NyxID voice native bridge", () => {
     });
   });
 
+  it("keeps the published result identifier while stripping hidden execution identifiers", async () => {
+    const request = {
+      id: sessionId,
+      state: "completed",
+      turn_id: "turn-1",
+      pending_acknowledgement_ids: [],
+      result_message_id: "visible-result",
+    };
+    invokeMock.mockResolvedValueOnce({
+      ...request,
+      execution_result_message_id: "hidden-execution-result",
+    });
+
+    await expect(
+      nyxIdVoiceBridge.nyxIdVoiceRequest(conversationId, sessionId),
+    ).resolves.toEqual(request);
+  });
+
   it("keeps voice unavailable in browser preview", async () => {
     const runtime = new BrowserCompanionRuntime({
       storage: { getItem: () => null, setItem: () => undefined },

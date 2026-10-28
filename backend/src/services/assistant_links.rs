@@ -1,15 +1,33 @@
 //! Browser destinations shared by assistant tools, setup APIs and notifications.
+
+pub const AGENT_DETAILS_GRANTS: &str = "grants";
+pub const AGENT_DETAILS_SKILLS: &str = "skills";
+
 #[derive(Clone, Copy)]
 pub enum AssistantPage<'a> {
+    Conversation {
+        conversation: &'a str,
+    },
     Settings {
         tab: &'a str,
     },
     NyxBotSettings,
+    ReviewCard {
+        conversation: &'a str,
+        card: &'a str,
+    },
     Billing {
+        tab: &'a str,
+    },
+    /// An agent's details sheet, opened on one section; the frontend ignores
+    /// other values and opens nothing.
+    AgentDetails {
+        agent: &'a str,
         tab: &'a str,
     },
     Automations {
         setup: Option<&'a str>,
+        agent: Option<&'a str>,
     },
     Machines,
     MachineSettings {
@@ -34,10 +52,20 @@ impl AssistantPage<'_> {
     pub fn path(self) -> String {
         let mut query = url::form_urlencoded::Serializer::new(String::new());
         let path = match self {
+            Self::Conversation { conversation } => {
+                query.append_pair("c", conversation);
+                "/assistant".into()
+            }
             Self::Settings { tab } => {
                 query
                     .append_pair("panel", "settings")
                     .append_pair("panelTab", tab);
+                "/assistant".into()
+            }
+            Self::ReviewCard { conversation, card } => {
+                query
+                    .append_pair("c", conversation)
+                    .append_pair("card", card);
                 "/assistant".into()
             }
             Self::NyxBotSettings => {
@@ -50,9 +78,18 @@ impl AssistantPage<'_> {
                     .append_pair("panelTab", tab);
                 "/assistant".into()
             }
-            Self::Automations { setup } => {
+            Self::AgentDetails { agent, tab } => {
+                query
+                    .append_pair("agent", agent)
+                    .append_pair("details", tab);
+                "/assistant".into()
+            }
+            Self::Automations { setup, agent } => {
                 if let Some(setup) = setup {
                     query.append_pair("setup", setup);
+                }
+                if let Some(agent) = agent {
+                    query.append_pair("agent", agent);
                 }
                 "/assistant/automations".into()
             }
@@ -110,6 +147,7 @@ impl AssistantPage<'_> {
 #[cfg(test)]
 mod tests {
     use super::AssistantPage::*;
+    use super::{AGENT_DETAILS_GRANTS, AGENT_DETAILS_SKILLS};
 
     #[test]
     fn browser_links_use_assistant_workspace_and_encode_parameters() {
@@ -147,6 +185,13 @@ mod tests {
                 Settings { tab: "privacy" },
                 "/assistant?panel=settings&panelTab=privacy",
             ),
+            (
+                ReviewCard {
+                    conversation: "nyxa-test",
+                    card: "a&b",
+                },
+                "/assistant?c=nyxa-test&card=a%26b",
+            ),
             (NyxBotSettings, "/assistant?panel=nyxbot"),
             (
                 Billing { tab: "billing" },
@@ -168,10 +213,47 @@ mod tests {
                 },
                 "/assistant?panel=billing&panelTab=a%26b+c%2F%E4%B8%AD%E6%96%87%2B%25",
             ),
-            (Automations { setup: None }, "/assistant/automations"),
             (
-                Automations { setup: Some("a&b") },
+                Automations {
+                    setup: None,
+                    agent: None,
+                },
+                "/assistant/automations",
+            ),
+            (
+                Automations {
+                    setup: Some("a&b"),
+                    agent: None,
+                },
                 "/assistant/automations?setup=a%26b",
+            ),
+            (
+                Automations {
+                    setup: None,
+                    agent: Some("agent/中文 &"),
+                },
+                "/assistant/automations?agent=agent%2F%E4%B8%AD%E6%96%87+%26",
+            ),
+            (
+                Automations {
+                    setup: Some("s"),
+                    agent: Some("a1"),
+                },
+                "/assistant/automations?setup=s&agent=a1",
+            ),
+            (
+                AgentDetails {
+                    agent: "a1",
+                    tab: AGENT_DETAILS_GRANTS,
+                },
+                "/assistant?agent=a1&details=grants",
+            ),
+            (
+                AgentDetails {
+                    agent: "a&b/中文",
+                    tab: AGENT_DETAILS_SKILLS,
+                },
+                "/assistant?agent=a%26b%2F%E4%B8%AD%E6%96%87&details=skills",
             ),
             (Machines, "/assistant/machines"),
             (SavedLogins, "/assistant/machines?tab=logins"),

@@ -25,6 +25,8 @@ function StudioBreadcrumbLink({
       return <Link {...props} to="/integration-guide" search={{ tab }} />;
     case "/admin/credits":
       return <Link {...props} to="/admin/credits" search={{ tab }} />;
+    case "/admin/billing":
+      return <Link {...props} to="/admin/billing" search={{ tab }} />;
     case "/admin/invite-codes":
       return (
         <Link
@@ -46,7 +48,7 @@ function StudioBreadcrumbLink({
         <Link
           {...props}
           to="/admin/usage"
-          search={{ tab: tab === "list" ? "list" : "dashboard" }}
+          search={{ tab: tab === "nyxbot" ? "nyxbot" : tab === "list" ? "list" : "dashboard" }}
         />
       );
   }

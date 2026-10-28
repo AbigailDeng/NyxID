@@ -189,11 +189,22 @@ redaction, bounds or review.
 
 Creation, claiming and completion use compare-and-set updates on
 `config_revision` and a monotonically increasing fence. A worker claims one
-run with a short lease, renews it while reading evidence, and releases it by
-writing a terminal status. A lease expiry permits a later worker to retry;
+run with a 120-second lease and writes a terminal status on completion. The
+worker checks lease expiry before inference and after its response; stale work
+is cancelled without advancing the cursor. A lease expiry permits a later worker to retry;
 the fence prevents the old worker from advancing the cursor or writing a
 proposal after loss of ownership. Queue depth, attempts, evidence count,
 excerpt bytes and proposal size are bounded.
+
+Destroying a specialist disables its existing learning configuration, advances
+its revision, and cancels queued or analyzing runs with cleared leases and
+advanced fences in the same transaction. Configuration and run admission write
+fence the live agent; admission reserves the configuration and inserts the run
+atomically. Workers re-read agent, configuration and lease authority after
+loading evidence and again after inference. Inference already admitted before
+destruction may finish, but successful completion (including cursor-only results)
+write-fences the live agent in the proposal/cursor transaction. A destroyed agent
+cannot re-enable learning, admit another run, or persist a late learning result.
 
 Run states are `queued`, `running`, `analyzing`, `succeeded`, `failed`,
 `cancelled` and `blocked`; proposal state is separate (`pending`, `rejected`,
@@ -368,6 +379,172 @@ otherwise it stops as `publication_failed` with a human retry action. It never
 blindly creates a second skill or claims exactly-once behavior for an external
 API that has no idempotency key.
 
+### Publication recovery and rollout
+
+The review card shows copy for the fixed failure code. NyxID stores and audits
+the durable publication stage for recovery.
+Ornn problem responses contribute their root `code`, HTTP status, and up to
+ten allowlisted package-validation rule identifiers. NyxID never stores raw
+response bodies, messages, or detail text. Authentication and write permission
+refusals are distinct from package validation, interface changes, version
+conflicts, unavailable Ornn, and an uncertain dispatch. A verified Ornn version
+is checkpointed before the agent pin transaction; a failed pin reports
+`published_unpinned`, and retry verifies and pins without another publication
+request. Read denial, missing authentication, and transport failure have
+separate failure codes; an unavailable validator is never reported as an
+invalid package.
+
+For a definitive refusal before Ornn mutation, NyxID clears the started flag
+only if that operation has never had an uncertain dispatch. The same
+transaction releases its reserved target, allowing a revised draft to claim
+that version. A later retry of the first draft can claim it again only if
+the target remains free. Invalid package, dependency, name and interface
+failures do not offer a write retry. For authored drafts, the fenced failure
+transaction queues a durable repair event and wakes the drafting agent to request a corrected
+draft. Learned proposals do not queue that authored repair event; the owner
+should discard the proposal and ask NyxBot for a revised one. A version conflict
+after dispatch keeps the barrier and permits only read-only checks until publication is resolved.
+Once an attempt is uncertain, every later click
+reconciles the exact version read-only. An absent version is not proof that a
+delayed request cannot still land. If the version later appears, NyxID checks
+the private owner, empty sharing ACL, name, version, metadata hash, empty
+dependency closure, and downloaded ZIP hash before attaching it. A version
+with different bytes is a conflict and is never adopted. An expired unconsumed
+card can be renewed for the same operation; changing package bytes requires
+a new review revision while the old operation is conclusively non-effective.
+
+Updates reserve the target `{skill GUID}:{version}` before publication. Another
+operation targeting that pair is refused as `target_busy`. A reservation may
+be released only with a proposal transition while the operation has not
+started, has no live lease, has no verified checkpoint, and has never had an
+uncertain dispatch. Uncertain and landed reservations stay. Create operations
+use Ornn's unique name constraint and the same reconciliation-only rule after
+uncertainty. These fences cover NyxID writers; an external Ornn writer or a
+stalled request that later regresses Ornn's `latest` pointer remain residual
+risks. Legacy uncertain drafts can recover only when their exact private
+version is found; NyxID cannot authorize another write without authoritative
+evidence that the old request can no longer mutate.
+
+Deploy this change with a writer drain:
+
+1. Disable effective `assistant:agent-learning` access for every person: set
+   the global baseline false and remove or disable personal and org enabling
+   overrides. The `flag_enabled_people` path honors personal overrides. An
+   alternative is to stop all publication-serving traffic.
+2. Drain in-flight publication requests and verify no old writer remains.
+3. Deploy only new replicas. Startup classifies every started, unpinned legacy
+   operation from its own encrypted draft or persisted operation-bound target,
+   reserves update targets, and writes `assistant_learning_migrations` marker
+   `_id: publication-targets-v1` only after all operations are classified.
+   Verify that marker before enabling publication.
+4. Deploy the frontend only after every backend replica serves the new
+   preview. The authored card reads its actions from
+   `GET .../learning/proposals/{id}?acknowledgement_id=...`; an older backend
+   ignores the parameter and returns no actions, so a new frontend in front of
+   it shows a read-only card. A new backend keeps the original preview when the
+   parameter is absent, so the old frontend keeps working during the window.
+5. Restore the prior flag configuration.
+
+Rollback uses the same procedure in reverse: disable effective
+`assistant:agent-learning` access, drain publication requests, then replace
+replicas. Old binaries replace the whole `publication` object on claim and
+ignore target reservations and the migration marker, so they must never serve
+publication while rows written by this version exist and the flag is on. Keep
+the flag off after a rollback until the new version is deployed again. New
+fields left on rows are ignored by old readers and are reused when the new
+version returns.
+
+Skipping the drain or the order fails closed. Without the marker, claims and
+allocations refuse; a card without actions is read-only; an operation that may
+have dispatched stays reconciliation-only. No path infers that a second
+publication is safe.
+
+Claims and new allocations refuse with `nyxid_refused` while the marker is
+absent. If startup logs an unresolved operation ID, inspect the exact original
+operation in Ornn and recover its authoritative target GUID. Record the target
+and kind on that publication, then rerun startup migration. A current agent
+pin found by name or version is diagnostic only: renames and replacements make
+it unsafe as target identity. Do not create a marker manually while any
+started operation remains unclassified. Existing started operations with an
+unrecoverable body must remain blocked until authoritative evidence is found.
+
+Startup runs the migration once before serving. A pass that fails on storage
+or on decrypting a legacy draft (for example a key-service outage) is retried
+in the background, from 5 seconds doubling to 5 minutes, and logged as
+"could not be decrypted; migration will retry". If a draft still cannot be
+decrypted on the third pass, NyxID also logs an error and records
+`assistant_learning_migration_unresolved` with `reason: "undecryptable"`, then
+keeps retrying. A draft that decrypts but does not decode, or an operation with
+no operation-bound target, is recorded with `reason: "unclassified"` and needs
+the operator procedure below.
+
+Use the original operation ID and proposal ID as the update fence. After
+independent Ornn verification, an operator may set
+`publication.target_kind="update"` and `publication.target_skill_id=<GUID>` on
+that exact started proposal (or `target_kind="create"` for a proven create),
+then restart one new replica to rerun the migration. Check the marker and
+barrier row before restoring traffic. Never infer the GUID from the current
+agent pin, a matching name, or a matching version alone.
+
+#### Operator release of an uncertain target
+
+Versions are derived from the attached base, so an uncertain attempt (for
+example a migrated legacy draft) keeps holding `{skill GUID}:{version}` and no
+other draft can publish that version. NyxID never skips to another version on
+its own. A platform admin may release the target only with authoritative
+evidence that the original request had no effect and can no longer have one:
+
+1. Confirm in Ornn that the version list for the skill has no such version.
+2. Confirm in Ornn's request records for that operation ID that the upload
+   failed or never arrived, and that no retry of it can still be in flight.
+3. Call `POST /api/v1/admin/assistant/learning/publications/{proposal_id}/release-target`
+   with `{"operation_id": "<exact operation>", "evidence_ref": "<ticket or log reference>"}`.
+
+The request requires a first-party admin session and fences on the exact
+operation. It refuses a verified, pinned or leased publication and a landed
+target. In one transaction it deletes the reserved or uncertain target and
+marks the operation as never dispatched (`failure_code: operator_released`).
+The same reviewed package can then be published again from its card:
+**Retry publication** while the approving card is still live, otherwise
+**Request a new confirmation**; or the owner can **Discard** the draft. A
+legacy package (prepared before #1828) is never published again: its owner
+rebuilds it first (see "Recovering drafts created before #1828"). The
+`assistant_learning_publication_target_released` audit event records the
+operator, proposal, operation, target, previous state and evidence reference
+(metadata only). Do not edit the target or proposal documents directly.
+
+#### Verified but not attached
+
+An operation that may already have reached Ornn is never rewritten, and it is
+still checked when the conditions for attaching it no longer hold. Two such
+conditions exist: the agent's source skill pin changed, or learned evidence or
+consent was withdrawn. NyxID reconciles and verifies the exact version
+read-only, checkpoints a verified version, and then refuses to attach it with
+`base_changed` or `evidence_unavailable` (status `published_unpinned`). The
+operation is then settled: neither the card nor the learning panel offers to
+check it again, and the server refuses any confirmation that tries, because
+checking would only repeat the same refusal. The private version stays in the
+owner's Ornn account and can be attached manually from the agent's skills. A
+NyxID-side failure that is not a registry outcome (a lost lease, a concurrent
+skills change, storage) is recorded by dispatch state only: `nyxid_refused`
+before dispatch, `publish_uncertain` after a possible dispatch, `pin_conflict`
+after verification. A read NyxID refuses or cannot start (an inactive catalog
+row, an identity or storage error) sends nothing to Ornn, so it is also
+`nyxid_refused` at validation and base verification, as for a refused
+publication request; during reconciliation it stays `publish_uncertain`.
+
+#### Learned evidence withdrawn after dispatch
+
+Withdrawing consent or disabling learning invalidates a learned draft that never
+dispatched. A learned operation that may already have reached Ornn is kept
+instead: the review list shows it with `evidence_available: false`, its
+confirmation only checks, and NyxID reconciles and verifies the exact version
+read-only. A verified version is checkpointed but never attached; the proposal
+settles as `published_unpinned` with `evidence_unavailable`. The private version
+stays in the owner's Ornn account. The owner may attach it manually through the
+agent's skill selection or leave it. If it never appears, the operator release
+above applies.
+
 Public publication requires a separate future owner action and is not an L1
 option. If Ornn cannot represent the polymorphic org owner, approval stops in
 `owner_binding_unavailable` before the first mutation; it never publishes
@@ -457,9 +634,12 @@ retention cleanup is a bounded maintenance task and is part of the delivery
 work that follows the dormant PR-1 worker; no cleanup can expose evidence.
 
 Changing the agent owner, destroying the agent, removing an org member or
-disabling the owner account fences queued and running work. The worker checks
-the fence before every read, model call, write and external mutation. Pending
-proposals are invalidated transactionally with the ownership change. A skill
+disabling the owner account fences queued and running work. Workers and review
+operations recheck live authority before inference, settlement and publication.
+Destroying a specialist cancels outstanding runs transactionally; existing
+proposals remain stored, and live review checks refuse publication for the
+destroyed agent. Other authority or evidence changes are revalidated by the
+review and publication paths and may invalidate the proposal there. A skill
 already published and pinned through B2 remains an explicit owner decision;
 L1 does not silently remove it or claim that learning revocation retracts
 content already shared in Ornn.
@@ -545,22 +725,87 @@ operation scopes, approvals, memory visibility or existing B2 pins.
 
 ## Owner-requested skill authoring
 
-`draft_agent_skill` is NyxBot-only: it drafts for review, never publishes on a
-model's authority. It reuses the default-off `assistant:agent-learning` flag,
-encrypted proposal store, and the one-card fenced publication saga. The additive
+In Auto and Ask every time, authored draft results include an absolute
+`review_url` identifying both the
+conversation and acknowledgement (`/assistant?c=...&card=...`). Channel agents
+must send this full link when there is no `confirm_phrase`. Group pending rows
+show **Review draft** without Confirm/Allow/Deny; chat replies never authorize
+publication. The app loads and highlights the exact card, where the owner must
+review all files. On old replicas the additive card query falls back to normal
+history; deploy all replicas to guarantee loading cards outside recent history.
+
+`learning_status`, `learning_list_proposals` and `learning_run_now` resolve
+NyxBot's own immutable UUID with the maintain ACL, just like specialist IDs.
+Listing honors the same person/pilot gate as authoring; automatic learning's
+own enrollment gate is unchanged. Authored proposal items add latest
+`acknowledgement_id`, `card_status`, `card_expires_at` and `review_url`.
+
+In those reviewed modes, re-drafting identical content in another turn reuses a pending, never-dispatched
+proposal and its latest pending/expired card if the original owner's conversation
+and its bound authoring key remain valid. Expired cards link to **Request a new confirmation**. Reuse never
+moves cards, approves them or bypasses publication fences. Changed content gets
+a new draft; started, uncertain or verified publication is not reusable. An
+unstarted proposal marked `publication_failed` only because its confirmation
+expired also keeps its original review link; only explicit owner renewal creates
+a new confirmation for that operation in the reviewed modes. An allowed, unexpired card with no
+publication started or active lease returns `waiting_publication` and the same
+review link. This joins the original operation without another card, Ornn read
+or publication dispatch.
+
+Concurrent authoring requests reserve one proposal and its original review origin
+in `assistant_authored_draft_claims`. Ornn preparation happens outside a database
+transaction; a second transaction fences that generation, proposal and credential
+when inserting the card. Interrupted or failed preparation retains the proposal
+for retry, including its original turn/trigger/voice identity. Stale workers cannot
+create a card after another generation replaces an unusable origin. Claim rows
+contain only stable identifiers and are removed on owner or target-agent deletion;
+a deleted origin conversation cannot authorize reuse. Legacy
+proposals with a valid card are adopted. A legacy orphan without recorded origin
+must be reviewed or discarded before retrying; NyxID refuses to guess a different
+review conversation or silently create a duplicate.
+
+`draft_agent_skill` delegates publication to NyxID: a Full-access owner turn
+publishes and pins immediately with a linked automatic receipt, while Auto and
+Ask every time require owner review first. NyxBot drafts for any agent it
+maintains; a specialist drafts only for its own agent. It reuses the default-off `assistant:agent-learning` flag,
+encrypted proposal store, and the same fenced publication saga in both paths. The additive
 proposal source defaults to `learned`; `authored` proposals do not require
 automatic learning enrollment or conversation evidence. Flag discovery skips
-membership resolution when no relevant rollout is enabled. Only owner NyxBot
-chats read the authoring flag during tool discovery; a failed lookup hides only
-the drafting tool. Guests and specialists cannot draft; specialists can ask
-NyxBot with `request_agent_skills`.
+membership resolution when no relevant rollout is enabled. Owner NyxBot and
+specialist chats read the authoring flag during tool discovery; a failed lookup
+hides only the drafting tool. Guests cannot draft.
+
+Before the owner card is raised, NyxID builds the package as publication will,
+except that an improvement's interface metadata (already accepted by Ornn) is not
+re-read, and asks Ornn's `/skill-format/validate`. Agent drafts send this check
+with the drafting chat key, so approval policy, the live-turn fence and
+attribution apply; where policy would require an approval, or a webhook turn's
+policy refuses the request, the check is skipped without raising a prompt. Owner
+edits started in the app send it as the person. An explicit refusal
+returns `ornn_format_rejected` with Ornn's rule identifiers in `ornn_rules`
+(sanitized, at most 10; Ornn's messages are never relayed because they can quote
+filenames), so the author fixes the draft first; nothing is stored. An
+unavailable Ornn leaves the draft flow unchanged, and publication validates again
+after approval. Supporting files outside `references/`, `scripts/` or `assets/`
+are placed under `references/` both in the reviewed draft and in the package
+(existing packages keep their bytes). Authoring also refuses `<`/`>` in the
+description and `claude`/`anthropic` in the name. Assistant chat keys cannot call
+Ornn's raw create, pull, update, refresh or source routes; they are told to use
+`draft_agent_skill`, so no agent ever needs or asks for a ZIP. Specialist cards
+approve only their own agent's drafts.
+
+Rollout: stored proposals whose files sit outside the allowed folders were
+unpublishable before (Ornn refused them); after upgrade their rebuilt package
+differs from the reviewed hash, so they fail with a conflict instead and should
+be discarded and drafted again.
 
 Build agents from description (role/scope), persona (tone/style), and Ornn skills
 (repeatable procedures, checklists, references, templates and workflows). Search,
 preview and propose attaching existing skills before drafting uncovered procedures.
 Never package or publish through Ornn Playground, sandboxes, machines or raw
 Ornn upload APIs. NyxID validates bounded text, rejects credential shapes, encrypts
-the draft and shows all proposed files on one owner approval card. The card stores
+the draft and, in Auto and Ask every time, shows all proposed files on one owner
+approval card. The card stores
 only IDs/revisions; its human review view reads the encrypted proposal.
 
 Approval uses the existing server ZIP builder and signed approving-person Ornn
@@ -577,6 +822,44 @@ as inert text. Retry uses the same card and publication operation; it never
 replays an uncertain POST/PUT. The initiating model turn may already have ended
 when the human approves. The current chat key, owner, proposal/skill revisions
 and publication lease still fence the action.
+
+Each authored card fetches its preview with its acknowledgement ID. The server
+checks that card's binding and returns the actions available to that card;
+the browser displays those actions without inferring them from proposal status.
+An expired or outdated card can request a new confirmation for the same
+operation, including a read-only check after a possible Ornn write. Denying an
+older card after publication has started dismisses that confirmation and leaves
+the operation available for recovery. After a refusal that the same package
+cannot overcome (an interface, validation, package, dependency or name refusal,
+a changed source skill, or a version conflict before dispatch), the card offers
+**Deny** or **Discard** and no retry; the drafting agent is notified in its
+drafting conversation to prepare a revised
+package. When
+another draft's operation holds the target version and is the only blocker, the
+preview reports a computed `target_busy` (not stored) and withholds the write.
+A changed source skill replaces a transient failure code on an operation that
+never dispatched, so the card stops offering a retry that cannot succeed.
+Confirmations the server withholds return one fixed message and are audited as
+`assistant_learning_publication_decision_withheld`, metadata only. Pre-claim
+refusal audits also name the card that was clicked.
+
+The issue #1812 report of 2026-10-09 captured `409` / `1004` ("Learning approval
+card is missing, expired, used or stale") from the learning panel's
+**Confirm publish & attach** on an authored proposal: the panel posted a card
+that had never been decided. The panel now directs authored proposals to their
+conversation card, and the HTTP approve route refuses authored execution through
+an acknowledgement or raises a card elsewhere: for an authored proposal it only
+renews the original card (`renewal_of`), in that card's conversation. The
+panel links each authored proposal to its card's conversation (`?c=`). When
+NyxBot drafted inside a group, that is its hidden member thread, which opens
+as a thread page with the full card; the group view only summarizes member
+actions and cannot show the draft files. For a learned
+proposal, **Confirm publish & attach** acts only on the owner's own pending or
+allowed learning card for that exact binding in the NyxBot conversation that
+raised it (or the used card that approved the operation, to resume it). It
+allows and audits that card (`assistant_acknowledgement_decided`) and refuses
+any other card id, including service, account and authored cards, without
+changing it. A refused confirmation is shown in the panel.
 
 Authored validation is separate from learned L1 validation at creation, editing,
 review and publication. Authored fields reject credential shapes (provider keys,
@@ -608,3 +891,225 @@ use `field: "draft"`. Other fixed rules cover required text, slug/path constrain
 duplicates, text-only content, input/schema/kind shape and base matching. Unknown
 JSON keys report their containing object. No matched text or raw parser errors
 enter diagnostics, logs or audit. No new permission or publication path is added.
+
+### Format validation and recovery
+
+New authored drafts use the shared Ornn field rules and perform one read-only
+Ornn format preflight before creating a review card. Non-allowed supporting paths
+are relocated under `references/`; `references/`, `scripts/` and `assets/` paths
+remain. A format refusal returns `ornn_format_rejected` with bounded sanitized
+`ornn_rules` that the agent can correct in the same turn. Review binding does
+not repeat preflight; publication validates the exact approved package before
+mutation. Learned generation and newly submitted edits use the same field-rule
+function after the stricter L1 validator, while stored proposals decode tolerantly.
+Publication state and approval remain authoritative.
+
+During a rolling deployment, keep `assistant:agent-learning` disabled for
+affected people until every replica understands the additive learning fields.
+Older replicas fail closed when presented with a newer approval binding.
+
+`draft_agent_skill` requires `scope: {status, omissions}`. Complete declarations
+have no omissions; reduced declarations have 1–8 omissions of at most 200
+characters each, using the authored text/credential rules. Scope is encrypted
+separately and binds both request identity and the owner's approval digest.
+In Auto and Ask every time, separate owner acceptance stores the revision, digest
+and omission count, with a metadata-only audit entry. It can resume only that
+same operation; an edit voids acceptance. Full access bypasses this request to
+proceed and publishes reduced-scope drafts immediately. Its automatic receipt
+records only the omission count and consent bypass; its proposal link shows the
+decrypted omissions to the owner. No human `ScopeAcceptance` is
+fabricated. Legacy and owner-started scope-less drafts show no scope section and
+keep their original digest behavior.
+
+Ornn `ornn_format_rejected` preflight refusals count toward the durable
+three-rejection budget for a conversation/turn; ordinary local field, size,
+credential, scope and base errors do not. The startup-created 24-hour TTL index cleans the
+separate `assistant_skill_draft_attempts` collection. Preflight failure returns
+the released sanitized rule IDs in `ornn_rules` so the drafting agent can repair
+within the turn; no card exists for a package explicitly refused by the preflight. Availability failures allow a card for later publication.
+Publication failure requiring new bytes and successful pinning queue a stable
+`skill_publication` event in the fenced state transaction. The handler wakes
+the drafting agent after commit; the deferred queue sweep handles interruption after commit.
+This event describes a proposal-publication transition, separate from the
+`skill_request_allowed` outbox for owner-allowed skill requests. Authored failures
+ask the drafting agent for a corrected draft; learned failures retain guidance to revise or
+discard the proposal. Both persist bounded allowlisted `failure_rules` and a fixed
+`failure_stage`, never provider prose; a corrected revision clears them. See
+[the adapter projections](AGENT_SKILLS.md#ornn-package-contract).
+
+## Recovering drafts created before #1828
+
+Before #1828, NyxID packaged every update of an existing skill as
+`category: plain`, without the base skill's tools, runtimes or output type, so
+Ornn rejects the update of any non-plain base. Such a **legacy package** is an
+update whose publication has no interface snapshot (`package_format` below 2,
+which includes rows where the field is absent, and no `interface_encrypted`;
+an unclassified row counts as an update when its draft has a base skill).
+NyxID never dispatches a legacy package: no card, panel or approve request
+can confirm it, and only an operation that already dispatched may still be
+checked.
+
+A legacy operation counts as never dispatched when it has no dispatch flag,
+live lease or verified skill, whatever its status: besides `pending` and
+`publication_failed`, pre-#1828 servers recorded a failure before dispatch as
+`published_unpinned` (shown as `publication_failed`, since nothing was
+verified) and left a crashed attempt `publishing`. Their stored
+`publication_retry_required` code is shown as the rebuild prompt, or as
+`publish_uncertain` for an attempt that did dispatch. Such drafts can also be
+discarded.
+
+### Owner flow
+
+- **Authored drafts:** every card of the draft, live or expired, offers
+  **Review updated package** (the `reprepare` action) while the operation never
+  dispatched and the source skill is still the attached pin. The card shows "This
+  draft was prepared by an older NyxID version that can't preserve the skill's
+  tools/runtimes. Review the updated package." The click calls
+  `POST /api/v1/assistant/nyxagent/agents/{id}/learning/proposals/{proposal_id}/reprepare`
+  with `{"acknowledgement_id": "<clicked card>"}` (first-party human session,
+  live card authority as for a card decision). NyxID reads the exact attached
+  base with the owner's own identity, builds the snapshot, and in one
+  transaction replaces the operation (new operation ID, package and hash, next
+  revision), deletes only the old operation's own `reserved` target, clears the
+  failure code and writes the `assistant_learning_proposal_reprepared` audit
+  event. It then raises a new card in the clicked card's conversation. The
+  package changed, so the owner reviews every file before publishing; older
+  cards show "This confirmation no longer matches the draft."
+- **Interrupted rebuild:** if the process stopped after the swap and before the
+  new card existed, older cards of the draft offer **Show updated draft**,
+  which only raises the missing card (a live card for the new package is
+  reused). It authorizes nothing and changes no publication state. If the
+  swap committed but the card could not be raised, the request still succeeds
+  with `card_pending: true` and the card says to use **Show updated draft**.
+- **Learned drafts:** the learning panel shows the same copy and a **Review
+  updated package** button (the same route without `acknowledgement_id`). The
+  rebuilt draft is then confirmed from the panel as usual.
+- **Base no longer reproducible:** if the agent's pin changed, or Ornn's base
+  moved on or cannot be reproduced, the rebuild refuses (`base_skill_changed`,
+  `base_interface_incompatible`, `publication_integrity_failed`) and records
+  `base_changed`, `base_interface_incompatible` or `base_verify_failed`; the
+  operation is unchanged and the owner can only discard the draft and ask for
+  a revised one. A transient read failure records nothing
+  (`source_skill_unavailable`).
+
+### Operator flow for stalled legacy dispatches
+
+A legacy operation that dispatched with an unknown outcome holds its target
+and is check-only. A platform admin may release such operations in bulk with
+`POST /api/v1/admin/assistant/learning/publications/release-stale` (first-party
+admin session). Body: `{"dry_run": true, "min_age_hours": 24, "limit": 200}`;
+these are the defaults, `min_age_hours` is 24..=8760 and `limit` 1..=200.
+
+1. Run a dry run and review every row. A candidate is a dispatched (`started`
+   or `uncertain_dispatch`), unverified, unleased legacy update in `pending`,
+   `publishing` or `publication_failed`, or a draft discarded before the
+   migration (`rejected`, `invalidated`) whose dispatched operation still holds
+   its target. Its age is measured from the latest of its first dispatch, its
+   lease expiry and `legacy_classified_at`, which startup stamps once on every
+   dispatched legacy update. Nothing is releasable until `min_age_hours` after
+   the new version first ran. Releasable rows come first, oldest stamp first;
+   rows the stamp missed follow only while `limit` has room. At most `limit`
+   rows per call, read with bounded concurrency within a 60 second deadline.
+   Both dispatch branches of the query are indexed (`{publication.started,
+   status}` and the partial `{publication.uncertain_dispatch, status}`).
+2. For each row NyxID reads Ornn with the proposal owner's identity, never the
+   admin's: the exact version must be a definitive 404 `skill_version_not_found`
+   and the latest version must be exactly the base version in the operation's
+   own draft. A discarded draft no longer has its draft, so its version must
+   instead be missing from the version list; nothing is rebuilt from it.
+   Decisions: `release` (dry run), `released_audited` (applied),
+   `release_reservation` / `released_reservation_audited` (a discarded draft:
+   only its target reservation is released, it stays discarded),
+   `landed_check_again` (the version exists; the owner's **Check again**
+   reconciles it), `skip:landed` (the version of a discarded draft exists; its
+   reservation stays), `skip:uncertain`, `skip:latest_mismatch`,
+   `skip:age_unknown` (no stamp yet), `skip:legacy_target_unresolved`,
+   `skip:barrier_changed`, `skip:cas_changed`, `skip:deadline` and `skip:error`.
+   Responses carry identifiers and decision codes only.
+3. Repeat with `"dry_run": false`. The apply pass reads Ornn again (dry-run
+   results are never reused) and releases each row in one transaction fenced
+   on the full observed state (revision, status, operation, attempt, package
+   hash, target, legacy format, dispatch flags, no verification, no live lease)
+   and on the target barrier. The same transaction records
+   `publication.release_evidence` and the `assistant_learning_publication_target_released`
+   audit event with the admin actor, `evidence: "absence_only"`, the batch ID,
+   the evidence and `reservation_only`; a summary event
+   (`..._stale_release_summary`) lists the decision counts. A release
+   therefore never exists without its audit event.
+4. The released row shows **Review updated package**: the owner rebuilds and
+   reviews it as above before anything is written again. A discarded draft's
+   release only frees the version for new drafts.
+
+Every release is labelled `evidence: "absence_only"`. This is an explicit
+exception, limited to legacy operations, to the rule that absence never
+authorizes another write.
+
+### Residual risks
+
+- A request stalled longer than `min_age_hours` can still land after release.
+  The rebuilt operation targets the same version and pins only after exact
+  version and ZIP hash verification: if the old package landed first, the new
+  PUT is refused, reconciliation finds a different hash and the operation
+  becomes a terminal `version_conflict` (target retained, nothing attached;
+  the card explains that an earlier request may have landed late). If the old
+  request lands after the new version was pinned, Ornn may move its `latest`
+  tag back; the agent's pin stays on the verified new version.
+- The flags and drain procedure of "Rollout and compatibility" still apply;
+  keep learning disabled until the migration marker is present.
+
+## Current HTTP editor contract
+
+The learning status response is flat and includes `enabled`, `threshold`, `org_owned`, `opted_in`, and `publication_blocked`. Organization members can update only their own learning consent with `PUT /assistant/nyxagent/agents/{id}/learning/consent`. Proposal edits use `{revision, draft}`; validation is a dry run and returns field diagnostics where available. Preview and history are metadata-bounded owner surfaces.
+
+The durable skill-approval outbox and authored-draft generation claims require
+all backend replicas and assistant workers to run this version before enabling
+or resuming the corresponding workflows. During rollout, pause authoring and
+skill approvals, drain active assistant turns, upgrade every writer and sweeper,
+then resume. Existing API shapes and stored drafts remain readable; older writers
+do not participate in claim serialization or transactional event consumption.
+Running these workflows across mixed backend versions can duplicate drafts or
+replay a notification. The image-input capability gate and card-query fallback
+continue to support older NyxAgent deployments and frontends independently.
+
+For this coordinated upgrade, first disable `assistant:agent-learning` for
+all affected users using the existing feature-flag administration. Quiesce
+assistant and approval ingress at the deployment's load balancer, including
+channel webhook ingress; the learning flag alone does not pause skill requests
+or owner decisions. Let admitted assistant turns and publication requests finish,
+then stop the old backend/assistant worker processes so no old sweeper can drain
+or enqueue events. Upgrade every backend writer and worker before restoring
+traffic and the flag. This requires a maintenance window; there is no automatic
+mixed-version activation fence for these two new internal workflows.
+
+Before rollback, quiesce the same ingress and drain/stop the new workers.
+An older binary leaves undelivered skill-notification markers untouched and
+cannot deliver them; retain those rows and upgrade again to recover delivery.
+Do not run old and new workers simultaneously. A marker records notification
+admission to a NyxBot turn, not successful attachment: upstream turn failure can
+still require the owner to resume NyxBot. Attachment uses a separate owner
+review card in Auto and Ask every time, or an automatic receipt in Full access.
+
+When source or persisted destination authority is temporarily unavailable,
+keep the owner decision and defer notification retries for 60 seconds, doubling
+to a one-hour cap. Restored access is rechecked at the next due sweep (at most
+one hour plus sweep backlog). Busy threads and event-budget limits retain normal
+queued-event handling; database failures do not become authority deferrals.
+
+Personal account erasure checks publication recovery before accepting deletion.
+A dispatched or uncertain operation without verified completion, an uncertain
+update-target reservation, or a live publication lease blocks acceptance. This
+check and dispatch/claim/pin transitions contend on the same persistent owner
+barrier in majority transactions. Rejection leaves sign-in and provider
+credentials available: finish read-only reconciliation, or use the existing
+operator release procedure with its required external evidence, before retrying
+erasure. Erasure never publishes a package or assumes a timed-out request had
+no effect. A defensive worker guard also preserves unresolved proposals and
+capabilities on previously accepted intents before provider cleanup.
+
+After settlement, erasure may remove personal proposal bodies and agent
+metadata. A proven undispatched reservation can be released transactionally;
+landed target reservations and orphan reservations remain minimal external-effect
+locks. They contain operation/package identities and target metadata, retain
+the existing prohibition on reusing a landed/unknown target, and do not authorize
+new registry writes. Other owners' skills and publication records remain under
+their existing lifecycle.

@@ -69,7 +69,7 @@ static URL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)[a-z][a-z0-9+.-]*://[^\s<>"`]+"#).expect("static authored URL rule")
 });
 
-fn credential_position(text: &str) -> Option<usize> {
+pub(super) fn credential_position(text: &str) -> Option<usize> {
     let shape = CREDENTIALS
         .iter()
         .filter_map(|rule| rule.find(text).map(|m| m.start()));
@@ -103,7 +103,7 @@ fn credential_position(text: &str) -> Option<usize> {
     shape.chain(urls).min()
 }
 
-fn text(field: &str, value: &str, maximum: usize, required: bool) -> AppResult<()> {
+pub(super) fn text(field: &str, value: &str, maximum: usize, required: bool) -> AppResult<()> {
     limit(field, "characters", value.chars().count(), maximum)?;
     if required && value.trim().is_empty() {
         return Err(invalid("required", field));
@@ -181,6 +181,19 @@ pub(crate) fn validate(body: &GeneratedProposal) -> AppResult<Vec<u8>> {
     limit("draft", "characters", encoded.chars().count(), MAX_CHARS)?;
     limit("draft", "bytes", encoded.len(), MAX_BYTES)?;
     Ok(encoded.into_bytes())
+}
+
+/// Ornn's frontmatter rules for fields NyxID copies into SKILL.md, checked
+/// when a draft is authored. Stored drafts keep decoding with `validate`.
+pub(crate) fn ornn_rules(body: &GeneratedProposal) -> AppResult<()> {
+    if body.description.contains(['<', '>']) {
+        return Err(invalid("angle_brackets", "description"));
+    }
+    let name = body.name.to_ascii_lowercase();
+    if name.contains("claude") || name.contains("anthropic") {
+        return Err(invalid("reserved_name", "name"));
+    }
+    Ok(())
 }
 
 pub(crate) fn decode(value: &str) -> AppResult<GeneratedProposal> {

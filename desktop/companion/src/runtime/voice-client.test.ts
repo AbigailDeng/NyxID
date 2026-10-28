@@ -76,7 +76,11 @@ class Peer {
     Peer.current = this;
   }
 }
-let track: { enabled: boolean; stop: ReturnType<typeof vi.fn> };
+let track: {
+  enabled: boolean;
+  stop: ReturnType<typeof vi.fn>;
+  onended: (() => void) | null;
+};
 let microphone: ReturnType<typeof vi.fn>;
 let listener: (event: NyxIdVoiceEvent) => void;
 let audio: HTMLAudioElement;
@@ -105,7 +109,7 @@ beforeEach(() => {
   pcm.close.mockReset();
   pcm.enqueue.mockReset();
   pcm.flush.mockReset();
-  track = { enabled: true, stop: vi.fn() };
+  track = { enabled: true, stop: vi.fn(), onended: null };
   microphone = vi.fn().mockResolvedValue({
     getAudioTracks: () => [track],
     getTracks: () => [track],
@@ -317,6 +321,31 @@ describe("NyxID desktop realtime media", () => {
       "语音连接超时，请结束后重新开始通话。",
     );
     expect(bridge.controlNyxIdVoice).toHaveBeenCalledWith(session.id, "end");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("ends the session and releases resources when microphone permission or the device is lost", async () => {
+    const handlers = callbacks();
+    const client = new NyxIdVoiceClient(bridge, handlers);
+    await client.prepare();
+    await client.start(option);
+    snapshot();
+    Peer.current.channel.onmessage?.({
+      data: JSON.stringify({ type: "session.started" }),
+    });
+    client.hold(true);
+    track.onended?.();
+    expect(client.isClosed).toBe(true);
+    expect(track.enabled).toBe(false);
+    expect(track.stop).toHaveBeenCalled();
+    expect(track.onended).toBeNull();
+    expect(Peer.current.close).toHaveBeenCalled();
+    expect(unlisten).toHaveBeenCalled();
+    expect(bridge.controlNyxIdVoice).toHaveBeenCalledWith(session.id, "end");
+    expect(handlers.onError).toHaveBeenCalledWith(
+      "麦克风已断开或访问权限已撤销，请检查系统设置后重新开始通话。",
+    );
+    expect(handlers.onClosed).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
   });
 });

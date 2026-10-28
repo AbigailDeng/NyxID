@@ -6,6 +6,7 @@ import type { WsFrameInjection } from "@/schemas/services";
 export type { DefaultRequestHeader } from "@/schemas/default-request-headers";
 
 export interface KeyInfo {
+  readonly offering_kind?: "ai_service" | "tool";
   readonly can_edit_configuration?: boolean;
   readonly preference_rank?: number | null;
   readonly preference_position?: number | null;
@@ -50,6 +51,9 @@ export interface KeyInfo {
   readonly catalog_service_slug: string | null;
   /** User-selected image URL; takes precedence over the built-in glyph. */
   readonly icon_url?: string | null;
+  /** The catalog service's icon (uploaded provider or Tool icon), used when
+   * there is no override. */
+  readonly catalog_icon_url?: string | null;
   readonly catalog_service_name: string | null;
   readonly revocation?: RevocationCapability | null;
   readonly node_id: string | null;
@@ -259,6 +263,7 @@ export interface CatalogEntry {
 
 export interface RevocationCapability {
   readonly revokes_grant: boolean;
+  readonly effect_scope?: "token_only" | "grant_wide" | "request_scoped" | null;
 }
 
 export interface CatalogListResponse {

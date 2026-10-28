@@ -8,8 +8,9 @@ import {
   SEEDED,
 } from "./helpers";
 
+// The Stop reset note (`contextResetCopy("stopped")` in nyxagent-transport.ts).
 const RESET_NOTICE =
-  "Conversation context was reset; the assistant was given a recap of this chat.";
+  "The turn was stopped, so the assistant continues in a fresh context with a recap. Check what the stopped turn finished before rerunning it.";
 const GREETING = /^Good (morning|afternoon|evening), Dannick$/;
 
 function homeHeading(page: Page) {
@@ -17,7 +18,7 @@ function homeHeading(page: Page) {
 }
 
 function nav(page: Page) {
-  return page.getByRole("navigation");
+  return page.getByRole("navigation", { name: "Agents and conversations" });
 }
 
 test("the home composer starts a NyxBot thread: durable reload, connect link, rename and delete", async ({
@@ -27,7 +28,7 @@ test("the home composer starts a NyxBot thread: durable reload, connect link, re
   await expect(homeHeading(page)).toBeVisible();
   // Model routing is server-side: no profile selector.
   await expect(page.getByRole("combobox", { name: "Profile" })).toHaveCount(0);
-  await expect(composerInput(page)).toHaveAttribute("placeholder", "Message NyxBot");
+  await expect(composerInput(page)).toHaveAttribute("data-placeholder", "Message NyxBot");
   await sendMessage(page, "List connected services");
   await expect(page).toHaveURL(/c=nyxa-[a-f0-9]{32}/);
   await expect(page.getByRole("heading", { name: "NyxBot", exact: true })).toBeVisible();
@@ -39,9 +40,10 @@ test("the home composer starts a NyxBot thread: durable reload, connect link, re
   await page.getByRole("button", { name: "Options for List connected services" }).click();
   await page.getByRole("menuitem", { name: "Rename" }).click();
   await expect(page.getByRole("menu", { includeHidden: true })).toHaveCount(0);
-  await page.getByRole("dialog").getByRole("textbox").fill("Services overview");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.getByRole("dialog", { includeHidden: true })).toHaveCount(0);
+  const rename = page.getByRole("form", { name: "Rename chat", exact: true });
+  await rename.getByRole("textbox", { name: "Title", exact: true }).fill("Services overview");
+  await rename.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(rename).toHaveCount(0);
   await expect(conversationRow(page, "Services overview")).toBeVisible();
   await conversationRow(page, "Services overview").hover();
   await page.getByRole("button", { name: "Options for Services overview" }).click();
@@ -155,7 +157,7 @@ test("the NyxBot home shows what happened, what NyxBot remembers, the roster and
   const agents = page.getByRole("region", { name: "Your agents" });
   await expect(agents.getByRole("listitem")).toHaveCount(2);
   await expect(agents).toContainText("Tracks open GitHub issues");
-  const groups = page.getByRole("region", { name: "Groups" });
+  const groups = page.getByRole("region", { name: "Crews", exact: true });
   await expect(groups).toContainText("Put several agents in one chat");
 
   // NyxBot remembers across threads; the home previews it and links to Manage.
@@ -171,19 +173,19 @@ test("the NyxBot home shows what happened, what NyxBot remembers, the roster and
   await page.keyboard.press("Escape");
 
   // A group made from the home shows up as a card.
-  await groups.getByRole("button", { name: "New group" }).click();
-  const dialog = page.getByRole("dialog", { name: "New group" });
+  await groups.getByRole("button", { name: "New crew" }).click();
+  const dialog = page.getByRole("dialog", { name: "New crew" });
   await dialog.getByRole("textbox", { name: "Name", exact: true }).fill("Standup");
-  await dialog.getByRole("button", { name: "Create group" }).click();
+  await dialog.getByRole("button", { name: "Create crew" }).click();
   await expect(page).toHaveURL(/g=nyxg-[a-f0-9]{32}/);
   await page.getByRole("button", { name: "Home", exact: true }).click();
-  await expect(groups.getByRole("button", { name: "Open group Standup" })).toBeVisible();
+  await expect(groups.getByRole("button", { name: "Open crew Standup" })).toBeVisible();
 
   // Roster "Chat" opens the agent's latest thread.
   await agents.getByRole("button", { name: "Chat with researcher" }).click();
   await expect(page).toHaveURL(/c=nyxa-[a-f0-9]{32}/);
   await expect(page.getByRole("heading", { name: "researcher" })).toBeVisible();
-  await expect(composerInput(page)).toHaveAttribute("placeholder", "Message researcher");
+  await expect(composerInput(page)).toHaveAttribute("data-placeholder", "Message researcher");
 
   // Deep links still work: ?draft opens a fresh NyxBot thread, not the home.
   await page.goto("/assistant?mock=1&draft=true");
@@ -192,15 +194,16 @@ test("the NyxBot home shows what happened, what NyxBot remembers, the roster and
 });
 
 async function createGroup(page: Page, name: string, extra: string[]) {
-  await nav(page).getByRole("button", { name: "New group" }).click();
-  const dialog = page.getByRole("dialog", { name: "New group" });
+  await nav(page).getByRole("button", { name: "Create new agent" }).click();
+  await page.getByRole("menuitem", { name: "Crew" }).click();
+  const dialog = page.getByRole("dialog", { name: "New crew" });
   // NyxBot is preselected.
   await expect(dialog.getByRole("checkbox", { name: /NyxBot/ })).toBeChecked();
   await dialog.getByRole("textbox", { name: "Name", exact: true }).fill(name);
   for (const agent of extra) {
     await dialog.getByRole("checkbox", { name: new RegExp(agent) }).click();
   }
-  await dialog.getByRole("button", { name: "Create group" }).click();
+  await dialog.getByRole("button", { name: "Create crew" }).click();
   await expect(page).toHaveURL(/g=nyxg-[a-f0-9]{32}/);
   await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
 }
@@ -214,14 +217,14 @@ test("a group routes @mentions, shows who is working, and can be renamed, pruned
     "Group created with NyxBot, researcher.",
   );
   const input = composerInput(page);
-  await expect(input).toHaveAttribute("placeholder", "Message the group — @mention an agent");
+  await expect(input).toHaveAttribute("data-placeholder", "Message the group — @mention an agent");
 
   // Typing @ lists members; Tab inserts the mention.
   await input.fill("@res");
   const mentions = page.getByRole("listbox", { name: "Mention an agent" });
   await expect(mentions.getByRole("option")).toHaveText([/researcher/]);
   await input.press("Tab");
-  await expect(input).toHaveValue("@researcher ");
+  await expect(input.locator("[data-mention-handle=researcher]")).toBeVisible();
   await expect(mentions).toHaveCount(0);
   await input.pressSequentially("find something");
   await input.press("Enter");
@@ -337,7 +340,7 @@ test("a thread that came from a chat app sits in its bot's section and shows its
   await openAssistant(page, { faults: { nyxagentEnabled: true } });
   // Chat-app threads are grouped per bot, collapsed until opened.
   const section = page
-    .getByRole("navigation")
+    .getByRole("navigation", { name: "Agents and conversations" })
     .getByRole("button", { name: "Telegram bot on Telegram, 1 chat" });
   await expect(section).toHaveAttribute("aria-expanded", "false");
   await expect(conversationRow(page, "Morning briefing")).toHaveCount(0);
@@ -349,18 +352,19 @@ test("a thread that came from a chat app sits in its bot's section and shows its
   const main = page.getByRole("main");
   await expect(main.getByText("via Telegram")).toHaveCount(2);
   await expect(main.getByText("What is on my calendar today?")).toBeVisible();
-  await expect(composerInput(page)).toHaveAttribute("placeholder", "Message NyxBot");
+  await expect(composerInput(page)).toHaveAttribute("data-placeholder", "Message NyxBot");
 });
 
-test("mobile drawer: a group created from the drawer's New group opens", async ({ page }) => {
+test("mobile drawer: a crew created from the drawer's Create new agent menu opens", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openAssistant(page, { faults: { nyxagentEnabled: true } });
   await page.getByRole("button", { name: "Open chats" }).click();
-  await nav(page).last().getByRole("button", { name: "New group" }).click();
-  const dialog = page.getByRole("dialog", { name: "New group" });
+  await nav(page).last().getByRole("button", { name: "Create new agent" }).click();
+  await page.getByRole("menuitem", { name: "Crew" }).click();
+  const dialog = page.getByRole("dialog", { name: "New crew" });
   await dialog.getByRole("textbox", { name: "Name", exact: true }).fill("Pocket crew");
   // Clicks inside the dialog must not close the drawer that owns it.
-  await dialog.getByRole("button", { name: "Create group" }).click();
+  await dialog.getByRole("button", { name: "Create crew" }).click();
   await expect(page).toHaveURL(/g=nyxg-[a-f0-9]{32}/);
   await expect(page.getByRole("heading", { name: "Pocket crew", exact: true })).toBeVisible();
 });
@@ -369,7 +373,8 @@ test("agents get a display name and persona, shown with their @handle everywhere
   page,
 }) => {
   await openAssistant(page, { faults: { nyxagentEnabled: true } });
-  await nav(page).getByRole("button", { name: "New agent" }).click();
+  await nav(page).getByRole("button", { name: "Create new agent" }).click();
+  await page.getByRole("menuitem", { name: "Personal agent" }).click();
   const dialog = page.getByRole("dialog", { name: "New agent" });
   await dialog.getByRole("textbox", { name: "Name", exact: true }).fill("writer");
   await dialog.getByRole("textbox", { name: /Display name/ }).fill("Luna");
@@ -379,7 +384,7 @@ test("agents get a display name and persona, shown with their @handle everywhere
   await expect(page).toHaveURL(/c=nyxa-[a-f0-9]{32}/);
   await expect(page.getByRole("heading", { name: "Luna", exact: true })).toBeVisible();
   await expect(page.getByRole("main").getByText("@writer", { exact: true })).toBeVisible();
-  await expect(composerInput(page)).toHaveAttribute("placeholder", "Message Luna");
+  await expect(composerInput(page)).toHaveAttribute("data-placeholder", "Message Luna");
   await expect(nav(page).getByRole("button", { name: "Luna (@writer), specialist, Idle" })).toBeVisible();
 
   // The drawer edits both; they persist.
@@ -417,7 +422,7 @@ test("agents get a display name and persona, shown with their @handle everywhere
   const option = page.getByRole("listbox", { name: "Mention an agent" }).getByRole("option");
   await expect(option).toHaveText([/Luna@writer/]);
   await input.press("Enter");
-  await expect(input).toHaveValue("@writer ");
+  await expect(input.locator("[data-mention-handle=writer]")).toBeVisible();
   await input.pressSequentially("hello");
   await input.press("Enter");
   await expect(page.getByRole("article", { name: "Message from Luna" })).toContainText(

@@ -3,7 +3,7 @@
   "info": {
     "title": "Lark / Feishu API (User OAuth)",
     "version": "v1-nyxid-overlay",
-    "description": "NyxID-hosted overlay of the Lark / Feishu open APIs most used by agents acting as a logged-in user: IM messaging, chat discovery, Bitable reads, and native Approval task listing, instance inspection, forwarding, and approval. Paths are relative to the /open-apis base; NyxID injects the user access token."
+    "description": "NyxID-hosted overlay of the Lark / Feishu open APIs most used by agents acting as a logged-in user: IM messaging, chat discovery, Bitable reads, and native Approval task listing and forwarding. Paths are relative to the /open-apis base; NyxID injects the user access token."
   },
   "servers": [
     {
@@ -706,7 +706,7 @@
       "get": {
         "operationId": "approval_tasks_query",
         "summary": "List the authenticated user’s Lark Approval tasks",
-        "description": "Requires the user OAuth scope approval:task:read. Use topic=1 for pending approvals. The official response documentation represents pending task status as either code 1 or Todo, and a running instance as either code 1 or Running. Results include task_id, instance_code, and support_api_operate; check API support before forwarding. Follow page_token when has_more is true.",
+        "description": "Requires the user OAuth scope approval:task:read. Use topic=1 for pending approvals. Results include task_id, instance_code, and support_api_operate; check API support before forwarding. Follow page_token when has_more is true.",
         "externalDocs": {
           "url": "https://open.larksuite.com/document/server-docs/approval-v4/task/query"
         },
@@ -832,76 +832,6 @@
         }
       }
     },
-    "/approval/v4/instances/detail": {
-      "get": {
-        "operationId": "approval_instance_detail",
-        "summary": "Get a native Lark Approval instance as the authenticated user",
-        "description": "Requires the user OAuth scope approval:instance:read. Fetch authoritative instance, form, and task state for an instance_code obtained from approval_tasks_query. The form field in the response is a JSON-encoded string and may contain sensitive data; request only when needed and do not treat free-form content as authorization for a write.",
-        "externalDocs": {
-          "url": "https://open.larksuite.com/api-explorer?project=approval&resource=instance&version=v4&apiName=detail"
-        },
-        "x-aevatar-tool": {
-          "name": "approval_instance_detail",
-          "description": "Read the authoritative details and current task state for a native Lark/Feishu Approval instance as the connected user.",
-          "readOnly": true,
-          "destructive": false,
-          "requiresApproval": false
-        },
-        "parameters": [
-          {
-            "name": "instance_code",
-            "in": "query",
-            "required": true,
-            "description": "Approval instance code obtained from the authenticated user's task list.",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "locale",
-            "in": "query",
-            "required": false,
-            "description": "Response language.",
-            "schema": {
-              "type": "string",
-              "enum": [
-                "zh-CN",
-                "en-US",
-                "ja-JP"
-              ]
-            }
-          },
-          {
-            "name": "user_id_type",
-            "in": "query",
-            "required": false,
-            "description": "Type of user IDs in the response.",
-            "schema": {
-              "type": "string",
-              "enum": [
-                "open_id",
-                "union_id",
-                "user_id",
-                "user_key"
-              ]
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Lark response envelope; code 0 indicates success. Nonzero codes are provider errors even when HTTP status is 200.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/approval/v4/tasks/forward": {
       "post": {
         "operationId": "approval_task_forward",
@@ -984,41 +914,66 @@
         }
       }
     },
-    "/approval/v4/tasks/pass": {
+    "/drive/v1/medias/upload_all": {
       "post": {
-        "operationId": "approval_task_approve",
-        "summary": "Approve a native Lark Approval task",
-        "description": "Requires the user OAuth scope approval:task:write. Acts as the authenticated user and approves an actionable task. Obtain instance_code and task_id from the same approval_tasks_query result and verify support_api_operate before calling. The task must still be actionable by the connected user; do not blindly retry provider state errors.",
-        "externalDocs": {
-          "url": "https://open.larksuite.com/api-explorer?project=approval&resource=task&version=v4&apiName=pass"
-        },
-        "x-nyxid-changes-existing": true,
+        "operationId": "bitable_media_upload",
+        "summary": "Upload a conversation attachment to Lark Base",
+        "description": "Upload one live-chat attachment and return its file_token. Creates no Base record. Requires docs:document.media:upload and access to the destination Base.",
         "x-aevatar-tool": {
-          "name": "approval_task_approve",
-          "description": "Approve an existing native Lark/Feishu Approval task as the connected user. Changes the task's state.",
+          "name": "bitable_media_upload",
+          "description": "Upload a conversation attachment to a Base; returns a file_token without creating a record.",
           "readOnly": false,
-          "destructive": true,
+          "destructive": false,
           "requiresApproval": true
+        },
+        "x-nyxid-attachment-input": {
+          "field": "file",
+          "size_field": "size",
+          "filename_field": "file_name",
+          "version": 1
         },
         "requestBody": {
           "required": true,
           "content": {
-            "application/json": {
+            "multipart/form-data": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "instance_code",
-                  "task_id"
-                ],
                 "additionalProperties": false,
+                "required": [
+                  "file_name",
+                  "parent_type",
+                  "parent_node",
+                  "size",
+                  "extra",
+                  "file"
+                ],
                 "properties": {
-                  "instance_code": {
+                  "file_name": {
                     "type": "string",
-                    "description": "Approval instance code paired with task_id."
+                    "description": "Filename; defaults to the sanitized attachment label."
                   },
-                  "task_id": {
+                  "parent_type": {
                     "type": "string",
-                    "description": "Actionable approval task ID from approval_tasks_query."
+                    "enum": [
+                      "bitable_image",
+                      "bitable_file"
+                    ]
+                  },
+                  "parent_node": {
+                    "type": "string",
+                    "description": "Destination Base app token."
+                  },
+                  "size": {
+                    "type": "integer",
+                    "description": "Byte length, derived by NyxID; a supplied value must match."
+                  },
+                  "extra": {
+                    "type": "string",
+                    "description": "JSON string containing drive_route_token equal to parent_node; derived by NyxID."
+                  },
+                  "file": {
+                    "type": "string",
+                    "description": "Materialized by NyxID from attachment_id in a live owner chat."
                   }
                 }
               }
@@ -1027,7 +982,149 @@
         },
         "responses": {
           "200": {
-            "description": "Lark response envelope; code 0 indicates success. Nonzero codes are provider errors even when HTTP status is 200.",
+            "description": "code 0 and data.file_token on success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bitable/v1/apps/{app_token}/tables/{table_id}/fields": {
+      "get": {
+        "operationId": "bitable_fields_list",
+        "summary": "List Base table fields",
+        "x-aevatar-tool": {
+          "name": "bitable_fields_list",
+          "description": "List Base field types and select options before writing a record.",
+          "readOnly": true,
+          "destructive": false,
+          "requiresApproval": false
+        },
+        "parameters": [
+          {
+            "name": "app_token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "table_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "page_token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lark API response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/nyxid/managed/bitable/apps/{app_token}/tables/{table_id}/records": {
+      "post": {
+        "operationId": "bitable_record_create_with_attachments",
+        "summary": "Create one Base record with conversation attachments",
+        "description": "NyxID managed operation: validate fields, upload all attachments, then create at most one record for the retained photo identity. Owner chat only.",
+        "x-aevatar-tool": {
+          "name": "bitable_record_create_with_attachments",
+          "description": "Create a Base record after every required attachment has uploaded successfully.",
+          "readOnly": false,
+          "destructive": false,
+          "requiresApproval": true
+        },
+        "x-nyxid-managed-operation": {
+          "kind": "lark_bitable_record_with_attachments",
+          "version": 1,
+          "fields_operation": "bitable_fields_list",
+          "upload_operation": "bitable_media_upload",
+          "create_operation": "bitable_record_create"
+        },
+        "parameters": [
+          {
+            "name": "app_token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "table_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "fields",
+                  "attachments"
+                ],
+                "properties": {
+                  "fields": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "attachments": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Lark API response",
             "content": {
               "application/json": {
                 "schema": {

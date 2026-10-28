@@ -61,13 +61,21 @@ pub fn parse_client_request_id(value: &str) -> AppResult<String> {
 }
 
 pub fn payload_fingerprint(request: &TurnRequest) -> String {
-    super::mcp_service::canonical_sha256(serde_json::json!({
+    let mut payload = serde_json::json!({
         "attachment_ids": request.attachment_ids,
         "conversation_id": request.conversation_id,
         "agent_id": request.agent_id,
         "text": request.text,
         "model": request.model,
-    }))
+    });
+    // Preserve existing fingerprints when the additive execution inputs are absent.
+    if let Some(id) = request.acknowledgement_id.as_ref() {
+        payload["acknowledgement_id"] = serde_json::json!(id);
+    }
+    if let Some(id) = request.retry_of.as_ref() {
+        payload["retry_of"] = serde_json::json!(id);
+    }
+    super::mcp_service::canonical_sha256(payload)
 }
 
 fn id(user_id: &str, client_request_id: &str) -> String {
@@ -229,6 +237,8 @@ mod tests {
     #[test]
     fn fingerprint_ignores_retired_access_mode_and_binds_execution_fields() {
         let base = TurnRequest {
+            acknowledgement_id: None,
+            retry_of: None,
             attachment_ids: vec!["attachment".into()],
             conversation_id: Some("nyxa-0123456789abcdef0123456789abcdef".into()),
             agent_id: None,
@@ -241,6 +251,28 @@ mod tests {
         assert_eq!(
             payload_fingerprint(&base),
             payload_fingerprint(&retired_changed)
+        );
+        assert_eq!(
+            payload_fingerprint(&base),
+            super::super::mcp_service::canonical_sha256(serde_json::json!({
+                "attachment_ids": base.attachment_ids,
+                "conversation_id": base.conversation_id,
+                "agent_id": base.agent_id,
+                "text": base.text,
+                "model": base.model,
+            }))
+        );
+        let mut acknowledgement_changed = base.clone();
+        acknowledgement_changed.acknowledgement_id = Some(uuid::Uuid::new_v4().to_string());
+        assert_ne!(
+            payload_fingerprint(&base),
+            payload_fingerprint(&acknowledgement_changed)
+        );
+        let mut retry_changed = base.clone();
+        retry_changed.retry_of = Some(uuid::Uuid::new_v4().to_string());
+        assert_ne!(
+            payload_fingerprint(&base),
+            payload_fingerprint(&retry_changed)
         );
         let mut text_changed = base.clone();
         text_changed.text = "different".into();

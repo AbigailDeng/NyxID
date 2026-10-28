@@ -21,6 +21,8 @@ pub const DEFAULT_MCP_NOTIFICATION_TTL_SECS: u64 = 30 * 24 * 3600;
 pub const DEFAULT_MCP_NOTIFICATION_POLL_INTERVAL_MILLIS: u64 = 250;
 
 const MAX_PER_USER_SESSIONS: usize = 50;
+const SESSION_RECLAIM_IDLE_SECS: i64 = 3600;
+const SESSION_CREATE_ATTEMPTS: usize = 5;
 const NOTIFICATION_PAGE_SIZE: i64 = 100;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -39,6 +41,8 @@ pub struct McpSessionRecord {
     /// they must re-present a live credential.
     #[serde(default)]
     pub session_fallback_allowed: bool,
+    #[serde(default)]
+    pub parent_session_id: Option<String>,
     #[serde(default)]
     pub notification_sequence: i64,
     #[serde(with = "bson::serde_helpers::chrono_datetime_as_bson_datetime")]
@@ -63,8 +67,10 @@ pub struct McpSessionSlot {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct McpSessionAccess {
     pub user_id: String,
+    pub created_at: DateTime<Utc>,
     pub proxy_authorized: bool,
     pub session_fallback_allowed: bool,
+    pub parent_session_id: Option<String>,
 }
 
 pub struct McpSession {
@@ -75,6 +81,7 @@ pub struct McpSession {
     pub activated_service_ids: HashSet<String>,
     pub proxy_authorized: bool,
     pub session_fallback_allowed: bool,
+    pub parent_session_id: Option<String>,
     pub notification_sequence: i64,
     pub notification_tx: Option<mpsc::Sender<serde_json::Value>>,
 }
@@ -166,11 +173,11 @@ impl McpSessionStore {
             .collect();
         let active_auth_sessions: Vec<mongodb::bson::Document> = db
             .collection::<mongodb::bson::Document>("sessions")
-            .find(doc! {
+            .find(crate::services::session_authority::authenticated(doc! {
                 "user_id": { "$in": user_ids.iter().copied().collect::<Vec<_>>() },
                 "revoked": false,
                 "expires_at": { "$gt": now },
-            })
+            }))
             .await?
             .try_collect()
             .await?;
@@ -184,8 +191,11 @@ impl McpSessionStore {
         let mut orphaned_ids = Vec::new();
         let mut loaded = 0;
         for record in records {
-            if active_users.contains(&record.user_id) && self.ensure_recovered_slot(&record).await?
-            {
+            // Only fallback sessions depend on a live login; the rest must
+            // present a live bearer anyway, so a restart keeps them.
+            let login_alive =
+                !record.session_fallback_allowed || active_users.contains(&record.user_id);
+            if login_alive && self.ensure_recovered_slot(&record).await? {
                 self.hydrate(record);
                 loaded += 1;
             } else {
@@ -216,9 +226,60 @@ impl McpSessionStore {
         proxy_authorized: bool,
         session_fallback_allowed: bool,
     ) -> Result<Option<String>, mongodb::error::Error> {
-        let Some(db) = &self.db else {
-            return Ok(self.create_in_memory(user_id, proxy_authorized, session_fallback_allowed));
-        };
+        self.create_with_parent_session(user_id, proxy_authorized, session_fallback_allowed, None)
+            .await
+    }
+
+    pub async fn create_with_parent_session(
+        &self,
+        user_id: &str,
+        proxy_authorized: bool,
+        session_fallback_allowed: bool,
+        parent_session_id: Option<&str>,
+    ) -> Result<Option<String>, mongodb::error::Error> {
+        if self.db.is_none() {
+            return Ok(self.create_in_memory(
+                user_id,
+                proxy_authorized,
+                session_fallback_allowed,
+                parent_session_id,
+            ));
+        }
+
+        // Admission can conflict with another replica before reclamation starts.
+        // Only retry transactions MongoDB identifies as aborted; an unknown
+        // commit result must not create a second session.
+        for attempt in 0..SESSION_CREATE_ATTEMPTS {
+            match self
+                .create_durable_session(
+                    user_id,
+                    proxy_authorized,
+                    session_fallback_allowed,
+                    parent_session_id,
+                )
+                .await
+            {
+                Err(error)
+                    if attempt + 1 < SESSION_CREATE_ATTEMPTS
+                        && error.contains_label("TransientTransactionError")
+                        && !error.contains_label("UnknownTransactionCommitResult") =>
+                {
+                    tokio::time::sleep(Duration::from_millis(10 << attempt)).await;
+                }
+                result => return result,
+            }
+        }
+        unreachable!("the final attempt returns its result")
+    }
+
+    async fn create_durable_session(
+        &self,
+        user_id: &str,
+        proxy_authorized: bool,
+        session_fallback_allowed: bool,
+        parent_session_id: Option<&str>,
+    ) -> Result<Option<String>, mongodb::error::Error> {
+        let db = self.db.as_ref().expect("durable session store");
 
         for slot in 0..MAX_PER_USER_SESSIONS {
             let now = Utc::now();
@@ -232,6 +293,7 @@ impl McpSessionStore {
                 activated_service_ids: Vec::new(),
                 proxy_authorized,
                 session_fallback_allowed,
+                parent_session_id: parent_session_id.map(str::to_owned),
                 notification_sequence: 0,
                 created_at: now,
                 last_active_at: now,
@@ -288,7 +350,86 @@ impl McpSessionStore {
             self.hydrate(record);
             return Ok(Some(session_id));
         }
-        Ok(None)
+        self.replace_oldest_idle_session(
+            user_id,
+            proxy_authorized,
+            session_fallback_allowed,
+            parent_session_id,
+        )
+        .await
+    }
+
+    /// At capacity, replace one idle session atomically with its admission slot.
+    /// Touches update the same record in a transaction, so concurrent activity
+    /// conflicts with reclamation instead of reviving an evicted session.
+    async fn replace_oldest_idle_session(
+        &self,
+        user_id: &str,
+        proxy_authorized: bool,
+        session_fallback_allowed: bool,
+        parent_session_id: Option<&str>,
+    ) -> Result<Option<String>, mongodb::error::Error> {
+        let db = self.db.as_ref().expect("durable session store");
+        let now = Utc::now();
+        let cutoff = now - chrono::Duration::seconds(SESSION_RECLAIM_IDLE_SECS);
+        let mut transaction = db.client().start_session().await?;
+        transaction.start_transaction().await?;
+        let old = db
+            .collection::<McpSessionRecord>(MCP_SESSION_COLLECTION)
+            .find_one_and_delete(doc! {
+                "user_id": user_id,
+                "last_active_at": { "$lte": bson::DateTime::from_chrono(cutoff) },
+                "expires_at": { "$gt": bson::DateTime::from_chrono(now) },
+            })
+            .sort(doc! { "last_active_at": 1, "_id": 1 })
+            .session(&mut transaction)
+            .await?;
+        let Some(old) = old else {
+            transaction.abort_transaction().await?;
+            return Ok(None);
+        };
+        let id = uuid::Uuid::new_v4().to_string();
+        let expires_at = now + chrono::Duration::seconds(MCP_SESSION_MAX_IDLE_SECS as i64);
+        let slot = db
+            .collection::<McpSessionSlot>(MCP_SESSION_SLOT_COLLECTION)
+            .update_one(
+                doc! { "user_id": user_id, "session_id": &old.id },
+                doc! { "$set": {
+                    "session_id": &id,
+                    "expires_at": bson::DateTime::from_chrono(expires_at),
+                }},
+            )
+            .session(&mut transaction)
+            .await?;
+        if slot.matched_count != 1 {
+            transaction.abort_transaction().await?;
+            return Ok(None);
+        }
+        let record = McpSessionRecord {
+            id: id.clone(),
+            user_id: user_id.to_string(),
+            client_info: None,
+            activated_service_ids: Vec::new(),
+            proxy_authorized,
+            session_fallback_allowed,
+            parent_session_id: parent_session_id.map(str::to_owned),
+            notification_sequence: 0,
+            created_at: now,
+            last_active_at: now,
+            expires_at,
+        };
+        db.collection::<McpSessionRecord>(MCP_SESSION_COLLECTION)
+            .insert_one(&record)
+            .session(&mut transaction)
+            .await?;
+        db.collection::<McpSessionNotification>(MCP_NOTIFICATION_COLLECTION)
+            .delete_many(doc! { "session_id": &old.id })
+            .session(&mut transaction)
+            .await?;
+        transaction.commit_transaction().await?;
+        self.evict(&old.id);
+        self.hydrate(record);
+        Ok(Some(id))
     }
 
     pub async fn get_for_auth(
@@ -300,8 +441,10 @@ impl McpSessionStore {
             .await?
             .map(|record| McpSessionAccess {
                 user_id: record.user_id,
+                created_at: record.created_at,
                 proxy_authorized: record.proxy_authorized,
                 session_fallback_allowed: record.session_fallback_allowed,
+                parent_session_id: record.parent_session_id.clone(),
             }))
     }
 
@@ -408,13 +551,23 @@ impl McpSessionStore {
         Ok(())
     }
 
-    pub async fn remove_by_user_id(&self, user_id: &str) -> Result<(), mongodb::error::Error> {
+    /// Remove the user's sessions that can authenticate without a bearer
+    /// (`session_fallback_allowed`), so that ending a login also ends them.
+    ///
+    /// Every other session presents a live bearer on each request, so its row
+    /// grants nothing on its own. Deleting it would revoke nothing and would
+    /// only disconnect an MCP client (Claude, Codex, any OAuth app) whose
+    /// credential is unrelated to the login that ended.
+    pub async fn remove_fallback_sessions_by_user_id(
+        &self,
+        user_id: &str,
+    ) -> Result<(), mongodb::error::Error> {
         if let Some(db) = &self.db {
             let mut transaction = db.client().start_session().await?;
             transaction.start_transaction().await?;
             let mut cursor = db
                 .collection::<McpSessionRecord>(MCP_SESSION_COLLECTION)
-                .find(doc! { "user_id": user_id })
+                .find(doc! { "user_id": user_id, "session_fallback_allowed": true })
                 .session(&mut transaction)
                 .await?;
             let ids: Vec<String> = cursor
@@ -422,23 +575,26 @@ impl McpSessionStore {
                 .map_ok(|record| record.id)
                 .try_collect()
                 .await?;
-            db.collection::<McpSessionRecord>(MCP_SESSION_COLLECTION)
-                .delete_many(doc! { "user_id": user_id })
-                .session(&mut transaction)
-                .await?;
-            db.collection::<McpSessionSlot>(MCP_SESSION_SLOT_COLLECTION)
-                .delete_many(doc! { "user_id": user_id })
-                .session(&mut transaction)
-                .await?;
             if !ids.is_empty() {
+                db.collection::<McpSessionRecord>(MCP_SESSION_COLLECTION)
+                    .delete_many(doc! { "_id": { "$in": &ids } })
+                    .session(&mut transaction)
+                    .await?;
+                db.collection::<McpSessionSlot>(MCP_SESSION_SLOT_COLLECTION)
+                    .delete_many(doc! { "session_id": { "$in": &ids } })
+                    .session(&mut transaction)
+                    .await?;
                 db.collection::<McpSessionNotification>(MCP_NOTIFICATION_COLLECTION)
                     .delete_many(doc! { "session_id": { "$in": &ids } })
                     .session(&mut transaction)
                     .await?;
             }
             transaction.commit_transaction().await?;
+            for id in &ids {
+                self.evict(id);
+            }
         }
-        self.evict_user(user_id);
+        self.evict_fallback_sessions(user_id);
         Ok(())
     }
 
@@ -858,20 +1014,31 @@ impl McpSessionStore {
         user_id: &str,
         proxy_authorized: bool,
         session_fallback_allowed: bool,
+        parent_session_id: Option<&str>,
     ) -> Option<String> {
         let mut sessions = self
             .sessions
             .write()
             .unwrap_or_else(|error| error.into_inner());
+        let now = Utc::now();
         if sessions
             .values()
             .filter(|session| session.user_id == user_id)
             .count()
             >= MAX_PER_USER_SESSIONS
         {
-            return None;
+            let cutoff = now - chrono::Duration::seconds(SESSION_RECLAIM_IDLE_SECS);
+            let oldest = sessions
+                .iter()
+                .filter(|(_, session)| session.user_id == user_id && session.last_active <= cutoff)
+                .min_by_key(|(id, session)| (session.last_active, *id))
+                .map(|(id, _)| id.clone())?;
+            sessions.remove(&oldest);
+            self.pending_receivers
+                .write()
+                .unwrap_or_else(|error| error.into_inner())
+                .remove(&oldest);
         }
-        let now = Utc::now();
         let id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = mpsc::channel(32);
         sessions.insert(
@@ -884,6 +1051,7 @@ impl McpSessionStore {
                 activated_service_ids: HashSet::new(),
                 proxy_authorized,
                 session_fallback_allowed,
+                parent_session_id: parent_session_id.map(str::to_owned),
                 notification_sequence: 0,
                 notification_tx: Some(tx),
             },
@@ -909,6 +1077,7 @@ impl McpSessionStore {
             session.activated_service_ids = record.activated_service_ids.into_iter().collect();
             session.proxy_authorized = record.proxy_authorized;
             session.session_fallback_allowed = record.session_fallback_allowed;
+            session.parent_session_id = record.parent_session_id.clone();
             session.notification_sequence = record.notification_sequence;
             return;
         }
@@ -924,6 +1093,7 @@ impl McpSessionStore {
                 activated_service_ids: record.activated_service_ids.into_iter().collect(),
                 proxy_authorized: record.proxy_authorized,
                 session_fallback_allowed: record.session_fallback_allowed,
+                parent_session_id: record.parent_session_id.clone(),
                 notification_sequence: record.notification_sequence,
                 notification_tx: Some(tx),
             },
@@ -948,6 +1118,7 @@ impl McpSessionStore {
                 activated_service_ids: session.activated_service_ids.iter().cloned().collect(),
                 proxy_authorized: session.proxy_authorized,
                 session_fallback_allowed: session.session_fallback_allowed,
+                parent_session_id: session.parent_session_id.clone(),
                 notification_sequence: session.notification_sequence,
                 created_at: session.created_at,
                 last_active_at: session.last_active,
@@ -966,13 +1137,13 @@ impl McpSessionStore {
             .remove(session_id);
     }
 
-    fn evict_user(&self, user_id: &str) {
+    fn evict_fallback_sessions(&self, user_id: &str) {
         let ids: Vec<String> = self
             .sessions
             .read()
             .unwrap_or_else(|error| error.into_inner())
             .iter()
-            .filter(|(_, session)| session.user_id == user_id)
+            .filter(|(_, session)| session.user_id == user_id && session.session_fallback_allowed)
             .map(|(id, _)| id.clone())
             .collect();
         for id in ids {
@@ -998,6 +1169,7 @@ mod tests {
             activated_service_ids: Vec::new(),
             proxy_authorized: true,
             session_fallback_allowed: true,
+            parent_session_id: None,
             notification_sequence: 0,
             created_at: now,
             last_active_at: now,
@@ -1116,14 +1288,73 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn remove_by_user_only_removes_matching_local_sessions() {
+    async fn remove_fallback_sessions_keeps_bearer_sessions_and_other_users() {
         let store = McpSessionStore::new();
-        let first = store.create("user-1").await.unwrap().expect("create");
-        let second = store.create("user-2").await.unwrap().expect("create");
-        store.remove_by_user_id("user-1").await.unwrap();
+        let fallback = store
+            .create_with_proxy_access("user-1", true, true)
+            .await
+            .unwrap()
+            .expect("create");
+        let bearer_only = store
+            .create_with_proxy_access("user-1", true, false)
+            .await
+            .unwrap()
+            .expect("create");
+        let other_user = store
+            .create_with_proxy_access("user-2", true, true)
+            .await
+            .unwrap()
+            .expect("create");
+        store
+            .remove_fallback_sessions_by_user_id("user-1")
+            .await
+            .unwrap();
 
-        assert!(!store.validate(&first, "user-1").await.unwrap());
-        assert!(store.validate(&second, "user-2").await.unwrap());
+        assert!(!store.validate(&fallback, "user-1").await.unwrap());
+        assert!(store.validate(&bearer_only, "user-1").await.unwrap());
+        assert!(store.validate(&other_user, "user-2").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn remove_fallback_sessions_keeps_persisted_bearer_sessions() {
+        let db =
+            crate::test_utils::connect_transaction_test_database("mcp_remove_fallback_sessions")
+                .await;
+        let user_id = uuid::Uuid::new_v4().to_string();
+        let store = McpSessionStore::with_db(db.clone());
+        let fallback = store
+            .create_with_proxy_access(&user_id, true, true)
+            .await
+            .unwrap()
+            .expect("create");
+        let bearer_only = store
+            .create_with_proxy_access(&user_id, true, false)
+            .await
+            .unwrap()
+            .expect("create");
+
+        store
+            .remove_fallback_sessions_by_user_id(&user_id)
+            .await
+            .unwrap();
+
+        assert!(!store.validate(&fallback, &user_id).await.unwrap());
+        assert!(store.validate(&bearer_only, &user_id).await.unwrap());
+        let slots = db.collection::<McpSessionSlot>(MCP_SESSION_SLOT_COLLECTION);
+        assert!(
+            slots
+                .find_one(doc! { "session_id": &fallback })
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            slots
+                .find_one(doc! { "session_id": &bearer_only })
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[tokio::test]
@@ -1255,6 +1486,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn startup_recovery_never_uses_pending_challenges_as_login_authority() {
+        let db = crate::test_utils::connect_transaction_test_database("mcp_pending_denied").await;
+        let user_id = uuid::Uuid::new_v4().to_string();
+        let mut persisted = record(&user_id);
+        persisted.session_fallback_allowed = true;
+        db.collection::<McpSessionRecord>(MCP_SESSION_COLLECTION)
+            .insert_one(&persisted)
+            .await
+            .unwrap();
+        let challenge = doc! {"_id":uuid::Uuid::new_v4().to_string(),"user_id":&user_id,"revoked":false,
+        "purpose":"mfa_pending","expires_at":bson::DateTime::from_chrono(Utc::now()+chrono::Duration::minutes(5))};
+        db.collection::<bson::Document>(crate::models::session::MFA_CHALLENGES)
+            .insert_one(challenge.clone())
+            .await
+            .unwrap();
+        let mut legacy = challenge;
+        legacy.remove("purpose");
+        legacy.insert("user_agent", "mfa_pending");
+        db.collection::<bson::Document>("sessions")
+            .insert_one(legacy)
+            .await
+            .unwrap();
+        let store = McpSessionStore::with_db(db);
+        assert_eq!(store.load_from_db().await.unwrap(), 0);
+        assert!(!store.validate(&persisted.id, &user_id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn startup_recovery_keeps_bearer_sessions_without_a_live_login() {
+        let Some(db) = crate::test_utils::connect_test_database("mcp_recovery_bearer").await else {
+            return;
+        };
+        let user_id = uuid::Uuid::new_v4().to_string();
+        let fallback = record(&user_id);
+        let mut bearer_only = record(&user_id);
+        bearer_only.session_fallback_allowed = false;
+        let sessions = db.collection::<McpSessionRecord>(MCP_SESSION_COLLECTION);
+        sessions
+            .insert_one(&fallback)
+            .await
+            .expect("insert fallback session");
+        sessions
+            .insert_one(&bearer_only)
+            .await
+            .expect("insert bearer-only session");
+
+        let store = McpSessionStore::with_db(db.clone());
+        assert_eq!(store.load_from_db().await.unwrap(), 1);
+        assert!(store.validate(&bearer_only.id, &user_id).await.unwrap());
+        assert!(!store.validate(&fallback.id, &user_id).await.unwrap());
+    }
+
+    #[tokio::test]
     async fn cross_replica_notifications_are_durable_and_strictly_ordered() {
         let db =
             crate::test_utils::connect_transaction_test_database("mcp_notification_outbox").await;
@@ -1332,6 +1616,142 @@ mod tests {
             assert!(store.create("user-1").await.unwrap().is_some());
         }
         assert!(second.create("user-1").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn mongo_capacity_reclaims_only_the_oldest_idle_session_across_replicas() {
+        let db = crate::test_utils::connect_transaction_test_database("mcp_reclaim_idle").await;
+        let first = McpSessionStore::with_db(db.clone());
+        let second = McpSessionStore::with_db(db.clone());
+        let mut records: Vec<_> = (0..MAX_PER_USER_SESSIONS)
+            .map(|_| record("user-1"))
+            .collect();
+        records[0].last_active_at = Utc::now() - chrono::Duration::hours(3);
+        records[1].last_active_at = Utc::now() - chrono::Duration::hours(2);
+        records[0].session_fallback_allowed = true;
+        records[1].activated_service_ids = vec!["old-service".into()];
+        let slots: Vec<_> = records
+            .iter()
+            .enumerate()
+            .map(|(slot, record)| McpSessionSlot {
+                id: format!("user-1:{slot}"),
+                user_id: "user-1".into(),
+                session_id: record.id.clone(),
+                slot: slot as i32,
+                expires_at: record.expires_at,
+            })
+            .collect();
+        db.collection::<McpSessionRecord>(MCP_SESSION_COLLECTION)
+            .insert_many(&records)
+            .await
+            .unwrap();
+        db.collection::<McpSessionSlot>(MCP_SESSION_SLOT_COLLECTION)
+            .insert_many(&slots)
+            .await
+            .unwrap();
+        // A different replica resumes the oldest session just before admission.
+        assert!(second.touch(&records[0].id).await.unwrap());
+        first
+            .send_notification(&records[1].id, serde_json::json!({"old": true}))
+            .await
+            .unwrap();
+        // Notifications do not make an abandoned client active.
+        db.collection::<McpSessionRecord>(MCP_SESSION_COLLECTION).update_one(
+            doc! { "_id": &records[1].id },
+            doc! { "$set": { "last_active_at": bson::DateTime::from_chrono(records[1].last_active_at) } },
+        ).await.unwrap();
+        assert!(first.validate(&records[1].id, "user-1").await.unwrap());
+        let other = first.create("other-user").await.unwrap().unwrap();
+        let (left, right) = tokio::join!(
+            first.create_with_proxy_access("user-1", true, false),
+            second.create_with_proxy_access("user-1", true, false),
+        );
+        let admitted: Vec<_> = [left.unwrap(), right.unwrap()]
+            .into_iter()
+            .flatten()
+            .collect();
+        assert_eq!(admitted.len(), 1);
+        let replacement = &admitted[0];
+        assert!(second.validate(&records[0].id, "user-1").await.unwrap());
+        assert!(!first.validate(&records[1].id, "user-1").await.unwrap());
+        assert!(!second.touch(&records[1].id).await.unwrap());
+        assert!(second.validate(&other, "other-user").await.unwrap());
+        assert!(
+            !first
+                .get_for_auth(replacement)
+                .await
+                .unwrap()
+                .unwrap()
+                .session_fallback_allowed
+        );
+        assert!(
+            first
+                .get_activated_service_ids(replacement)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            db.collection::<McpSessionRecord>(MCP_SESSION_COLLECTION)
+                .count_documents(doc! { "user_id": "user-1" })
+                .await
+                .unwrap(),
+            MAX_PER_USER_SESSIONS as u64
+        );
+        assert_eq!(
+            db.collection::<McpSessionSlot>(MCP_SESSION_SLOT_COLLECTION)
+                .count_documents(doc! { "user_id": "user-1" })
+                .await
+                .unwrap(),
+            MAX_PER_USER_SESSIONS as u64
+        );
+        assert_eq!(
+            db.collection::<McpSessionNotification>(MCP_NOTIFICATION_COLLECTION)
+                .count_documents(doc! { "session_id": &records[1].id })
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(first.create("user-1").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn in_memory_capacity_reclaims_idle_sessions_without_inheriting_authority() {
+        let store = McpSessionStore::new();
+        let old = store
+            .create_with_proxy_access("user-1", true, true)
+            .await
+            .unwrap()
+            .unwrap();
+        for _ in 1..MAX_PER_USER_SESSIONS {
+            store.create("user-1").await.unwrap().unwrap();
+        }
+        let other = store.create("other-user").await.unwrap().unwrap();
+        assert!(store.create("user-1").await.unwrap().is_none());
+        store
+            .sessions
+            .write()
+            .unwrap()
+            .get_mut(&old)
+            .unwrap()
+            .last_active = Utc::now() - chrono::Duration::hours(2);
+        let replacement = store
+            .create_with_proxy_access("user-1", true, false)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!store.validate(&old, "user-1").await.unwrap());
+        assert!(!store.pending_receivers.read().unwrap().contains_key(&old));
+        assert!(
+            !store
+                .get_for_auth(&replacement)
+                .await
+                .unwrap()
+                .unwrap()
+                .session_fallback_allowed
+        );
+        assert!(store.validate(&other, "other-user").await.unwrap());
+        assert!(store.create("user-1").await.unwrap().is_none());
     }
 
     #[tokio::test]

@@ -93,6 +93,19 @@ function renderDialog() {
   return { onCreated, onClose, user: userEvent.setup() };
 }
 
+it("describes a specialist as handling direct work itself, never as handing it to NyxBot", async () => {
+  render(
+    <QueryClientProvider client={client}>
+      <NewAgentDialog onClose={vi.fn()} onCreated={vi.fn()} />
+    </QueryClientProvider>,
+  );
+  const dialog = await screen.findByRole("dialog", { name: "New agent" });
+  expect(dialog).toHaveTextContent(
+    "When you talk to it directly it handles the work itself and tells you what it is missing; you add grants in its details.",
+  );
+  expect(dialog).not.toHaveTextContent(/asks? NyxBot|ask NyxBot for access/);
+});
+
 it("creates a specialist with its role, services and account read, then opens its home thread", async () => {
   const { onCreated, user } = renderDialog();
   const dialog = screen.getByRole("dialog", { name: "New agent" });
@@ -209,6 +222,25 @@ it("gates org creation and offers Member organizations with org-only resource co
     account_read: false,
     services: [],
   });
+});
+
+it("starts on the first writable organization when opened for an organization agent", async () => {
+  orgEnabled = true;
+  const onCreated = vi.fn();
+  render(
+    <QueryClientProvider client={client}>
+      <OverlayLayer layer={ASSISTANT_OVERLAY_BASE}>
+        <NewAgentDialog owner="org" onClose={vi.fn()} onCreated={onCreated} />
+      </OverlayLayer>
+    </QueryClientProvider>,
+  );
+  const user = userEvent.setup();
+  expect(screen.getByRole("combobox", { name: "Ownership" })).toHaveTextContent("Team");
+  await user.type(screen.getByRole("textbox", { name: "Name" }), "researcher");
+  await user.type(screen.getByRole("textbox", { name: "Role" }), "Research public topics");
+  await user.click(screen.getByRole("button", { name: "Create agent" }));
+  await waitFor(() => expect(onCreated).toHaveBeenCalled());
+  expect(posts[0]).toMatchObject({ org: "org-team" });
 });
 
 it("hides organization selection while rollout is disabled", () => {

@@ -1,4 +1,6 @@
+mod dictation;
 mod socket;
+pub use dictation::{dictation_options, dictation_stream};
 pub use socket::stream;
 // Human-only voice control and durable request dispatch.
 use crate::{
@@ -66,7 +68,7 @@ pub fn preference_patch<'de, D: serde::Deserializer<'de>>(
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OptionsQuery {
-    conversation_id: String,
+    conversation_id: Option<String>,
 }
 
 pub async fn options(
@@ -77,8 +79,12 @@ pub async fn options(
     super::login_client_context::require_first_party_human(&auth)?;
     let user = auth.user_id.to_string();
     voice::require_enabled(&state.db, &user).await?;
-    let thread = voice::thread(&state.db, &user, &q.conversation_id).await?;
-    let options = voice::options(&state.db, &state.encryption_keys, &thread).await?;
+    let options = if let Some(id) = q.conversation_id {
+        let thread = voice::thread(&state.db, &user, &id).await?;
+        voice::options(&state.db, &state.encryption_keys, &thread).await?
+    } else {
+        voice::settings_options(&state.db, &state.encryption_keys, &user).await?
+    };
     Ok(Json(serde_json::json!({"options":options,"limits": {
         "call_seconds":crate::models::assistant_voice::MAX_CALL_SECONDS,"idle_seconds":crate::models::assistant_voice::IDLE_SECONDS,"idle_warning_seconds":crate::models::assistant_voice::IDLE_WARNING_SECONDS,
         "transmitting_calls":1,"queued_requests":crate::models::assistant_voice::MAX_QUEUED},"recording":false})))
@@ -168,8 +174,9 @@ impl From<crate::models::assistant_voice_session::VoiceSession> for SessionRespo
             final_usage_confirmed: row.final_usage_confirmed,
             end_reason: row.end_reason,
             idle_warning: (chrono::Utc::now() - row.last_user_at).num_seconds() >= 165,
-            resumable: row.protocol
-                != Some(crate::models::downstream_service::VoiceProtocol::XaiRealtime)
+            resumable: !row.dictation
+                && row.protocol
+                    != Some(crate::models::downstream_service::VoiceProtocol::XaiRealtime)
                 && row.provider_session_id.is_some()
                 && row.live_slot,
         }
@@ -222,6 +229,15 @@ pub async fn control(
 ) -> AppResult<Json<SessionResponse>> {
     super::login_client_context::require_first_party_human(&auth)?;
     require_origin(&state, &headers)?;
+    if crate::services::voice::session::get(&state.db, &auth.user_id.to_string(), &id, &sid)
+        .await?
+        .dictation
+        && body.action != "end"
+    {
+        return Err(AppError::Forbidden(
+            "Dictation only supports ending capture".into(),
+        ));
+    }
     Ok(Json(
         crate::services::voice::session::control(
             &state.db,
@@ -243,6 +259,18 @@ pub struct RequestResponse {
     id: String,
     state: crate::models::assistant_voice::RequestState,
     turn_id: String,
+    result_message_id: Option<String>,
+}
+impl From<crate::models::assistant_voice::VoiceRequest> for RequestResponse {
+    fn from(row: crate::models::assistant_voice::VoiceRequest) -> Self {
+        Self {
+            pending_acknowledgement_ids: row.pending_acknowledgement_ids,
+            id: row.id,
+            state: row.state,
+            turn_id: row.turn_id,
+            result_message_id: row.result_message_id,
+        }
+    }
 }
 pub async fn request(
     State(state): State<AppState>,
@@ -252,12 +280,7 @@ pub async fn request(
     super::login_client_context::require_first_party_human(&auth)?;
     let user = auth.user_id.to_string();
     let row = voice::get(&state.db, &user, &id, &rid).await?;
-    Ok(Json(RequestResponse {
-        pending_acknowledgement_ids: row.pending_acknowledgement_ids,
-        id: row.id,
-        state: row.state,
-        turn_id: row.turn_id,
-    }))
+    Ok(Json(row.into()))
 }
 pub async fn cancel(
     State(state): State<AppState>,
@@ -315,6 +338,8 @@ pub(crate) async fn sweep(state: &AppState) -> AppResult<()> {
                 "turn_id":&request.turn_id,"execution_pending":true,
             }).await?.ok_or_else(|| AppError::NotFound("Voice input unavailable".into()))?;
             let mut start = engine::TurnStart::from(&engine::TurnRequest {
+            acknowledgement_id: None,
+            retry_of: None,
                 conversation_id:Some(request.task_conversation_id.clone().ok_or_else(|| AppError::Conflict("Voice task thread unavailable".into()))?),text:message.text,
                 model:None,agent_id:None,attachment_ids:Vec::new(),access_mode:None,
             });
@@ -362,12 +387,15 @@ pub(crate) async fn sweep(state: &AppState) -> AppResult<()> {
                 .collection::<crate::models::assistant_voice::VoiceRequest>(REQUESTS)
                 .update_one(
                     doc! {"_id":&request.id,"state":"queued"},
-                    doc! {"$set":{"state":"cancelled"}},
+                    doc! {"$set":{"state":"cancelled", "terminal_error_code":
+                        if request.expires_at <= chrono::Utc::now() { "voice_request_expired".to_owned() }
+                        else { result.as_ref().err().map(|e|e.error_key().to_owned()).unwrap_or_else(||"cancelled".into()) } }},
                 )
                 .await?;
         }
         // Pool/active-turn/temporary database errors leave the durable queue intact.
     }
+    voice::publish_completed_results(&state.db).await?;
     Ok(())
 }
 
@@ -385,6 +413,8 @@ fn require_origin(state: &AppState, headers: &axum::http::HeaderMap) -> AppResul
     let trusted = std::iter::once(&state.config.frontend_url)
         .chain(std::iter::once(&state.config.base_url))
         .chain(state.config.cors_allowed_origins.iter())
+        .chain(state.config.domain_aliases.frontend_urls.iter())
+        .chain(state.config.domain_aliases.base_urls.iter())
         .any(|s| url::Url::parse(s).is_ok_and(|u| u.origin().ascii_serialization() == origin));
     if !trusted {
         return Err(crate::errors::AppError::Forbidden(
@@ -408,6 +438,44 @@ pub(crate) fn spawn_dispatch(state: AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn voice_request_response_reports_durable_publication_without_private_metadata() {
+        use crate::models::assistant_voice::{RequestState, VoiceRequest};
+        let mut row = VoiceRequest {
+            started_at: None,
+            terminal_error_code: None,
+            async_operation_pending: false,
+            id: uuid::Uuid::new_v4().to_string(),
+            user_id: "private-owner".into(),
+            conversation_id: "visible-thread".into(),
+            task_conversation_id: Some("private-execution-thread".into()),
+            session_id: uuid::Uuid::new_v4().to_string(),
+            source_id: "private-source".into(),
+            message_id: uuid::Uuid::new_v4().to_string(),
+            message_seq: 1,
+            turn_id: uuid::Uuid::new_v4().to_string(),
+            state: RequestState::Completed,
+            pending_acknowledgement_ids: Vec::new(),
+            acknowledgement_id: None,
+            credential_api_key_id: Some("private-credential".into()),
+            parent_turn_id: None,
+            root_request_id: None,
+            result_message_id: None,
+            recovery_replays: 0,
+            created_at: chrono::Utc::now(),
+            expires_at: chrono::Utc::now(),
+        };
+        let unpublished = serde_json::to_value(RequestResponse::from(row.clone())).unwrap();
+        assert_eq!(unpublished["state"], "completed");
+        assert!(unpublished["result_message_id"].is_null());
+        let result_id = uuid::Uuid::new_v4().to_string();
+        row.result_message_id = Some(result_id.clone());
+        let published = serde_json::to_value(RequestResponse::from(row)).unwrap();
+        assert_eq!(published["result_message_id"], result_id);
+        assert_eq!(published.as_object().unwrap().len(), 5);
+        assert!(!published.to_string().contains("private-"));
+    }
 
     #[test]
     fn preferences_preserve_omitted_and_reset_explicit_null() {
@@ -444,5 +512,20 @@ mod tests {
         assert!(call_has_capacity(2, 8));
         assert!(!call_has_capacity(3, 8));
         assert!(!call_has_capacity(1, 1));
+    }
+}
+
+#[cfg(test)]
+mod domain_alias_tests {
+    #[tokio::test]
+    async fn domain_alias_browser_origin_gate_is_opt_in() {
+        let mut state = crate::test_utils::test_app_state_no_db().await;
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("origin", "https://old.example".parse().unwrap());
+        assert!(super::require_origin(&state, &headers).is_err());
+        state.config.domain_aliases.frontend_urls = vec!["https://old.example".into()];
+        assert!(super::require_origin(&state, &headers).is_ok());
+        headers.insert("origin", "https://old.example.evil".parse().unwrap());
+        assert!(super::require_origin(&state, &headers).is_err());
     }
 }

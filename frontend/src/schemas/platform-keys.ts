@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  BILLING_METRICS,
+  SERVICE_BILLING_METRICS,
   metricLabel,
   unitPriceSchema,
 } from "./billing-metrics";
@@ -101,18 +101,26 @@ const componentViewSchema = z.object({
   credits_per_unit: unitPriceSchema,
   sync_status: z.enum(["pending", "synced", "failed"]).optional(),
 });
+const operationPriceSchema = z.object({
+  operation: z.string().min(1).max(200),
+  label: z.string().max(200).optional(),
+  credits_per_unit: unitPriceSchema,
+  sync_status: z.enum(["pending", "synced", "failed"]).optional(),
+});
 export const lanePricingViewSchema = componentViewSchema.extend({
   components: z.array(componentViewSchema).nullish(),
+  operations: z.array(operationPriceSchema).nullish(),
 });
 const componentInputSchema = componentViewSchema.extend({
-  metric: z.enum(BILLING_METRICS),
+  metric: z.enum(SERVICE_BILLING_METRICS),
 });
 export const lanePricingInputSchema = componentInputSchema
   .extend({
     components: z
       .array(componentInputSchema)
-      .max(BILLING_METRICS.length - 1)
+      .max(SERVICE_BILLING_METRICS.length - 1)
       .nullish(),
+    operations: z.array(operationPriceSchema).max(256).nullish(),
   })
   .superRefine((lane, ctx) => {
     const seen = new Set([lane.metric]);

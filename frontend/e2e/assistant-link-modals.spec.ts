@@ -16,14 +16,14 @@ test("the manual NyxBot demo URL works without test initialization and survives 
 }) => {
   await page.goto("/assistant?mock=1&nyxbot=1");
   await expect(
-    page.getByRole("button", { name: "New agent", exact: true }).first(),
+    page.getByRole("button", { name: "Create new agent", exact: true }).first(),
   ).toBeVisible();
   await sendMessage(page, "connect to my github");
   const link = page.getByRole("link", { name: "Connect GitHub", exact: true });
   await expect(link).toBeVisible();
   await page.reload();
   await expect(
-    page.getByRole("button", { name: "New agent", exact: true }).first(),
+    page.getByRole("button", { name: "Create new agent", exact: true }).first(),
   ).toBeVisible();
   await link.click();
   const dialog = page.getByRole("dialog", { name: "Connect a service" });
@@ -192,7 +192,7 @@ for (const nyxagentEnabled of [false, true]) {
         expect(page.context().pages()).toHaveLength(1);
         await dialog.getByRole("button", { name: "Done", exact: true }).click();
         await expect(dialog).toHaveCount(0);
-        await expect(page.locator("textarea")).toBeVisible();
+        await expect(page.locator("[data-composer-textbox]")).toBeVisible();
         if (nyxagentEnabled) {
           await expect(
             page.getByText(/Your Telegram bot @helper_bot is linked/),

@@ -24,12 +24,10 @@ test("a first send stays continuous through the canonical id transition", async 
   const message = "Plan my week with my connected calendar.";
   await openAssistant(page, { faults: { aliasOnFirstSend: true } });
   const sidebarRows = page
-    .getByRole("navigation")
+    .getByRole("navigation", { name: "Agents and conversations" })
     .getByRole("button", { name: "Options for" });
 
-  await expect(
-    page.locator("header").getByText("New chat", { exact: true }),
-  ).toBeVisible();
+  await expect(page).toHaveTitle("nyxid - New chat");
   await expect(
     thread(page).getByText(
       "Ask NyxID to help with services, access, and account operations.",
@@ -49,7 +47,7 @@ test("a first send stays continuous through the canonical id transition", async 
 
   const echoedMessage = thread(page).getByText(message, { exact: true });
   await expect(echoedMessage).toHaveCount(1, { timeout: 1_000 });
-  await expect(composerInput(page)).toHaveValue("");
+  await expect(composerInput(page)).toHaveText("");
   await expect(page).toHaveURL(/c=nyxid-chat-mock-/, { timeout: 2_000 });
 
   await expect(
@@ -126,9 +124,7 @@ test("reloading a fixture-only canonical id repairs naturally to New chat", asyn
   }, reloadUrl.toString());
   await page.reload();
 
-  await expect(
-    page.locator("header").getByText("New chat", { exact: true }),
-  ).toBeVisible({ timeout: 5_000 });
+  await expect(page).toHaveTitle("nyxid - New chat", { timeout: 5_000 });
   await expect(
     thread(page).getByText(
       "Ask NyxID to help with services, access, and account operations.",
@@ -153,7 +149,7 @@ test("deleting a canonical conversation drops c", async ({
   await sendMessage(page, message);
   await expect(page).toHaveURL(/c=nyxid-chat-mock-/, { timeout: 2_000 });
   await expect(composerInput(page)).toHaveAttribute(
-    "placeholder",
+    "data-placeholder",
     "Message NyxID Assistant...",
     { timeout: 10_000 },
   );

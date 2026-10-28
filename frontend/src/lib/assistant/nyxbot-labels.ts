@@ -1,5 +1,11 @@
 import { getProviderBrand } from "@/lib/provider-branding";
-import type { AssistantAgent, AssistantAgentKind } from "@/schemas/assistant-nyxagent";
+import type {
+  AssistantAgent,
+  AssistantAgentKind,
+  NyxAgentAccessMode,
+  NyxAgentActionConfirmation,
+  NyxAgentModel,
+} from "@/schemas/assistant-nyxagent";
 import type { Conversation } from "@/types/assistant";
 
 const PLATFORM_NAMES: Readonly<Record<string, string>> = {
@@ -81,14 +87,26 @@ export const AGENT_STATUS_LABEL = {
 // wording over time, so any NyxID events header is stripped.
 const EVENT_HEADER = /^NyxID events[^:\n]*:\s*/;
 
-/** The individual notices of a server-authored `event` message. */
+/**
+ * The individual notices of a server-authored `event` message. The server
+ * writes one `- ` line per event, but an event's text may itself span lines
+ * (a specialist's multi-line reply excerpt), so a new notice starts only at a
+ * top-level `- ` line outside an open quote; the server swaps double quotes
+ * inside quoted text for single ones, so an odd count means still inside.
+ * Text without the events header (an automation's instruction) is one notice.
+ */
 export function eventNotices(text: string): string[] {
-  const body = text.replace(EVENT_HEADER, "");
-  const lines = body
-    .split("\n")
-    .map((line) => line.replace(/^\s*-\s+/, "").trim())
-    .filter(Boolean);
-  return lines.length ? lines : [text.trim()];
+  if (!EVENT_HEADER.test(text)) return [text.trim()];
+  const notices: string[] = [];
+  for (const line of text.replace(EVENT_HEADER, "").split("\n")) {
+    const current = notices.at(-1);
+    const insideQuote = current !== undefined && (current.match(/"/g)?.length ?? 0) % 2 === 1;
+    if (/^- /.test(line) && !insideQuote) notices.push(line.slice(2).trim());
+    else if (current === undefined) notices.push(line.replace(/^\s*-\s+/, "").trim());
+    else notices[notices.length - 1] = `${current}\n${line}`;
+  }
+  const kept = notices.map((notice) => notice.trim()).filter(Boolean);
+  return kept.length ? kept : [text.trim()];
 }
 
 export const AGENT_KIND_LABEL = { nyxbot: "NyxBot", specialist: "Specialist" } as const;
@@ -101,6 +119,7 @@ export type EventNoticeKind =
   | "connection"
   | "channel"
   | "message"
+  | "task"
   | "notice";
 export type EventNoticeTone = "neutral" | "success" | "warning" | "destructive";
 
@@ -130,6 +149,9 @@ function firstSentence(text: string): string {
  */
 export function describeEventNotice(text: string): EventNotice {
   const notice = text.trim();
+  if (notice.startsWith("Skill ") && (notice.includes("published and attached") || notice.includes("requires a corrected package"))) {
+    return { kind: "notice", tone: notice.includes("published and attached") ? "success" : "warning", summary: "Skill publication", detail: notice };
+  }
   // The server swaps double quotes in quoted text for single ones.
   let match = /^Specialist (\S+) (replied|was stopped|failed \(([^)]*)\))\. Reply excerpt: "([^"]*)"/.exec(
     notice,
@@ -225,6 +247,16 @@ export function describeEventNotice(text: string): EventNotice {
       detail: match[2]?.trim() || undefined,
     };
   }
+  match = /^Asynchronous service operation finished: ([^.]+)\./.exec(notice);
+  if (match) {
+    const outcome = match[1]?.trim() ?? "";
+    const ok = outcome === "done";
+    return {
+      kind: "task",
+      tone: ok ? "success" : "warning",
+      summary: ok ? "Background task finished" : `Background task ${outcome.replace(/_/g, " ")}`,
+    };
+  }
   const summary = firstSentence(notice);
   return {
     kind: "notice",
@@ -313,4 +345,53 @@ export function agentOwnerSections(agents: readonly AssistantAgent[]) {
   return [...groups.values()].sort(
     (a, b) => Number(b.id === "personal") - Number(a.id === "personal"),
   );
+}
+
+export const ACCESS_MODE_LABEL = {
+  autopilot: "Full access",
+  nyxmode: "Auto",
+  ask_every_time: "Ask every time",
+} as const satisfies Record<NyxAgentAccessMode, string>;
+
+/** What each access mode asks before, in one line. */
+export const ACCESS_MODE_DESCRIPTION = {
+  autopilot:
+    "Never asks. Every action, including automation, machine, saved-login and service-approval confirmations, runs on its own and the chat records what was allowed automatically.",
+  nyxmode: "Acts on its own; asks before sensitive or destructive actions.",
+  ask_every_time: "Asks before every action that changes something. Reading never asks.",
+} as const satisfies Record<NyxAgentAccessMode, string>;
+
+/** The mode that governs an agent: its own override, else the workspace mode. */
+export function effectiveAccessMode(
+  workspace: NyxAgentAccessMode | undefined,
+  override: NyxAgentAccessMode | null | undefined,
+): NyxAgentAccessMode {
+  return override ?? workspace ?? "nyxmode";
+}
+
+export const ACTION_RISK_LABEL = {
+  read: "Read",
+  change: "Change",
+  sensitive: "Sensitive",
+  destructive: "Destructive",
+} as const;
+
+/** Why a card asks, for its risk line. */
+export function confirmationReason(confirmation: NyxAgentActionConfirmation): string {
+  if (confirmation.reason === "webhook") return "This automation's confirmation policy asks.";
+  if (confirmation.reason === "policy") {
+    return "This machine's or saved login's confirmation setting asks.";
+  }
+  return confirmation.access_mode
+    ? `Your access mode is ${ACCESS_MODE_LABEL[confirmation.access_mode]}.`
+    : "Your access mode asks.";
+}
+
+/** Prefer the upstream name; older servers supply only the routing alias. */
+export function modelDisplayName(model: Pick<NyxAgentModel, "id" | "label">): string {
+  const alias = model.id.replace(/^nyxagent\//, "");
+  const label = model.label.trim();
+  if (label && label !== alias && label !== model.id) return label;
+  if (model.id === "nyxagent/chat") return "Default model";
+  return alias.replace(/[_-]+/g, " ").replace(/^./, (letter) => letter.toUpperCase());
 }

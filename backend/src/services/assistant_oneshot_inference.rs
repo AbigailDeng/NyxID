@@ -1,7 +1,7 @@
 //! Bounded, tool-less text inference for server-owned assistant metadata tasks.
 //! Never accepts an agent key, session, tool definitions, or arbitrary request JSON.
 //! Prefer the configured platform utility route. If absent or unavailable, use
-//! legacy platform-first selection. Preferring small advertised models is a heuristic, not
+//! personal connections in saved order, with authorized catalog platform fallback. Preferring small advertised models is a heuristic, not
 //! policy. Only model/capability metadata is cached; authority is resolved on every call.
 use std::{
     collections::HashMap,
@@ -238,21 +238,51 @@ impl Route {
 }
 
 async fn resolve(state: &AppState, actor: &str, service: &DownstreamService) -> AppResult<Route> {
-    // These are the LLM gateway's authoritative resolvers, including personal
-    // binding precedence, live platform ACL before decryption, and org role/scope.
-    let resolution = Box::pin(proxy_service::resolve_proxy_target_from_user_service(
-        &state.db,
-        &state.encryption_keys,
-        &state.node_ws_manager,
-        actor,
-        None,
-        Some(&service.id),
-        proxy_service::ProxyExecutionContext::new(
-            Some(&state.connection_expiry_notifier),
-            state.platform_user_rate_limit,
-        ),
-    ))
-    .await?;
+    // Server-owned metadata tasks never inherit organization credentials.
+    // Preserve saved order only within this catalog, then newest-first default.
+    let mut connections: Vec<crate::models::user_service::UserService> =
+        super::service_history::collection(&state.db, "user_services")
+            .find(doc! {"user_id": actor, "catalog_service_id": &service.id, "is_active": true})
+            .sort(doc! {"created_at": -1, "_id": 1})
+            .await?
+            .try_collect()
+            .await?;
+    let order = super::service_preference_service::get(&state.db, actor)
+        .await?
+        .map(|row| row.ordered)
+        .unwrap_or_default();
+    connections.sort_by_key(|row| {
+        order
+            .iter()
+            .position(|id| id == &row.id)
+            .unwrap_or(usize::MAX)
+    });
+    let mut resolution = None;
+    for connection in connections {
+        match proxy_service::resolve_proxy_target_by_user_service_id(
+            &state.db,
+            &state.encryption_keys,
+            actor,
+            &connection.id,
+            None,
+            Some(&service.id),
+            proxy_service::ProxyExecutionContext::new(
+                Some(&state.connection_expiry_notifier),
+                state.platform_user_rate_limit,
+            ),
+        )
+        .await
+        {
+            Ok(Some(candidate)) => {
+                resolution = Some(candidate);
+                break;
+            }
+            Ok(None)
+            | Err(crate::errors::AppError::CredentialUnavailable(_))
+            | Err(crate::errors::AppError::NodeOffline(_)) => continue,
+            Err(error) => return Err(error),
+        }
+    }
     if let Some(resolution) = resolution {
         let class = super::llm_gateway_service::credential_class(
             true,
@@ -260,9 +290,23 @@ async fn resolve(state: &AppState, actor: &str, service: &DownstreamService) -> 
             resolution.credential_source.as_deref(),
             &resolution.target,
         );
+        let delegated = if resolution.node_id.is_none() {
+            delegation_service::resolve_optional_auto_provision_credentials(
+                &state.db,
+                &state.encryption_keys,
+                actor,
+                &resolution.user_service_id,
+                &service.id,
+                &resolution.target,
+                Some(&state.connection_expiry_notifier),
+            )
+            .await?
+        } else {
+            vec![]
+        };
         return Ok(Route {
             target: resolution.target,
-            delegated: vec![],
+            delegated,
             class,
         });
     }
@@ -840,16 +884,16 @@ fn text_parts<'a>(value: &'a Value, kind: &str) -> Option<Vec<&'a str>> {
 // A deadline can drop the request at any await, including after provider dispatch.
 // Keep ordinary billing recovery semantics: release unsent reservations, settle
 // forwarded requests using the gateway's usage/byte estimate if no reply arrived.
-struct MeterGuard {
-    billing: Arc<billing::BillingService>,
-    metered: billing::MeteredProxyContext,
-    forwarded: bool,
-    usage: PlatformUsage,
-    model: Option<String>,
-    armed: bool,
+pub(crate) struct MeterGuard {
+    pub(crate) billing: Arc<billing::BillingService>,
+    pub(crate) metered: billing::MeteredProxyContext,
+    pub(crate) forwarded: bool,
+    pub(crate) usage: PlatformUsage,
+    pub(crate) model: Option<String>,
+    pub(crate) armed: bool,
 }
 impl MeterGuard {
-    async fn finish(&self) -> AppResult<()> {
+    pub(crate) async fn finish(&self) -> AppResult<()> {
         if !self.forwarded {
             return self
                 .billing
@@ -984,8 +1028,15 @@ async fn request_inner(
             .as_ref()
             .or(service.billing.as_ref()),
         state.billing.resale_enabled(),
-    )
-    .with_request_body(body.as_deref());
+    );
+    let operation = state
+        .billing
+        .http_operation(&ctx, if body.is_some() { "POST" } else { "GET" }, path)
+        .await
+        .map_err(|_| RequestFailure::terminal("dispatch_unavailable"))?;
+    let ctx = ctx
+        .with_operation(operation.as_deref())
+        .with_request_body(body.as_deref());
     let metered = Box::pin(state.billing.open(&ctx))
         .await
         .map_err(|_| RequestFailure::terminal("dispatch_unavailable"))?;

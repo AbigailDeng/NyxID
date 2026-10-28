@@ -87,6 +87,7 @@ export const nyxIdVoiceRequestSchema = z.object({
   ]),
   turn_id: z.string(),
   pending_acknowledgement_ids: z.array(z.string()),
+  result_message_id: z.string().nullable().optional(),
 });
 export type NyxIdVoiceRequest = z.infer<typeof nyxIdVoiceRequestSchema>;
 export const nyxIdVoiceEventSchema = z.discriminatedUnion("kind", [

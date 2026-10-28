@@ -18,7 +18,9 @@ credentials. A connection needs one of:
 
 - **A NyxID platform app.** An operator registers an OAuth app with the
   provider, using callback `{BASE_URL}/api/v1/providers/callback`, and stores
-  its client ID and secret on the NyxID provider.
+  its client ID and secret on the NyxID provider with
+  `nyxid admin provider set-credentials <slug>`. A Catalog Manager may set the
+  first client on a seeded provider; see [Catalog Manager](CATALOG_MANAGER.md).
 - **The user's own app.** The user supplies their app's client ID and secret
   when adding the service (`POST /keys` or `PUT /providers/{id}/credentials`).
   The app must use the same callback. NyxID runs the flow, then stores and
@@ -36,6 +38,22 @@ app credentials".
 NyxID's managed-app scope allowlist covers only selected seeded providers. Add
 reviewed entries for these providers before exposing a shared app, and keep
 the scope picker aligned with the scopes registered upstream.
+
+## Hosted authorization nonce
+
+Providers that require an authorization-request nonce can explicitly enable
+`authorization_nonce_required` in the advanced provider form or CLI provider/catalog
+manifest. The default is off. Upgrade all backend replicas before enabling it;
+older replicas ignore the setting. Hubstaff must retain its `hubstaff:read` scope,
+PKCE S256 and existing client authentication.
+
+Each hosted OAuth2 attempt receives a fresh random nonce stored separately from
+state, PKCE and ChatConnect correlation. This includes hosted connect links and
+ChatConnect, but does not add nonce support to node-owned OAuth. Configured nonce
+query parameters, fragment-bearing authorization URLs and a custom client-ID
+parameter named `nonce` are rejected only while enabled. Existing in-flight
+callbacks and tokens continue using their existing contracts. See the
+[provider API contract](API.md#post-apiv1providers) for update and rollout semantics.
 
 ## Providers
 

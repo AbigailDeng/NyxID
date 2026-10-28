@@ -257,6 +257,7 @@ struct NyxIdChatHistoryConversationWire {
 struct NyxIdChatHistoryMessageWire {
     #[serde(default)]
     execution_pending: bool,
+    request_id: Option<String>,
     voice: Option<NyxIdChatHistoryVoiceWire>,
     id: String,
     seq: i64,
@@ -306,7 +307,9 @@ impl NyxIdChatHistoryWire {
                 {
                     return Err("NyxID 返回了无法识别的对话记录。".to_owned());
                 }
-                let request_id = message.voice.and_then(|v| v.request_id);
+                let request_id = message
+                    .request_id
+                    .or_else(|| message.voice.and_then(|v| v.request_id));
                 if request_id.as_ref().is_some_and(|id| !valid_request_id(id)) {
                     return Err("NyxID 返回了无效的语音任务标识。".to_owned());
                 }
@@ -1171,5 +1174,52 @@ mod tests {
         assert_eq!(public["messages"][0]["requestId"], rid);
         assert_eq!(public["messages"][0]["executionPending"], true);
         assert!(!public.to_string().contains("must-not-cross-ipc"));
+    }
+
+    #[test]
+    fn history_projects_continuation_requests_without_audio_metadata() {
+        let id = "nyxa-0123456789abcdef0123456789abcdef";
+        let rid = uuid::Uuid::new_v4().to_string();
+        let legacy_id = uuid::Uuid::new_v4().to_string();
+        let mut value = serde_json::json!({
+            "conversation": {"id": id, "active_turn": null},
+            "messages": [{
+                "id": "message", "seq": 1, "turn_id": "continuation-task",
+                "role": "user", "text": "Continue after confirmation",
+                "status": "completed", "error_code": null,
+                "execution_pending": true, "request_id": rid, "voice": null,
+                "task_conversation_id": "hidden-task-must-not-cross-ipc",
+            }],
+        });
+        let history = serde_json::from_value::<NyxIdChatHistoryWire>(value.clone())
+            .unwrap()
+            .into_public(id)
+            .unwrap();
+        let public = serde_json::to_value(history).unwrap();
+        assert_eq!(public["messages"][0]["requestId"], rid);
+        assert_eq!(public["messages"][0]["executionPending"], true);
+        assert!(
+            !public
+                .to_string()
+                .contains("hidden-task-must-not-cross-ipc")
+        );
+
+        value["messages"][0]["voice"] = serde_json::json!({"request_id": legacy_id});
+        let history = serde_json::from_value::<NyxIdChatHistoryWire>(value.clone())
+            .unwrap()
+            .into_public(id)
+            .unwrap();
+        assert_eq!(
+            history.messages[0].request_id.as_deref(),
+            Some(rid.as_str())
+        );
+
+        value["messages"][0]["request_id"] = serde_json::json!("invalid-request");
+        assert!(
+            serde_json::from_value::<NyxIdChatHistoryWire>(value)
+                .unwrap()
+                .into_public(id)
+                .is_err()
+        );
     }
 }

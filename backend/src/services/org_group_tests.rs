@@ -61,6 +61,8 @@ async fn enqueue(
         Some(&id),
         uploads,
         Some(request),
+        std::slice::from_ref(&agent.id),
+        Vec::new(),
     )
     .await
     .unwrap();
@@ -82,6 +84,8 @@ async fn start(
     .await
     .unwrap();
     let mut start = engine::TurnStart::from(&engine::TurnRequest {
+        acknowledgement_id: None,
+        retry_of: None,
         conversation_id: Some(row.id),
         attachment_ids: vec![],
         text: "Shared request".into(),
@@ -95,9 +99,13 @@ async fn start(
     start.group_attachments = groups::request_attachments(&f.state.db, access, request)
         .await
         .unwrap();
-    engine::begin_turn(&f.state.db, &access.actor, start, &f.state.encryption_keys)
+    let admitted = engine::begin_turn(&f.state.db, &access.actor, start, &f.state.encryption_keys)
         .await
-        .unwrap()
+        .unwrap();
+    let turn = admitted.active_turn.as_ref().unwrap();
+    assert_eq!(turn.report_to, None);
+    assert!(!turn.with_nyxbot);
+    admitted
 }
 async fn key(f: &Fixture, row: &AssistantConversation) -> ApiKey {
     f.state
@@ -569,8 +577,7 @@ async fn org_group_cards_leave_revocation_and_queue_drop() {
     f.state.db.drop().await.unwrap();
 }
 
-#[tokio::test]
-async fn org_group_live_fanout_rechecks_delivery_and_excludes_nonparticipants() {
+async fn org_group_live_fanout_rechecks_delivery_and_excludes_nonparticipants_impl() {
     use super::assistant_live::LiveEvent;
     use http_body_util::BodyExt;
     let f = Fixture::new("org_group_live").await;
@@ -633,6 +640,221 @@ async fn org_group_live_fanout_rechecks_delivery_and_excludes_nonparticipants() 
     f.state.db.drop().await.unwrap();
 }
 
+async fn post_as(
+    f: &Fixture,
+    actor: &str,
+    group: &str,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
+    crate::handlers::assistant_group::post_message(
+        State(f.state.clone()),
+        test_auth_user(actor),
+        Path(group.into()),
+        axum::Json(serde_json::from_value(body).unwrap()),
+    )
+    .await
+    .map(|(_, axum::Json(value))| value)
+}
+
+async fn previewed(f: &Fixture, actor: &str, group: &str) -> serde_json::Value {
+    let axum::Json(response) = crate::handlers::assistant_group::get_group(
+        State(f.state.clone()),
+        test_auth_user(actor),
+        Path(group.into()),
+    )
+    .await
+    .unwrap();
+    serde_json::to_value(response).unwrap()["default_recipient_ids"].clone()
+}
+
+#[tokio::test]
+async fn org_group_sticky_recipients_are_per_actor() {
+    let f = Fixture::new("org_group_sticky").await;
+    let (researcher, _) = f.create().await;
+    let writer = super::assistant_team_service::create_specialist_for(
+        &f.state.db,
+        &f.state.encryption_keys,
+        &f.admin,
+        &f.org,
+        f.request("writer"),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .0;
+    engine_flag(&f).await;
+    let group = groups::create(
+        &f.state.db,
+        &f.admin,
+        &f.org,
+        "Sticky",
+        &[researcher.id.clone(), writer.id.clone()],
+        std::slice::from_ref(&f.member),
+        "user",
+    )
+    .await
+    .unwrap()
+    .group;
+    // Both start at the lead.
+    for actor in [&f.admin, &f.member] {
+        assert_eq!(
+            previewed(&f, actor, &group.id).await,
+            serde_json::json!([researcher.id])
+        );
+    }
+    // The admin's pills are honoured, stored on the message and kept as the
+    // admin's own selection.
+    let posted = post_as(
+        &f,
+        &f.admin,
+        &group.id,
+        serde_json::json!({"text":"draft the plan","recipient_agent_ids":[writer.id]}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        posted["addressed_agent_ids"],
+        serde_json::json!([writer.id])
+    );
+    assert_eq!(
+        posted["message"]["recipient_agent_ids"],
+        serde_json::json!([writer.id])
+    );
+    let stored = personal::messages(&f.state.db, &f.org, &group.id, 10, None)
+        .await
+        .unwrap();
+    let mine = stored
+        .iter()
+        .find(|row| row.author_user_id.as_deref() == Some(f.admin.as_str()))
+        .unwrap();
+    assert_eq!(mine.recipient_agent_ids, vec![writer.id.clone()]);
+    // The member's unaddressed message is not routed by the admin's choice.
+    let posted = post_as(
+        &f,
+        &f.member,
+        &group.id,
+        serde_json::json!({"text":"status?"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        posted["addressed_agent_ids"],
+        serde_json::json!([researcher.id])
+    );
+    assert_eq!(
+        previewed(&f, &f.admin, &group.id).await,
+        serde_json::json!([writer.id])
+    );
+    assert_eq!(
+        previewed(&f, &f.member, &group.id).await,
+        serde_json::json!([researcher.id])
+    );
+    // A selection naming a non-member is refused without a message.
+    // `post_message` advances eligible member turns inline. A member can
+    // therefore append its own reply while this assertion is running; that
+    // background activity is unrelated to whether the rejected request wrote
+    // a message. Count only owner-authored user messages, which is the state
+    // this validation is expected to leave unchanged.
+    let before = personal::messages(&f.state.db, &f.org, &group.id, 50, None)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|row| row.role == "user")
+        .count();
+    let refused = post_as(
+        &f,
+        &f.admin,
+        &group.id,
+        serde_json::json!({"text":"x","recipient_agent_ids":[Uuid::new_v4().to_string()]}),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(&refused, AppError::ValidationError(m) if m == "Choose 1 to 8 current group members as recipients"),
+        "{refused:?}"
+    );
+    assert_eq!(
+        personal::messages(&f.state.db, &f.org, &group.id, 50, None)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|row| row.role == "user")
+            .count(),
+        before
+    );
+    // The admin's bare follow-up goes to the admin's sticky writer.
+    let posted = post_as(&f, &f.admin, &group.id, serde_json::json!({"text":"and?"}))
+        .await
+        .unwrap();
+    assert_eq!(
+        posted["addressed_agent_ids"],
+        serde_json::json!([writer.id])
+    );
+    // A departing participant's selection is dropped; removing an agent
+    // prunes the others' selections. Leaving waits for settled turns.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while groups::threads(&f.state.db, &group)
+        .await
+        .unwrap()
+        .iter()
+        .any(|row| engine::live_turn(row, Utc::now()).is_some())
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "member turns never settled"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    groups::update(
+        &f.state.db,
+        access(&f, &f.member, &group.id).await,
+        None,
+        None,
+        None,
+        None,
+        true,
+    )
+    .await
+    .unwrap();
+    let stored = groups::get(&f.state.db, &f.admin, &group.id, None)
+        .await
+        .unwrap()
+        .group;
+    assert!(!stored.last_recipient_ids_by_actor.contains_key(&f.member));
+    assert_eq!(
+        stored.last_recipient_ids_by_actor.get(&f.admin),
+        Some(&vec![writer.id.clone()])
+    );
+    groups::update(
+        &f.state.db,
+        access(&f, &f.admin, &group.id).await,
+        None,
+        Some(std::slice::from_ref(&researcher.id)),
+        None,
+        None,
+        false,
+    )
+    .await
+    .unwrap();
+    let stored = groups::get(&f.state.db, &f.admin, &group.id, None)
+        .await
+        .unwrap()
+        .group;
+    assert_eq!(
+        stored.last_recipient_ids_by_actor.get(&f.admin),
+        Some(&Vec::new())
+    );
+    assert_eq!(
+        previewed(&f, &f.admin, &group.id).await,
+        serde_json::json!([researcher.id])
+    );
+}
+
+#[tokio::test]
+async fn org_group_live_fanout_rechecks_delivery_and_excludes_nonparticipants() {
+    org_group_live_fanout_rechecks_delivery_and_excludes_nonparticipants_impl().await;
+}
+
 #[tokio::test]
 async fn org_group_http_tools_and_demoted_or_inactive_members_are_refused() {
     use crate::handlers::{assistant_group as handler, assistant_team};
@@ -664,6 +886,19 @@ async fn org_group_http_tools_and_demoted_or_inactive_members_are_refused() {
     .await;
     assert!(!error);
     assert_eq!(listing["groups"][0]["id"], group.id);
+    // The fixture's member runs in Full access, which bypasses the webhook
+    // floor (covered by `full_access_webhook_change_executes_with_receipt_while_auto_asks`).
+    // Auto keeps the floor: the destructive leave must raise a card.
+    super::assistant_settings_service::update(
+        &f.state.db,
+        &f.member,
+        super::assistant_settings_service::Update {
+            access_mode: Some(crate::models::assistant_settings::AccessMode::Nyxmode),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
     let mut automation = chat.clone();
     automation.confirmation_policy =
         Some(crate::models::trigger_schedule::ConfirmationPolicy::Destructive);
@@ -674,7 +909,7 @@ async fn org_group_http_tools_and_demoted_or_inactive_members_are_refused() {
         &serde_json::json!({"group":group.id,"leave":true}),
     )
     .await;
-    assert!(error);
+    assert!(error, "{card}");
     assert_eq!(card["error"], "acknowledgement_required");
     groups::get(&f.state.db, &f.member, &group.id, None)
         .await
@@ -988,6 +1223,8 @@ async fn org_group_request_upload_isolation_retention_and_rotated_key_revocation
     let row = start(&f, &b, &agent, &first).await;
     finish(&f, &row).await;
     let mut resumed = engine::TurnStart::from(&engine::TurnRequest {
+        acknowledgement_id: None,
+        retry_of: None,
         conversation_id: Some(row.id.clone()),
         attachment_ids: vec![],
         text: "Direct hidden-thread post".into(),
@@ -1454,5 +1691,466 @@ async fn org_group_pending_cards_batch_acknowledgements_and_bound_approvals() {
         assert_eq!(card["agent_id"].as_str(), Some(agent.id.as_str()));
         assert_eq!(card["can_decide"].as_bool(), Some(actor == &f.admin));
     }
+    f.state.db.collection::<mongodb::bson::Document>(crate::models::assistant_acknowledgement::COLLECTION_NAME)
+        .update_many(doc! {},doc! {"$set":{"authored_skill":{
+            "agent_id":&agent.id,"proposal_id":uuid::Uuid::new_v4().to_string(),"revision":0_i64,"skills_revision":0_i64
+        }}}).await.unwrap();
+    let cards = crate::handlers::assistant_group::org_pending_actions(&state, &a)
+        .await
+        .unwrap();
+    assert_eq!(cards.len(), 2);
+    for card in cards {
+        assert_eq!(card["authored_skill"], true);
+        assert_eq!(card["can_decide"], false);
+        assert!(card.get("confirm_phrase").is_none());
+        assert!(
+            card["review_url"]
+                .as_str()
+                .unwrap()
+                .contains(card["acknowledgement_id"].as_str().unwrap())
+        );
+    }
+    f.state.db.drop().await.unwrap();
+}
+
+#[tokio::test]
+async fn org_group_tool_image_route_rechecks_membership_before_serving_pixels() {
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+    let f = Fixture::new("org_group_tool_image").await;
+    engine_flag(&f).await;
+    let (agent, _) = f.create().await;
+    let group = create(&f, &agent).await.group;
+    let access = access(&f, &f.member, &group.id).await;
+    let request = enqueue(&f, &access, &agent, &[]).await;
+    let row = start(&f, &access, &agent, &request).await;
+    let image = engine::attach_routed_image(
+        &f.state.db,
+        &f.state.encryption_keys,
+        &f.member,
+        &row.id,
+        "snapshot",
+        "image/png",
+        b"org tool pixels",
+        true,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let credential = super::assistant_agent_credential_service::load_for_conversation(
+        &f.state.db,
+        &f.state.encryption_keys,
+        &f.member,
+        &row.id,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let (_, router) = crate::routes::build_router();
+    let app = router.with_state(f.state.clone());
+    let fetch = || {
+        Request::builder()
+            .uri(format!(
+                "/api/v1/assistant-attachments/{}/content",
+                image.attachment.id
+            ))
+            .header("x-api-key", credential.raw_key.as_str())
+            .body(Body::empty())
+            .unwrap()
+    };
+    let response = app.clone().oneshot(fetch()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        to_bytes(response.into_body(), 1024).await.unwrap().as_ref(),
+        b"org tool pixels"
+    );
+    f.state
+        .db
+        .collection::<bson::Document>(crate::models::org_membership::COLLECTION_NAME)
+        .delete_one(doc! {"org_user_id":&f.org,"member_user_id":&f.member})
+        .await
+        .unwrap();
+    let response = app.oneshot(fetch()).await.unwrap();
+    assert!(response.status().is_client_error());
+    assert!(
+        !String::from_utf8_lossy(&to_bytes(response.into_body(), 4096).await.unwrap())
+            .contains("org tool pixels")
+    );
+    f.state.db.drop().await.unwrap();
+}
+
+async fn finish_with_tool_image(
+    f: &Fixture,
+    row: &AssistantConversation,
+) -> crate::models::assistant_conversation::TurnAttachment {
+    let attachment = engine::attach_routed_image(
+        &f.state.db,
+        &f.state.encryption_keys,
+        &row.user_id,
+        &row.id,
+        "camera__snapshot",
+        "image/png",
+        b"\x89PNG\r\n\x1a\ntool image",
+        true,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    engine::finish_turn(
+        &f.state.db,
+        row,
+        &row.credential_api_key_id,
+        &Uuid::new_v4().to_string(),
+        &engine::TurnResult {
+            text: "Generated image.".into(),
+            session_id: None,
+            response_id: None,
+            error: None,
+        },
+    )
+    .await
+    .unwrap();
+    attachment.attachment
+}
+
+#[tokio::test]
+async fn org_group_tool_images_are_shared_only_through_authorized_transcript_references() {
+    use crate::models::assistant_attachment::COLLECTION_NAME as ATTACHMENTS;
+    use crate::models::assistant_group::MESSAGES_COLLECTION_NAME as MESSAGES;
+    let f = Fixture::new("org_group_tool_images").await;
+    engine_flag(&f).await;
+    let (agent, _) = f.create().await;
+    let group = create(&f, &agent).await;
+    let member = access(&f, &f.member, &group.group.id).await;
+    let request = enqueue(&f, &member, &agent, &[]).await;
+    let row = start(&f, &member, &agent, &request).await;
+    assert_eq!(row.user_id, f.member);
+    let attachment = finish_with_tool_image(&f, &row).await;
+    f.state
+        .db
+        .collection::<bson::Document>(REQUESTS)
+        .update_one(
+            doc! {"_id": &request},
+            doc! {"$set":{"pending_agent_ids":[]}},
+        )
+        .await
+        .unwrap();
+    crate::handlers::org_group::member_settled(&f.state, member, &row, "Generated image.", None)
+        .await;
+    let reply = f
+        .state
+        .db
+        .collection::<crate::models::assistant_group::GroupMessage>(MESSAGES)
+        .find_one(doc! {"group_id": &group.group.id, "role":"agent"})
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reply.attachments[0].id, attachment.id);
+    // The reader is a different participant from the initiating member.
+    let (mime, bytes) = engine::read_group_tool_attachment(
+        &f.state.db,
+        &f.state.encryption_keys,
+        &f.admin,
+        &group.group.id,
+        &attachment.id,
+    )
+    .await
+    .unwrap();
+    assert_eq!(mime, "image/png");
+    assert_eq!(bytes, b"\x89PNG\r\n\x1a\ntool image");
+    for user in [&f.viewer, &f.outsider] {
+        assert!(matches!(
+            engine::read_group_tool_attachment(
+                &f.state.db,
+                &f.state.encryption_keys,
+                user,
+                &group.group.id,
+                &attachment.id,
+            )
+            .await,
+            Err(AppError::NotFound(_))
+        ));
+    }
+    // A forged transcript reference cannot bridge another group's thread.
+    let other = groups::create(
+        &f.state.db,
+        &f.admin,
+        &f.org,
+        "Other group",
+        std::slice::from_ref(&agent.id),
+        std::slice::from_ref(&f.member),
+        "user",
+    )
+    .await
+    .unwrap();
+    f.state.db.collection::<bson::Document>(MESSAGES).insert_one(doc! {
+        "_id":Uuid::new_v4().to_string(), "group_id":&other.group.id, "attachments":[{"id":&attachment.id}],
+    }).await.unwrap();
+    assert!(matches!(
+        engine::read_group_tool_attachment(
+            &f.state.db,
+            &f.state.encryption_keys,
+            &f.admin,
+            &other.group.id,
+            &attachment.id,
+        )
+        .await,
+        Err(AppError::NotFound(_))
+    ));
+    f.state
+        .db
+        .collection::<bson::Document>(ATTACHMENTS)
+        .update_one(
+            doc! {"_id":&attachment.id},
+            doc! {"$set":{"user_id":&f.admin}},
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        engine::read_group_tool_attachment(
+            &f.state.db,
+            &f.state.encryption_keys,
+            &f.admin,
+            &group.group.id,
+            &attachment.id,
+        )
+        .await,
+        Err(AppError::NotFound(_))
+    ));
+    f.state.db.drop().await.unwrap();
+}
+
+#[tokio::test]
+async fn personal_group_tool_images_require_owner_and_reject_api_keys() {
+    use super::assistant_team_service as team;
+    use crate::handlers::assistant_uploads::group_content;
+    let f = Fixture::new("personal_group_tool_images").await;
+    engine_flag(&f).await;
+    let agent = team::ensure_nyxbot(&f.state.db, &f.admin).await.unwrap();
+    let group = personal::create(
+        &f.state.db,
+        &f.admin,
+        "Images",
+        std::slice::from_ref(&agent.id),
+        "user",
+    )
+    .await
+    .unwrap();
+    let mut turn = engine::TurnStart::from(&engine::TurnRequest {
+        retry_of: None,
+        conversation_id: None,
+        attachment_ids: vec![],
+        text: "Show an image".into(),
+        agent_id: Some(agent.id.clone()),
+        model: None,
+        access_mode: None,
+        acknowledgement_id: None,
+    });
+    turn.origin = TurnOrigin::Group;
+    turn.group_id = Some(group.id.clone());
+    let row = engine::begin_turn(&f.state.db, &f.admin, turn, &f.state.encryption_keys)
+        .await
+        .unwrap();
+    let attachment = finish_with_tool_image(&f, &row).await;
+    crate::handlers::assistant_group::member_settled(&f.state, &row, "Generated image.", None)
+        .await;
+    let messages = personal::messages(&f.state.db, &f.admin, &group.id, 10, None)
+        .await
+        .unwrap();
+    assert_eq!(messages.last().unwrap().attachments[0].id, attachment.id);
+    let response = group_content(
+        State(f.state.clone()),
+        test_auth_user(&f.admin),
+        Path((group.id.clone(), attachment.id.clone())),
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.headers()["content-type"], "image/png");
+    assert_eq!(
+        axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap()
+            .as_ref(),
+        b"\x89PNG\r\n\x1a\ntool image"
+    );
+    assert!(matches!(
+        group_content(
+            State(f.state.clone()),
+            test_auth_user(&f.member),
+            Path((group.id.clone(), attachment.id.clone()))
+        )
+        .await,
+        Err(AppError::NotFound(_))
+    ));
+    let mut api_key = test_auth_user(&f.admin);
+    api_key.auth_method = crate::mw::auth::AuthMethod::ApiKey;
+    api_key.api_key_id = Some("key".into());
+    assert!(matches!(
+        group_content(
+            State(f.state.clone()),
+            api_key,
+            Path((group.id.clone(), attachment.id.clone()))
+        )
+        .await,
+        Err(AppError::ForbiddenWithGuidance { .. })
+    ));
+    use crate::models::assistant_upload_retention::{Policy, SETTINGS_ID, Settings};
+    f.state
+        .db
+        .collection::<Settings>(crate::models::platform_settings::COLLECTION_NAME)
+        .replace_one(
+            doc! {"_id":SETTINGS_ID},
+            Settings {
+                policy: Some(Policy {
+                    tool_image_days: Some(1),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .upsert(true)
+        .await
+        .unwrap();
+    f.state.db.collection::<bson::Document>(crate::models::assistant_attachment::COLLECTION_NAME)
+        .update_one(doc! {"_id":&attachment.id},doc! {"$set":{"created_at":bson::DateTime::from_chrono(Utc::now()-chrono::Duration::days(2))}})
+        .await.unwrap();
+    for swept in [false, true] {
+        if swept {
+            assert_eq!(
+                super::assistant_upload_retention::sweep(&f.state.db)
+                    .await
+                    .unwrap(),
+                1
+            );
+        }
+        assert!(matches!(
+            group_content(
+                State(f.state.clone()),
+                test_auth_user(&f.admin),
+                Path((group.id.clone(), attachment.id.clone()))
+            )
+            .await,
+            Err(AppError::AssistantAttachmentExpired)
+        ));
+        assert!(matches!(
+            group_content(
+                State(f.state.clone()),
+                test_auth_user(&f.member),
+                Path((group.id.clone(), attachment.id.clone()))
+            )
+            .await,
+            Err(AppError::NotFound(_))
+        ));
+    }
+    // Even a personal transcript reference cannot grant another actor's thread.
+    f.state
+        .db
+        .collection::<bson::Document>(crate::models::assistant_conversation::COLLECTION_NAME)
+        .update_one(doc! {"_id": &row.id}, doc! {"$set":{"user_id":&f.member}})
+        .await
+        .unwrap();
+    f.state
+        .db
+        .collection::<bson::Document>(crate::models::assistant_attachment::COLLECTION_NAME)
+        .update_one(
+            doc! {"_id": &attachment.id},
+            doc! {"$set":{"user_id":&f.member}},
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        engine::read_group_tool_attachment(
+            &f.state.db,
+            &f.state.encryption_keys,
+            &f.admin,
+            &group.id,
+            &attachment.id
+        )
+        .await,
+        Err(AppError::NotFound(_))
+    ));
+    f.state.db.drop().await.unwrap();
+}
+
+#[tokio::test]
+async fn org_group_concurrent_appends_retry_transaction_conflicts_without_duplicate_messages() {
+    use super::api_key_mutation_service::TransactionCollisionHook;
+    use std::sync::Arc;
+    let f = Fixture::new("org_group_append_collision").await;
+    let (agent, _) = f.create().await;
+    let access = create(&f, &agent).await;
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let first = TransactionCollisionHook::new(barrier.clone());
+    let second = TransactionCollisionHook::new(barrier);
+    let request = |id: &str| GroupRequest {
+        id: id.into(),
+        group_id: access.group.id.clone(),
+        user_id: f.org.clone(),
+        actor_user_id: access.actor.clone(),
+        message_seq: 0,
+        attachment_ids: Vec::new(),
+        pending_agent_ids: vec![agent.id.clone()],
+        hops_remaining: 3,
+        created_at: Utc::now(),
+    };
+    let first_id = Uuid::new_v4().to_string();
+    let second_id = Uuid::new_v4().to_string();
+    let (a, b) = tokio::join!(
+        groups::append_with_hook(
+            &f.state.db,
+            &access,
+            "user",
+            None,
+            "first",
+            Some(&first_id),
+            &[],
+            Some(request(&first_id)),
+            &[],
+            Vec::new(),
+            Some(first.clone())
+        ),
+        groups::append_with_hook(
+            &f.state.db,
+            &access,
+            "user",
+            None,
+            "second",
+            Some(&second_id),
+            &[],
+            Some(request(&second_id)),
+            &[],
+            Vec::new(),
+            Some(second.clone())
+        ),
+    );
+    let (a, b) = (a.unwrap(), b.unwrap());
+    assert_ne!(a.seq, b.seq);
+    assert_eq!(a.seq + b.seq, 3);
+    assert!(
+        first.attempts() + second.attempts() >= 3,
+        "the fixture must force a real transaction retry"
+    );
+    let messages = personal::messages(&f.state.db, &f.org, &access.group.id, 50, None)
+        .await
+        .unwrap();
+    assert_eq!(messages.len(), 2);
+    for message in [a, b] {
+        let queued = groups::request(&f.state.db, &access, message.request_id.as_deref().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(queued.message_seq, message.seq);
+    }
+    assert_eq!(
+        f.state
+            .db
+            .collection::<GroupRequest>(REQUESTS)
+            .count_documents(doc! {"group_id": &access.group.id})
+            .await
+            .unwrap(),
+        2
+    );
     f.state.db.drop().await.unwrap();
 }

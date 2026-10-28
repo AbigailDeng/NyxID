@@ -15,6 +15,8 @@ import {
   INVITE_CODES_TAB_DEFAULT,
   ADMIN_CREDITS_TABS,
   ADMIN_CREDITS_TAB_DEFAULT,
+  ADMIN_BILLING_TABS,
+  ADMIN_BILLING_TAB_DEFAULT,
   AI_SETUP_SKILL_TABS,
   parseTab,
 } from "./url-tabs";
@@ -87,7 +89,8 @@ const TAB_SECTIONS: Readonly<Record<string, TabSection>> = {
     billing: "Billing",
     usage: "Usage",
   }),
-  "/admin/usage": tabSection(["dashboard", "list"], "dashboard", {
+  "/admin/usage": tabSection(["dashboard", "list", "nyxbot"], "dashboard", {
+    nyxbot: "NyxBot",
     dashboard: "Dashboard",
     list: "List",
   }),
@@ -102,15 +105,23 @@ const TAB_SECTIONS: Readonly<Record<string, TabSection>> = {
     allowances: "Free allowances",
     schedules: "Schedules",
   }),
+  "/admin/billing": tabSection(ADMIN_BILLING_TABS, ADMIN_BILLING_TAB_DEFAULT, {
+    overview: "Services",
+    rates: "Rate cache",
+    settings: "Settings",
+  }),
 };
 
 const PAGE_LABELS: Record<string, string> = {
   "/dashboard": "Dashboard",
   "/billing": "Billing & Usage",
   "/keys": "Services & Credentials",
+  "/tools": "Tools",
+  "/admin/tools": "Tools",
   "/orgs": "Organizations",
   "/nodes": "Credential Nodes",
   "/channel-bots": "Channel Bots",
+  "/onboarding/setups": "Bot Setups",
   "/channel-bots/connect": "Setup links",
   "/settings": "Account Settings",
   "/settings/consents": "Access & Authorizations",
@@ -132,6 +143,7 @@ const PAGE_LABELS: Record<string, string> = {
   "/admin/usage": "Usage",
   "/admin/integrity": "Integrity",
   "/admin/credits": "Credits",
+  "/admin/billing": "Billing",
   "/admin/service-accounts": "Service Accounts",
   "/admin/oauth-clients": "OAuth Clients",
   "/admin/roles": "Roles",
@@ -139,6 +151,7 @@ const PAGE_LABELS: Record<string, string> = {
   "/admin/invite-codes": "Invite Codes",
   "/admin/feature-flags": "Feature Flags",
   "/admin/platform-credentials": "Platform Credentials",
+  "/admin/platform-bots": "Platform BotFather",
   "/admin/upload-retention": "Upload retention",
   "/admin/nodes": "Nodes",
   "/admin/ownership": "Ownership transfers",
@@ -205,6 +218,10 @@ export function buildStudioBreadcrumbs(
   }
   if (path === "/channel-bots/connect") {
     return finish([page("/channel-bots"), { label: "Setup links" }]);
+  }
+  const platformSetup = path.match(/^\/onboarding\/setups\/[^/]+$/);
+  if (platformSetup) {
+    return finish([page("/onboarding/setups"), named(path, "Bot setup")]);
   }
   if (path === "/providers/callback") {
     return finish([

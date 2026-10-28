@@ -91,6 +91,7 @@ import {
 import { FadeIn } from "./service-card-motion";
 import { useRevealMotion } from "@/hooks/use-card-sequence";
 import { ConnectionDeleteAction } from "./connection-delete-action";
+import { connectionIconUrl } from "@/lib/connection-icon";
 
 const authNames: Record<string, string> = {
   bearer: "Bearer",
@@ -443,7 +444,7 @@ export function ServiceConnectionTable({
                     >
                       <ServiceIcon
                         slug={key.catalog_service_slug ?? key.slug}
-                        iconUrl={key.icon_url}
+                        iconUrl={connectionIconUrl(key)}
                         size="xs"
                       />
                       <span
@@ -457,6 +458,9 @@ export function ServiceConnectionTable({
                         aria-hidden="true"
                       />
                     </Link>
+                    {key.offering_kind === "tool" && (
+                      <Badge variant="secondary">Tool · your key</Badge>
+                    )}
                     <Badge
                       className="ml-auto shrink-0"
                       variant={

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useOrgs } from "@/hooks/use-orgs";
 import { useFeature } from "@/hooks/use-feature-flag";
 import { FEATURE_FLAG } from "@/lib/feature-flags";
@@ -67,7 +67,7 @@ export function ServiceGrantPicker({
   readonly onChange: (slugs: string[]) => void;
   readonly disabled?: boolean;
 }) {
-  const keys = useKeys();
+  const keys = useKeys({ includeTools: true });
   const services = (keys.data ?? [])
     .filter((key) => key.is_active &&
         (!org ||
@@ -92,14 +92,15 @@ export function ServiceGrantPicker({
   if (!rows.length) {
     return (
       <p className="rounded-lg border border-dashed border-border px-3 py-2 text-12 text-muted-foreground">
-        You have no connected services yet. The agent can ask NyxBot for access later.
+        You have no connected services yet. Connect a service first, then grant it
+        here; the agent uses only what you grant.
       </p>
     );
   }
   return (
     <ul
       aria-label="Services"
-      className="assistant-scrollbar max-h-44 space-y-0.5 overflow-y-auto rounded-lg border border-border p-1"
+      className="assistant-scrollbar relative max-h-44 space-y-0.5 overflow-y-auto rounded-lg border border-border p-1"
     >
       {rows.map((service) => {
         const id = `grant-${service.slug}`;
@@ -129,6 +130,14 @@ export function ServiceGrantPicker({
   );
 }
 
+/** Organizations the person may create agents for. */
+function useWritableOrgs() {
+  const orgs = useOrgs();
+  return (orgs.data ?? []).filter((org) =>
+    ["admin", "member", "owner"].includes(org.your_role),
+  );
+}
+
 function AgentOwnerPicker({
   value,
   onChange,
@@ -136,10 +145,7 @@ function AgentOwnerPicker({
   readonly value?: string;
   readonly onChange: (id: string | undefined) => void;
 }) {
-  const orgs = useOrgs();
-  const writable = (orgs.data ?? []).filter((org) =>
-    ["admin", "member", "owner"].includes(org.your_role),
-  );
+  const writable = useWritableOrgs();
   return (
     <div className="space-y-2">
       <label className="text-12 font-medium" htmlFor="agent-owner">
@@ -173,9 +179,12 @@ function AgentOwnerPicker({
 
 /** Create a specialist: its name, role and starting grants. */
 export function NewAgentDialog({
+  owner = "personal",
   onClose,
   onCreated,
 }: {
+  /** "org" starts on the first organization the person can create agents for. */
+  readonly owner?: "personal" | "org";
   readonly onClose: () => void;
   readonly onCreated: (created: { id: string; home_conversation_id: string }) => void;
 }) {
@@ -196,6 +205,12 @@ export function NewAgentDialog({
   const name = form.watch("name");
   const description = form.watch("description");
   const org = form.watch("org");
+  const firstOrg = useWritableOrgs()[0]?.id;
+  // Organizations may still be loading when the dialog opens; preselect once known.
+  useEffect(() => {
+    if (owner !== "org" || !orgAgentsEnabled || !firstOrg || form.getValues("org")) return;
+    form.setValue("org", firstOrg, { shouldDirty: false, shouldTouch: false });
+  }, [firstOrg, form, orgAgentsEnabled, owner]);
 
   async function submit(values: AssistantAgentCreate) {
     setError(undefined);
@@ -218,8 +233,10 @@ export function NewAgentDialog({
         <DialogHeader className="shrink-0 pr-6">
           <DialogTitle>New agent</DialogTitle>
           <DialogDescription>
-            A specialist keeps its own memory and threads, uses only the
-            services you grant here, and asks NyxBot for anything else.
+            A specialist keeps its own memory and threads and uses only the
+            services you grant here. When you talk to it directly it handles
+            the work itself and tells you what it is missing; you add grants
+            in its details.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>

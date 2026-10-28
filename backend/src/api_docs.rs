@@ -2,6 +2,8 @@
 #[openapi(
     modifiers(&SecurityAddon),
     paths(
+        crate::handlers::oracle_pools::transfer_pool,
+        crate::handlers::oracle_pools::delete_pool,
         crate::handlers::llm_gateway::pool_aliases,
         crate::handlers::service_pools_handler::create_pool,
         crate::handlers::service_pools_handler::list_pools,
@@ -24,6 +26,7 @@
         crate::handlers::admin_ownership::transfer,
         crate::handlers::admin_usage::get_usage,
         crate::handlers::admin_usage::get_analytics,
+        crate::handlers::admin_usage::get_identities,
         crate::handlers::admin_usage::get_workspace,
         crate::handlers::admin_usage::save_workspace,
         crate::handlers::options::get_options,
@@ -149,6 +152,15 @@
         crate::handlers::billing::create_topup,
         crate::handlers::billing::list_topups,
         crate::handlers::billing::download_invoice,
+        crate::handlers::billing::get_bill,
+        crate::handlers::billing::list_invoices,
+        crate::handlers::managed_executions::list,
+        crate::handlers::managed_executions::get,
+        crate::handlers::billing_credits::allocate,
+        crate::handlers::billing_credits::reclaim,
+        crate::handlers::billing_credits::allocation_summary,
+        crate::handlers::billing_credit_schedules::allocate_recurring,
+        crate::handlers::billing_credit_schedules::edit_allocation_recurring,
         crate::handlers::billing_credits::issue_grant,
         crate::handlers::billing_credits::admin_list_grants,
         crate::handlers::billing_credits::revoke_grant,
@@ -167,6 +179,12 @@
     ),
     components(
         schemas(
+            crate::models::service_billing::OperationPrice,
+            crate::services::inference_service::OperationPricingView,
+            crate::services::inference_service::LanePricingView,
+            crate::handlers::services::DeclaredOperationResponse,
+            crate::services::admin_usage_service::UsageService,
+            crate::services::admin_usage_service::UsageOperation,
             crate::handlers::service_history::HistoryResponse,
             crate::handlers::service_history::ArchiveResponse,
             crate::handlers::service_history::AuthorshipResponse,
@@ -197,6 +215,7 @@
             crate::handlers::services::CreateServiceRequest,
             crate::handlers::services::SshServiceConfigRequest,
             crate::handlers::services::SshServiceConfigResponse,
+            crate::handlers::services::XChannelBillingResponse,
             crate::handlers::services::UpdateServiceRequest,
             crate::handlers::services::ServiceResponse,
             crate::handlers::services::ServiceListResponse,
@@ -310,9 +329,19 @@
             crate::handlers::billing::ProvisionWalletRequest,
             crate::handlers::billing::TopUpRequest,
             crate::handlers::billing::BillingWalletResponse,
+            crate::handlers::billing::CurrentBillResponse,
+            crate::handlers::billing::BillChargeResponse,
+            crate::handlers::billing::BillTaxResponse,
+            crate::handlers::billing::UsageInvoiceResponse,
+            crate::handlers::billing::UsageInvoicesResponse,
             crate::handlers::billing::TopUpResponse,
+            crate::handlers::managed_executions::ExecutionStatus,
             crate::handlers::billing_credits::IssueGrantRequest,
             crate::handlers::billing_credits::IssueGrantResponse,
+            crate::handlers::billing_credits::AllocationOverviewResponse,
+            crate::handlers::billing_credits::ServiceLimitResponse,
+            crate::services::billing::summaries::AllocationSummary,
+            crate::models::credit_service_limit::CreditServiceLimitInput,
             crate::handlers::billing_credits::IssueGrantRecipientResponse,
             crate::handlers::billing_credits::CreditGrantActivationState,
             crate::handlers::billing_credits::CreditGrantResponse,
@@ -347,6 +376,7 @@
         )
     ),
     tags(
+        (name = "Oracle", description = "Authenticated Oracle pool lifecycle; unreleased until first tagged release containing #1527/#1542"),
         (name = "Agent Key Login", description = "Human-approved CLI enrollment and child credential management"),
         (name = "Docs", description = "NyxID API documentation endpoints"),
         (name = "Proxy Docs", description = "Downstream OpenAPI and AsyncAPI catalog endpoints"),
@@ -404,17 +434,47 @@ mod tests {
             ),
             ("CreateKeyRequest", vec!["use_platform_key"]),
             ("UpdateServiceRequest", vec!["credential"]),
-            ("ServiceResponse", vec!["legacy_public_master"]),
+            (
+                "ServiceResponse",
+                vec![
+                    "legacy_public_master",
+                    "x_channel_billing",
+                    "declared_operations",
+                ],
+            ),
+            ("DeclaredOperationResponse", vec!["operation", "label"]),
+            ("LanePricing", vec!["operations"]),
+            (
+                "OperationPrice",
+                vec![
+                    "operation",
+                    "credits_per_unit",
+                    "lago_metric_code",
+                    "sync_status",
+                ],
+            ),
+            ("LanePricingView", vec!["operations"]),
+            (
+                "OperationPricingView",
+                vec!["operation", "label", "credits_per_unit", "sync_status"],
+            ),
+            ("BillingUsageRow", vec!["operation"]),
+            ("UsageService", vec!["by_operation"]),
+            ("UsageOperation", vec!["operation"]),
             ("UpdateKeyRequest", vec!["use_platform_key"]),
             (
                 "ServiceBilling",
-                vec!["byok_pricing", "platform_key_pricing"],
+                vec!["byok_pricing", "platform_key_pricing", "managed_execution"],
             ),
             ("CreateConnectLinkRequest", vec!["use_platform_key"]),
         ] {
+            // Flattened structs render as allOf parts.
+            let parts = std::iter::once(&schemas[schema])
+                .chain(schemas[schema]["allOf"].as_array().into_iter().flatten());
+            let properties: Vec<_> = parts.map(|part| &part["properties"]).collect();
             for field in fields {
                 assert!(
-                    schemas[schema]["properties"].get(field).is_some(),
+                    properties.iter().any(|p| p.get(field).is_some()),
                     "{schema}.{field}"
                 );
             }
@@ -440,6 +500,8 @@ mod tests {
             ("/api/v1/providers/codex-connection", "get", true),
             ("/api/v1/providers/codex-connection", "post", true),
             ("/api/v1/providers/codex-connection/verify", "post", true),
+            ("/api/v1/billing/executions", "get", true),
+            ("/api/v1/billing/executions/{id}", "get", true),
         ] {
             let operation = &document["paths"][path][method];
             assert!(operation.is_object(), "missing {method} {path}");

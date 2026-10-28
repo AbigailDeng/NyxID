@@ -1,3 +1,6 @@
+vi.mock("@/hooks/use-tools", () => ({
+  useToolTopics: () => ({ data: [] }),
+}));
 import {
   providerFormPayload,
   providerFormValues,
@@ -57,8 +60,15 @@ vi.mock("@/components/providers/provider-services", () => ({
   ),
 }));
 vi.mock("@/hooks/use-service-concurrency", () => ({
-  useServiceConcurrency: () => ({ data: { policy: null }, isPending: false, isError: false }),
-  useUpdateServiceConcurrency: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useServiceConcurrency: () => ({
+    data: { policy: null },
+    isPending: false,
+    isError: false,
+  }),
+  useUpdateServiceConcurrency: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
 }));
 vi.mock("@/hooks/use-services", () => ({
   useService: () => mock.service,
@@ -66,6 +76,18 @@ vi.mock("@/hooks/use-services", () => ({
     mutateAsync: mock.updateService,
     isPending: false,
   }),
+}));
+// The service editor's server-resolved billing panel is covered in
+// platform-service-fields.test.tsx; it renders nothing here.
+vi.mock("@/hooks/use-admin-billing", () => ({
+  useAdminBillingService: () => ({
+    data: undefined,
+    isLoading: false,
+    error: null,
+  }),
+}));
+vi.mock("@/hooks/use-endpoints", () => ({
+  useEndpoints: () => ({ data: [] }),
 }));
 vi.mock("@/hooks/use-developer-apps", () => ({
   useDeveloperApps: () => ({
@@ -514,6 +536,7 @@ it.each(["https://example.com/new-revoke", ""])(
         style: "rfc7009",
         auth: "basic",
         revokes_grant: true,
+        effect_scope: "grant_wide",
         request_encoding: "json",
       },
     } as ProviderConfig;
@@ -528,7 +551,7 @@ it.each(["https://example.com/new-revoke", ""])(
     );
     await waitFor(() =>
       expect(mock.updateProvider).toHaveBeenCalledWith({
-        revocation: url ? { ...mock.provider.data!.revocation, url } : null,
+        revocation: url ? { ...mock.provider.data!.revocation, url, effect_scope: null } : null,
       }),
     );
   },

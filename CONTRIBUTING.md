@@ -235,6 +235,20 @@ Wait until `db.hello().isWritablePrimary` is `true` before starting the suite.
 The CI workflow uses the same startup contract and verifies the effective
 parameter with `getParameter` before running tests.
 
+Database setup shares one 90-second readiness deadline across ping, a unique
+probe write, and initial run-lease publication. A busy shared mongod can recover
+after the former five-second probe limit; the original operation waits within
+this budget without retrying the test. Errors still fail immediately, a server
+that remains unavailable fails at the deadline, and an explicit URI never falls
+back to another server. Heartbeat, stale-sweep, and cleanup fencing retain their
+separate short deadlines.
+
+If readiness fails, inspect the reported phase and elapsed time alongside the
+`resources-backend-test` artifact and the job's MongoDB diagnostics. Clustered
+setup failures alone do not establish the cause of a server stall. Preserve
+these diagnostics and fix recurring setup failures instead of repeatedly
+rerunning the full workflow or adding test retries.
+
 ```bash
 # Backend unit tests
 cargo test
@@ -327,13 +341,34 @@ A change under `Cargo.toml` / `Cargo.lock` re-runs both `Backend Test` and `CLI 
 
 Wait for a green `CI Pipeline` before merging. If a check fails, fix the issue locally and push -- the workflow re-runs automatically.
 
-Backend test and coverage jobs use `CARGO_PROFILE_TEST_DEBUG=line-tables-only`
-to keep the large test binary within hosted-runner memory. Use the same setting
-for head and base coverage measurements. This preserves line locations and LLVM
-coverage instrumentation; keep the full test selection and coverage thresholds.
+Backend test and coverage builds use `CARGO_PROFILE_TEST_DEBUG=line-tables-only`
+to keep the large test binary within hosted-runner memory. Each mode compiles
+one archive, then runs four isolated shards with one MongoDB per runner.
+Inventory verification checks that every expected test ran exactly once across
+the shards; coverage profiles are merged before enforcing the existing threshold.
 When a runner exits with code 143 during compilation, inspect the last completed
 step before treating it as a test failure. Repeated shutdowns at the same compile
 stage need a build-resource correction rather than repeated full-workflow retries.
+
+The CI profile schedules the capacity-wait heartbeat, trigger grace deadline/recovery,
+lost-session recovery, stream-bound, and bounded analytics admission tests alone
+within each shard to keep concurrent database creation and cleanup out of their
+timing windows. The profile and reusable workflow are included in the coverage
+fingerprint. Base coverage reuses an exact-commit published report when available;
+it is informational and does not rerun the base suite.
+The reusable backend workflow sets `RUST_MIN_STACK=8388608` (8 MiB) for ordinary
+and instrumented native journeys. Each build and execution shard has a 60-minute
+budget. Tests retain the CI profile's five-minute deadline and one retry; every
+retried test is named in the job summary, and a second failure fails the run.
+
+For failed backend runs, open the verification job summary or download
+`backend-test-diagnostics` / `backend-coverage-diagnostics` (retained for 14 days).
+These contain available shard JUnit reports, failures/retries/skips, missing
+reports and the slowest cases; completeness and coverage remain separate gates.
+See the [CI stability follow-up](docs/plans/2026-10-22-ci-load-sensitive-tests.md)
+for focused reproduction commands and cache changes, and
+[service history](docs/SERVICE_HISTORY.md#writer-inventory-and-exclusions)
+for the credential usage/edit timestamp contract.
 
 ### Rollup Health Triage
 

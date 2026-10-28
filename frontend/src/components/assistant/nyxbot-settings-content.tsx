@@ -1,4 +1,8 @@
+import { useAuthStore } from "@/stores/auth-store";
+import { FEATURE_FLAG, userHasFeature } from "@/lib/feature-flags";
+import { ChannelAdapterBindings } from "./channel-adapter-bindings";
 import { AutomationPreferences } from "./automation-preferences";
+import { PlatformPersonalBindings } from "./platform-personal-bindings";
 import { useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { AlertTriangle } from "lucide-react";
@@ -15,7 +19,14 @@ import {
   useAppForm,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ACCESS_MODE_DESCRIPTION, ACCESS_MODE_LABEL } from "@/lib/assistant/nyxbot-labels";
 import { ErrorBanner } from "@/components/shared/error-banner";
 import { ChannelBotsManager } from "@/components/assistant/nyxbot-channels";
 import {
@@ -24,6 +35,7 @@ import {
   useUpdateNyxBotSettings,
 } from "@/hooks/use-nyxbot-agents";
 import {
+  nyxAgentAccessModeSchema,
   nyxAgentSettingsFormSchema,
   type NyxAgentSettings,
   type NyxAgentSettingsForm,
@@ -36,6 +48,7 @@ function errorMessage(error: unknown, fallback: string): string {
 
 export function NyxBotSettingsContent() {
   const settings = useNyxBotSettings();
+  const adaptersEnabled = useAuthStore(s=>userHasFeature(s.user,FEATURE_FLAG.NYXBOT_ADAPTERS));
   return (
     <section aria-label="NyxBot settings" className="space-y-8">
       <DetailSection title="General">
@@ -64,18 +77,21 @@ export function NyxBotSettingsContent() {
           <ChannelBotsSection />
         </div>
       </DetailSection>
+      {adaptersEnabled && <DetailSection title="Phone and speech connections"><div className="p-5"><ChannelAdapterBindings /></div></DetailSection>}
+      <DetailSection title="Personal chat links"><div className="p-5"><PlatformPersonalBindings /></div></DetailSection>
     </section>
   );
 }
 
 function formValues(settings: NyxAgentSettings): NyxAgentSettingsForm {
   return {
+    access_mode: settings.access_mode ?? (settings.skip_destructive_confirmation ? "autopilot" : "nyxmode"),
     max_auto_continuations: settings.max_auto_continuations ?? 8,
-    confirm_destructive: !settings.skip_destructive_confirmation,
     max_live_subagents: settings.max_live_subagents,
     max_concurrent_subagent_turns: settings.max_concurrent_subagent_turns,
     max_group_handoffs: settings.max_group_handoffs,
     max_group_handoffs_per_hour: settings.max_group_handoffs_per_hour,
+    specialist_access_requests: settings.specialist_access_requests ?? "denied",
   };
 }
 
@@ -86,18 +102,16 @@ function SettingsForm({ settings }: { readonly settings: NyxAgentSettings }) {
     defaultValues: formValues(settings),
   });
   const [error, setError] = useState<string>();
-  const confirm = form.watch("confirm_destructive");
+  const mode = form.watch("access_mode");
 
   async function save(values: NyxAgentSettingsForm) {
     setError(undefined);
     const dirty = form.formState.dirtyFields;
     // Send only what changed, so a concurrent edit elsewhere is not overwritten.
     const body: NyxAgentSettingsUpdate = {
+      ...(dirty.access_mode ? { access_mode: values.access_mode } : {}),
       ...(dirty.max_auto_continuations
         ? { max_auto_continuations: values.max_auto_continuations }
-        : {}),
-      ...(dirty.confirm_destructive
-        ? { skip_destructive_confirmation: !values.confirm_destructive }
         : {}),
       ...(dirty.max_live_subagents
         ? { max_live_subagents: values.max_live_subagents }
@@ -112,6 +126,9 @@ function SettingsForm({ settings }: { readonly settings: NyxAgentSettings }) {
         : {}),
       ...(dirty.max_group_handoffs_per_hour
         ? { max_group_handoffs_per_hour: values.max_group_handoffs_per_hour }
+        : {}),
+      ...(dirty.specialist_access_requests
+        ? { specialist_access_requests: values.specialist_access_requests }
         : {}),
     };
     try {
@@ -132,35 +149,40 @@ function SettingsForm({ settings }: { readonly settings: NyxAgentSettings }) {
       >
         <FormField
           control={form.control}
-          name="confirm_destructive"
+          name="access_mode"
           render={({ field }) => (
-            <FormItem className="space-y-2">
-              <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-4">
-                <div className="space-y-1">
-                  <FormLabel>Confirm destructive actions</FormLabel>
-                  <FormDescription className="text-12">
-                    NyxBot asks before deleting keys, bots, services or nodes.
-                  </FormDescription>
-                </div>
+            <FormItem className="space-y-2 rounded-lg border border-border p-4">
+              <FormLabel>Access mode</FormLabel>
+              <FormDescription className="text-12">
+                When NyxBot and your specialists ask you before acting. An agent can
+                have its own mode in its details.
+              </FormDescription>
+              <Select value={field.value} onValueChange={field.onChange}>
                 <FormControl>
-                  <Switch
-                    checked={field.value}
-                    onCheckedChange={field.onChange}
-                  />
+                  <SelectTrigger aria-label="Access mode">
+                    <SelectValue />
+                  </SelectTrigger>
                 </FormControl>
-              </div>
-              {!confirm ? (
+                <SelectContent>
+                  {nyxAgentAccessModeSchema.options.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {ACCESS_MODE_LABEL[option]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-12 text-muted-foreground">{ACCESS_MODE_DESCRIPTION[mode]}</p>
+              {mode === "autopilot" ? (
                 <div
                   role="alert"
                   className="flex items-start gap-2 rounded-xl border border-warning/15 bg-warning/[0.04] px-3 py-2.5 text-12 text-warning"
                 >
-                  <AlertTriangle
-                    aria-hidden="true"
-                    className="mt-0.5 h-3.5 w-3.5 shrink-0"
-                  />
+                  <AlertTriangle aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span>
-                    NyxBot will delete keys, channel bots, services and nodes
-                    without asking you first. Deletions cannot be undone.
+                    Approvals are bypassed: NyxBot deletes keys, channel bots, services and
+                    nodes and changes access without asking you first. Deletions cannot be
+                    undone. Automation, machine, saved-login, publication and service-approval
+                    confirmations are also bypassed and recorded in chat.
                   </span>
                 </div>
               ) : null}
@@ -238,6 +260,35 @@ function SettingsForm({ settings }: { readonly settings: NyxAgentSettings }) {
             )}
           />
         ))}
+        <FormField
+          control={form.control}
+          name="specialist_access_requests"
+          render={({ field }) => (
+            <FormItem className="space-y-2 rounded-lg border border-border p-4">
+              <FormLabel>Specialist access requests</FormLabel>
+              <FormDescription className="text-12">
+                Only you, and NyxBot for work it assigned or a group it is in, can grant access; specialists
+                cannot grant themselves or each other anything.
+              </FormDescription>
+              <Select value={field.value} onValueChange={field.onChange}>
+                <FormControl>
+                  <SelectTrigger aria-label="Specialist access requests">
+                    <SelectValue />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  <SelectItem value="denied">Deny requests</SelectItem>
+                  <SelectItem value="routed_to_nyxbot">Route to NyxBot</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-12 text-muted-foreground">
+                {field.value === "denied"
+                  ? "A specialist you talk to directly tells you what it is missing and continues; you grant it in the specialist's details. Only work NyxBot assigned, or work in a group NyxBot is in, reports to NyxBot instead."
+                  : "For work NyxBot assigned, or in a group with NyxBot, a specialist's request goes to NyxBot, which approves or denies it; you can decide it on its card instead. A specialist you talk to directly still tells you what it is missing."}
+              </p>
+            </FormItem>
+          )}
+        />
         <p className="text-11 text-muted-foreground">
           Every specialist turn and group hand-off is billed to your credits
           like any other NyxBot turn, so higher limits can spend credits faster.

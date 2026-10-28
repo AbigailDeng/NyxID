@@ -4,30 +4,79 @@ use crate::{
     errors::{AppError, AppResult},
     mw::auth::AuthUser,
     services::{
-        agent_skill_service as skills,
+        agent_skill_service::{
+            self as skills, OrnnCode, OrnnLocalRefusal, OrnnOutcome, OrnnReader,
+        },
         assistant_acknowledgement_service::{self as acks, ChatAuthority},
         assistant_team_service as team,
     },
 };
+
 use axum::{
     Json,
     body::{Body, to_bytes},
     extract::{Path, Query, State},
     http::{self, Request},
 };
-use serde::Deserialize;
+
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 #[derive(Clone)]
 pub(crate) struct OrnnSkillRead;
 #[derive(Clone, Copy)]
 pub(crate) struct OrnnSkillPublication;
+/// Drafting's pre-review format check. Never worth an owner approval prompt:
+/// where policy would ask, the check is skipped (publication validates later).
+#[derive(Clone, Copy)]
+pub(crate) struct OrnnSkillPreflight;
 pub(crate) struct Reader<'a> {
     pub(crate) state: &'a AppState,
     pub(crate) person: &'a str,
     pub(crate) thread_key: Option<&'a str>,
     pub(crate) scopes: Option<&'a crate::models::agent_operation_scope::OperationScopes>,
     pub(crate) chat: Option<std::sync::Arc<ChatAuthority>>,
+}
+
+/// A proposal owner's signed identity (no chat key), for admin-initiated
+/// maintenance reads of that owner's private skills. Callers return only
+/// identifiers and decision codes to the admin.
+pub(crate) struct OwnerReader {
+    state: AppState,
+    person: String,
+}
+
+impl OwnerReader {
+    pub(crate) fn new(state: &AppState, person: &str) -> Self {
+        Self {
+            state: state.clone(),
+            person: person.to_owned(),
+        }
+    }
+
+    fn reader(&self) -> Reader<'_> {
+        Reader {
+            state: &self.state,
+            person: &self.person,
+            thread_key: None,
+            scopes: None,
+            chat: None,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl OrnnReader for OwnerReader {
+    async fn get(&self, path: &str) -> AppResult<Vec<u8>> {
+        self.reader().get(path).await
+    }
+
+    async fn classified(&self, method: http::Method, path: &str, body: Vec<u8>) -> OrnnOutcome {
+        if method != http::Method::GET {
+            return OrnnOutcome::LocalRefusal(OrnnLocalRefusal::OperationNotAllowed);
+        }
+        self.reader().classified(method, path, body).await
+    }
 }
 
 struct OrnnFetch<'a> {
@@ -43,6 +92,46 @@ struct OrnnFetch<'a> {
 #[async_trait::async_trait]
 impl skills::OrnnReader for Reader<'_> {
     async fn get(&self, path: &str) -> AppResult<Vec<u8>> {
+        self.classified_request(http::Method::GET, path, Vec::new())
+            .await
+            .into_app_result()
+    }
+
+    async fn request(&self, method: http::Method, path: &str, body: Vec<u8>) -> AppResult<Vec<u8>> {
+        self.classified_request(method, path, body)
+            .await
+            .into_app_result()
+    }
+
+    async fn classified(&self, method: http::Method, path: &str, body: Vec<u8>) -> OrnnOutcome {
+        self.classified_request(method, path, body).await
+    }
+
+    async fn classified_as_owner(
+        &self,
+        method: http::Method,
+        path: &str,
+        body: Vec<u8>,
+    ) -> OrnnOutcome {
+        Reader {
+            state: self.state,
+            person: self.person,
+            thread_key: None,
+            scopes: None,
+            chat: None,
+        }
+        .classified_request(method, path, body)
+        .await
+    }
+}
+
+impl Reader<'_> {
+    async fn classified_request(
+        &self,
+        method: http::Method,
+        path: &str,
+        body: Vec<u8>,
+    ) -> OrnnOutcome {
         // A proxy request is a substantial state machine. Poll it as its own
         // task so nested native MCP dispatch does not accumulate its debug
         // stack frames. Cancellation/timeout must also cancel that task.
@@ -53,33 +142,7 @@ impl skills::OrnnReader for Reader<'_> {
         let scopes = self.scopes.cloned().unwrap_or_default();
         let chat = self.chat.clone();
         let task = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
-            Box::pin(fetch_ornn(OrnnFetch {
-                state: &state,
-                person: &person,
-                path: &path,
-                thread_key,
-                scopes,
-                chat,
-                method: http::Method::GET,
-                body: Body::empty(),
-            }))
-            .await
-        }));
-        tokio::time::timeout(std::time::Duration::from_secs(30), task)
-            .await
-            .map_err(|_| AppError::ServicePoolInfrastructureUnavailable)?
-            .map_err(|_| AppError::ServicePoolInfrastructureUnavailable)?
-    }
-
-    async fn request(&self, method: http::Method, path: &str, body: Vec<u8>) -> AppResult<Vec<u8>> {
-        let state = self.state.clone();
-        let person = self.person.to_owned();
-        let path = path.to_owned();
-        let thread_key = self.thread_key.map(str::to_owned);
-        let scopes = self.scopes.cloned().unwrap_or_default();
-        let chat = self.chat.clone();
-        let task = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
-            Box::pin(fetch_ornn(OrnnFetch {
+            Box::pin(fetch_ornn_classified(OrnnFetch {
                 state: &state,
                 person: &person,
                 path: &path,
@@ -91,14 +154,14 @@ impl skills::OrnnReader for Reader<'_> {
             }))
             .await
         }));
-        tokio::time::timeout(std::time::Duration::from_secs(30), task)
-            .await
-            .map_err(|_| AppError::ServicePoolInfrastructureUnavailable)?
-            .map_err(|_| AppError::ServicePoolInfrastructureUnavailable)?
+        match tokio::time::timeout(std::time::Duration::from_secs(30), task).await {
+            Ok(Ok(outcome)) => outcome,
+            _ => OrnnOutcome::Uncertain,
+        }
     }
 }
 
-async fn fetch_ornn(request: OrnnFetch<'_>) -> AppResult<Vec<u8>> {
+async fn fetch_ornn_classified(request: OrnnFetch<'_>) -> OrnnOutcome {
     let OrnnFetch {
         state,
         person,
@@ -111,22 +174,25 @@ async fn fetch_ornn(request: OrnnFetch<'_>) -> AppResult<Vec<u8>> {
     } = request;
     let publication = method != http::Method::GET;
     if !ornn_operation_allowed(&method, path, publication) {
-        return Err(AppError::Forbidden(
-            "This Ornn operation is not available to agent learning".into(),
-        ));
+        return OrnnOutcome::LocalRefusal(OrnnLocalRefusal::OperationNotAllowed);
     }
     // Fixed catalog selection; no caller-supplied destination, method or headers.
-    let service = state
+    let service = match state
         .db
         .collection::<crate::models::downstream_service::DownstreamService>(
             crate::models::downstream_service::COLLECTION_NAME,
         )
         .find_one(mongodb::bson::doc! {"slug":"ornn-api","is_active":true})
-        .await?
-        .ok_or_else(|| {
-            AppError::Forbidden("Ornn is unavailable; connect your Ornn access and retry".into())
-        })?;
-    let mut auth = super::assistant_team::owner_auth(person)?;
+        .await
+    {
+        Ok(Some(service)) => service,
+        Ok(None) => return OrnnOutcome::LocalRefusal(OrnnLocalRefusal::ServiceUnavailable),
+        Err(error) => return OrnnOutcome::LocalError(error.into()),
+    };
+    let mut auth = match super::assistant_team::owner_auth(person) {
+        Ok(auth) => auth,
+        Err(error) => return OrnnOutcome::LocalError(error),
+    };
     if let Some(key) = thread_key {
         // Native reads are agent requests, never browser-session bypasses of
         // approval policy. The key also binds live scope/guest/automation checks.
@@ -137,13 +203,15 @@ async fn fetch_ornn(request: OrnnFetch<'_>) -> AppResult<Vec<u8>> {
         auth.api_key_id = Some(key);
     }
     auth.assistant_operation_scopes = scopes;
-    auth.assistant_turn_fence = chat.as_ref().map(|chat| chat.turn_fence());
+    auth.assistant_turn_fence = chat.as_ref().map(|chat| Box::new(chat.turn_fence()));
     auth.assistant_chat = chat;
-    let mut request = Request::builder()
+    let Ok(mut request) = Request::builder()
         .method(method)
         .uri(format!("/api/v1/proxy/{}{path}", service.id))
         .body(body)
-        .map_err(|_| AppError::ValidationError("Invalid skill path".into()))?;
+    else {
+        return OrnnOutcome::LocalRefusal(OrnnLocalRefusal::InvalidPath);
+    };
     if publication {
         request.headers_mut().insert(
             http::header::CONTENT_TYPE,
@@ -156,9 +224,12 @@ async fn fetch_ornn(request: OrnnFetch<'_>) -> AppResult<Vec<u8>> {
     request.extensions_mut().insert(OrnnSkillRead);
     if publication {
         request.extensions_mut().insert(OrnnSkillPublication);
+        if path.split('?').next() == Some("/api/v1/skill-format/validate") {
+            request.extensions_mut().insert(OrnnSkillPreflight);
+        }
     }
     let mut slug = String::new();
-    let response = Box::pin(super::proxy::proxy_request_inner(
+    let response = match Box::pin(super::proxy::proxy_request_inner(
         state,
         &auth,
         &service.id,
@@ -167,25 +238,57 @@ async fn fetch_ornn(request: OrnnFetch<'_>) -> AppResult<Vec<u8>> {
         &mut slug,
     ))
     .await
-    .map_err(|error| match error {
-        AppError::ApiKeyScopeForbidden(_) => error,
-        _ => AppError::Forbidden(
-            "Skill unavailable through your Ornn access; check the connection and retry".into(),
-        ),
-    })?;
+    {
+        Ok(response) => response,
+        Err(AppError::ApiKeyScopeForbidden(message)) => {
+            return OrnnOutcome::LocalRefusal(OrnnLocalRefusal::ScopeForbidden(message));
+        }
+        Err(_) => return OrnnOutcome::ProxyError,
+    };
     if !response.status().is_success() {
-        return Err(AppError::Forbidden(
-            "Skill unavailable or not visible through your Ornn access".into(),
-        ));
-    }
-    to_bytes(response.into_body(), skills::MAX_ARCHIVE)
+        let status = response.status().as_u16();
+        // The status is complete once headers arrive. The problem body is
+        // bounded in size and time; a slow or oversized body yields `Unknown`.
+        let body = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            to_bytes(response.into_body(), 16 * 1024),
+        )
         .await
-        .map(|b| b.to_vec())
-        .map_err(|_| {
-            AppError::ValidationError(
-                "Ornn response exceeded the skill size limit or was interrupted".into(),
-            )
-        })
+        .ok()
+        .and_then(Result::ok);
+        let (code, rules) = body
+            .as_deref()
+            .map_or((OrnnCode::Unknown, Vec::new()), |bytes| {
+                (
+                    OrnnCode::from_problem_body(bytes),
+                    skills::parse_validation_rules(bytes),
+                )
+            });
+        return OrnnOutcome::Response {
+            status,
+            code,
+            rules,
+        };
+    }
+    match to_bytes(response.into_body(), skills::MAX_ARCHIVE).await {
+        Ok(bytes) => OrnnOutcome::Ok(bytes.to_vec()),
+        Err(_) => OrnnOutcome::Interrupted,
+    }
+}
+
+/// Ornn routes that publish skill content without NyxID's review: create
+/// (`POST /skills`, `POST /skills/pull`), new versions (`PUT /skills/{id}`,
+/// `POST /skills/{id}/refresh`) and source relinking (`PUT /skills/{id}/source`).
+pub(crate) fn raw_skill_publication(method: &http::Method, path: &str) -> bool {
+    let route = path.split('?').next().unwrap_or(path).trim_matches('/');
+    let segments: Vec<_> = route.split('/').collect();
+    match segments.as_slice() {
+        ["api", "v1", "skills"] | ["api", "v1", "skills", "pull"] => method == http::Method::POST,
+        ["api", "v1", "skills", id] => method == http::Method::PUT && !id.is_empty(),
+        ["api", "v1", "skills", id, "refresh"] => method == http::Method::POST && !id.is_empty(),
+        ["api", "v1", "skills", id, "source"] => method == http::Method::PUT && !id.is_empty(),
+        _ => false,
+    }
 }
 
 /// The learning publisher is deliberately narrower than the general Ornn
@@ -281,6 +384,7 @@ pub async fn get(
     auth: AuthUser,
     Path(id): Path<String>,
 ) -> AppResult<Json<skills::SkillsResponse>> {
+    super::login_client_context::require_first_party_human(&auth)?;
     let owner = auth.user_id.to_string();
     crate::services::assistant_nyxagent::require_enabled(&state.db, &owner).await?;
     Ok(Json(team::agent(&state.db, &owner, &id).await?.into()))
@@ -291,6 +395,7 @@ pub async fn set(
     Path(id): Path<String>,
     Json(selection): Json<skills::Selection>,
 ) -> AppResult<Json<skills::SkillsResponse>> {
+    super::login_client_context::require_first_party_human(&auth)?;
     let owner = auth.user_id.to_string();
     crate::services::assistant_nyxagent::require_enabled(&state.db, &owner).await?;
     Ok(Json(
@@ -311,6 +416,225 @@ pub async fn set(
         .await?,
     ))
 }
+
+pub async fn set_preload(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((id, skill_id)): Path<(String, String)>,
+    Json(selection): Json<crate::services::agent_skill_preload::Selection>,
+) -> AppResult<Json<skills::SkillsResponse>> {
+    super::login_client_context::require_first_party_human(&auth)?;
+    let actor = auth.user_id.to_string();
+    crate::services::assistant_nyxagent::require_enabled(&state.db, &actor).await?;
+    Ok(Json(
+        crate::services::agent_skill_preload::set(
+            &state.db,
+            &Reader {
+                state: &state,
+                person: &actor,
+                thread_key: None,
+                scopes: None,
+                chat: None,
+            },
+            &actor,
+            &id,
+            &skill_id,
+            &selection,
+        )
+        .await?,
+    ))
+}
+
+/// Transport adapter for automatic reads: retain the live conversation key,
+/// operation restrictions and approval policy used by native skill_read.
+pub(crate) fn preload_context(
+    state: AppState,
+) -> std::sync::Arc<dyn crate::services::agent_skill_preload::ContextProvider> {
+    std::sync::Arc::new(PreloadContext(state))
+}
+
+struct PreloadContext(AppState);
+
+#[async_trait::async_trait]
+impl crate::services::agent_skill_preload::ContextProvider for PreloadContext {
+    async fn prepare(
+        &self,
+        row: &crate::models::assistant_conversation::AssistantConversation,
+        agent: &crate::models::assistant_agent::AssistantAgent,
+    ) -> AppResult<String> {
+        preload_for_turn(&self.0, row, agent).await
+    }
+}
+
+pub(crate) async fn preload_for_turn(
+    state: &AppState,
+    row: &crate::models::assistant_conversation::AssistantConversation,
+    agent: &crate::models::assistant_agent::AssistantAgent,
+) -> AppResult<String> {
+    if !crate::services::agent_skill_preload::enabled(agent, row.guest_turn) {
+        return Ok(String::new());
+    }
+    let chat = acks::for_key(&state.db, &row.user_id, Some(&row.credential_api_key_id))
+        .await?
+        .filter(|chat| {
+            chat.turn_live
+                && !chat.turn_stopped
+                && !chat.guest
+                && chat.agent_id == agent.id
+                && chat.conversation_id == row.id
+                && chat.turn_id.as_deref()
+                    == row.active_turn.as_ref().map(|turn| turn.turn_id.as_str())
+        })
+        .ok_or_else(|| {
+            AppError::Forbidden("Live owner turn required for skill preloading".into())
+        })?;
+    Ok(crate::services::agent_skill_preload::instructions(
+        &Reader {
+            state,
+            person: &row.user_id,
+            thread_key: Some(&row.credential_api_key_id),
+            scopes: Some(&agent.operation_scopes),
+            chat: Some(std::sync::Arc::new(chat)),
+        },
+        agent,
+        row.guest_turn,
+    )
+    .await)
+}
+
+/// The result of testing one attached pin the way its agent reads it.
+#[derive(Debug, Serialize)]
+pub struct SkillTestResponse {
+    pub skill_id: String,
+    pub name: String,
+    pub version: String,
+    pub sha256: String,
+    pub disabled: bool,
+    pub description: String,
+    pub size_bytes: usize,
+    /// Whether the agent can read this pin now (false while disabled).
+    pub readable: bool,
+    /// The start of SKILL.md as the agent reads it.
+    pub excerpt: String,
+}
+
+const TEST_EXCERPT_CHARS: usize = 2_000;
+
+/// Test an attached skill: verify the exact pinned version in Ornn, then read
+/// its SKILL.md through the same reader the agent's `nyxid__skill_read` uses.
+pub async fn preview_attached(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((id, skill_id)): Path<(String, String)>,
+) -> AppResult<Json<SkillTestResponse>> {
+    super::login_client_context::require_first_party_human(&auth)?;
+    let owner = auth.user_id.to_string();
+    crate::services::assistant_nyxagent::require_enabled(&state.db, &owner).await?;
+    let agent = team::agent(&state.db, &owner, &id).await?;
+    let pin = agent
+        .skills
+        .iter()
+        .find(|s| s.skill_id == skill_id)
+        .cloned()
+        .ok_or_else(|| AppError::NotFound("Attached skill not found".into()))?;
+    let reader = Reader {
+        state: &state,
+        person: &owner,
+        thread_key: None,
+        scopes: None,
+        chat: None,
+    };
+    let preview = skills::preview(&reader, &pin.skill_id, &pin.version).await?;
+    if preview.reference.sha256 != pin.sha256 {
+        return Err(AppError::Conflict(
+            "Ornn now serves different content for this pinned version; reattach the skill".into(),
+        ));
+    }
+    let (readable, excerpt) = if pin.disabled {
+        (false, String::new())
+    } else {
+        let page = skills::read(&reader, &agent, &pin.skill_id, None, "SKILL.md", 0).await?;
+        let text: String = page["content"]
+            .as_str()
+            .unwrap_or_default()
+            .chars()
+            .take(TEST_EXCERPT_CHARS)
+            .collect();
+        (true, text)
+    };
+    Ok(Json(SkillTestResponse {
+        skill_id: pin.skill_id,
+        name: pin.name,
+        version: pin.version,
+        sha256: pin.sha256,
+        disabled: pin.disabled,
+        description: preview.description,
+        size_bytes: preview.size_bytes,
+        readable,
+        excerpt,
+    }))
+}
+
+pub async fn history(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<String>,
+) -> AppResult<Json<skills::HistoryResponse>> {
+    super::login_client_context::require_first_party_human(&auth)?;
+    let owner = auth.user_id.to_string();
+    crate::services::assistant_nyxagent::require_enabled(&state.db, &owner).await?;
+    let agent = team::agent(&state.db, &owner, &id).await?;
+    Ok(Json(skills::history(&state.db, &agent).await?))
+}
+
+#[derive(Debug, Serialize)]
+pub struct ImproveResponse {
+    pub proposal_id: String,
+    pub acknowledgement_id: String,
+}
+
+/// "Edit" an attached skill: start an authored improve draft from its exact
+/// pinned package. The owner edits it in the learning panel and publishes it
+/// from the review card raised in NyxBot's home thread.
+pub async fn improve(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((id, skill_id)): Path<(String, String)>,
+) -> AppResult<(axum::http::StatusCode, Json<ImproveResponse>)> {
+    super::login_client_context::require_first_party_human(&auth)?;
+    let owner = auth.user_id.to_string();
+    crate::services::assistant_nyxagent::require_enabled(&state.db, &owner).await?;
+    // Refuse readers who cannot maintain the agent before touching any thread.
+    team::maintained_agent(&state.db, &owner, &id).await?;
+    let chat = super::assistant_agent_learning::owner_chat(&state, &owner).await?;
+    let reader = Reader {
+        state: &state,
+        person: &owner,
+        thread_key: Some(&chat.api_key_id),
+        scopes: None,
+        chat: Some(std::sync::Arc::new(chat.clone())),
+    };
+    let validator = Reader {
+        state: &state,
+        person: &owner,
+        thread_key: None,
+        scopes: None,
+        chat: None,
+    };
+    let result = crate::services::assistant_skill_authoring::create_improve_draft(
+        &state, &chat, &id, &skill_id, &reader, &validator,
+    )
+    .await?;
+    let text = |key: &str| result[key].as_str().unwrap_or_default().to_owned();
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(ImproveResponse {
+            proposal_id: text("proposal_id"),
+            acknowledgement_id: text("acknowledgement_id"),
+        }),
+    ))
+}
+
 fn arg<'a>(args: &'a Value, key: &str) -> &'a str {
     args[key].as_str().unwrap_or_default()
 }
@@ -336,39 +660,48 @@ pub(crate) async fn dispatch(
         ));
     }
     if name == "draft_agent_skill" {
-        let input = crate::services::assistant_skill_authoring::parse_input(args)?;
-        return Ok((
-            Box::pin(crate::services::assistant_skill_authoring::create(
-                state, chat, input,
-            ))
-            .await?,
-            true,
-        ));
+        use crate::services::assistant_skill_authoring as authoring;
+        let reader = Reader {
+            state,
+            person: &chat.user_id,
+            thread_key: Some(&chat.api_key_id),
+            scopes: None,
+            chat: Some(std::sync::Arc::new(chat.clone())),
+        };
+        let input = authoring::parse_input(args)?;
+        // The pre-review format check is the agent's own Ornn request, so it
+        // keeps the thread key's approval policy, turn fence and attribution.
+        let result = Box::pin(authoring::create(state, chat, input, &reader, &reader)).await?;
+        let asks = result["error"] == "acknowledgement_required";
+        return Ok((result, asks));
     }
+    // Ornn reads run as the thread key, so they keep its agent's operation scopes.
+    let thread_scopes = team::agent(&state.db, &chat.user_id, &chat.agent_id)
+        .await?
+        .operation_scopes;
     let reader = Reader {
         state,
         person: &chat.user_id,
         thread_key: Some(&chat.api_key_id),
-        scopes: None,
+        scopes: Some(&thread_scopes),
         chat: Some(std::sync::Arc::new(chat.clone())),
     };
     let db = &state.db;
     let value = match name {
         "learning_status" | "learning_list_proposals" | "learning_run_now" => {
             let target = args["agent"].as_str().unwrap_or("nyxbot");
-            let agent =
-                super::assistant_team::target_agent(state, &chat.user_id, Some(target)).await?;
+            let agent = if uuid::Uuid::parse_str(target).is_ok() {
+                team::maintained_agent(db, &chat.user_id, target).await?
+            } else {
+                super::assistant_team::target_agent(state, &chat.user_id, Some(target)).await?
+            };
             crate::services::org_agent_service::require_maintain(db, &chat.user_id, &agent).await?;
-            crate::services::feature_flag_service::personal_flag_enabled(
-                db,
-                &chat.user_id,
-                crate::services::assistant_agent_learning::FLAG_KEY,
-            )
-            .await?
-            .then_some(())
-            .ok_or_else(|| {
-                AppError::ValidationError("Automatic agent learning is not enabled yet".into())
-            })?;
+            crate::services::assistant_skill_authoring::enabled(db, &chat.user_id)
+                .await?
+                .then_some(())
+                .ok_or_else(|| {
+                    AppError::ValidationError("Automatic agent learning is not enabled yet".into())
+                })?;
             match name {
                 "learning_status" => json!(
                     crate::services::assistant_agent_learning_review::status(
@@ -437,7 +770,7 @@ pub(crate) async fn dispatch(
             };
             if !chat.is_orchestrator() && (agent.id != chat.agent_id || name == "set_agent_skills")
             {
-                return Err(AppError::Forbidden("Specialists may read or request only their own skills; only NyxBot manages skills".into()));
+                return Err(AppError::Forbidden("Specialists may read or request only their own skills; skills are managed for them".into()));
             }
             if name == "get_agent_skills" {
                 return Ok((json!(skills::SkillsResponse::from(agent)), false));
@@ -455,14 +788,23 @@ pub(crate) async fn dispatch(
                     "NyxBot manages skills with set_agent_skills".into(),
                 ));
             }
+            if name == "request_agent_skills"
+                && args.get("skill").is_some()
+                && args.get("selection").is_some()
+            {
+                return Err(AppError::ValidationError(
+                    "Request a skill or a pinned selection, not both".into(),
+                ));
+            }
+            if name == "request_agent_skills" && !chat.involved() {
+                return missing_skill(db, chat, &agent, args).await;
+            }
             if name == "request_agent_skills" && args.get("skill").is_some() {
-                if args.get("selection").is_some() {
-                    return Err(AppError::ValidationError(
-                        "Request a skill or a pinned selection, not both".into(),
-                    ));
+                if let Some(result) = acks::allowed_skill_request(db, chat, args).await? {
+                    return Ok((result, false));
                 }
                 let summary = format!(
-                    "Skill {} version {} for agent {}. NyxBot must resolve and preview exact pins before requesting the owner's attachment card.",
+                    "Skill {} version {} for agent {}. Exact pins are resolved and previewed before attaching under the governing permission mode.",
                     arg(args, "skill"),
                     args["version"]
                         .as_str()
@@ -482,6 +824,9 @@ pub(crate) async fn dispatch(
                     },
                 ))
                 .await?;
+                if card.status == "allowed" {
+                    return Ok((acks::allowed_skill_result(&card), false));
+                }
                 if created {
                     Box::pin(super::assistant_team::permission_requested(
                         state, chat, &card,
@@ -497,6 +842,12 @@ pub(crate) async fn dispatch(
             let selection: skills::Selection = serde_json::from_value(args["selection"].clone())
                 .map_err(|_| AppError::ValidationError("Invalid skill selection".into()))?;
             skills::validate(&selection)?;
+            if name == "request_agent_skills"
+                && let Some(result) =
+                    acks::allowed_skill_request(db, chat, &args["selection"]).await?
+            {
+                return Ok((result, false));
+            }
             if agent.skills_revision != selection.expected_revision {
                 return Err(AppError::Conflict(
                     "Skills changed; reload the current revision".into(),
@@ -509,7 +860,12 @@ pub(crate) async fn dispatch(
                 selection
                     .skills
                     .iter()
-                    .map(|s| format!("{} @ {}", s.skill_id, s.version))
+                    .map(|s| format!(
+                        "{} @ {}{}",
+                        s.skill_id,
+                        s.version,
+                        if s.disabled { " (disabled)" } else { "" }
+                    ))
                     .collect::<Vec<_>>()
                     .join(", ")
             );
@@ -527,6 +883,9 @@ pub(crate) async fn dispatch(
                     },
                 ))
                 .await?;
+                if card.status == "allowed" {
+                    return Ok((acks::allowed_skill_result(&card), false));
+                }
                 if created {
                     Box::pin(super::assistant_team::permission_requested(
                         state, chat, &card,
@@ -535,51 +894,189 @@ pub(crate) async fn dispatch(
                 }
                 return Ok((acks::refusal(&card), true));
             }
-            let confirmed = if let Some(id) = args["acknowledgement_id"].as_str() {
-                if !acks::consume_action(db, chat, id, "nyxid__set_agent_skills", args).await? {
-                    return Ok((json!({"error":"acknowledgement_invalid"}), true));
-                }
-                true
-            } else {
-                false
-            };
-            if !confirmed
-                && (skills::needs_confirmation(&agent, &selection)
-                    || acks::webhook_confirmation_required(chat, false, false))
+            match Box::pin(skills::set_for_chat(
+                db, &reader, chat, &agent, &selection, args, &summary,
+            ))
+            .await?
             {
-                return super::assistant_team::operation_owner_card(
-                    db,
-                    chat,
-                    "nyxid__set_agent_skills",
-                    args,
-                    &summary,
-                )
-                .await;
+                Ok(updated) => json!(updated),
+                Err(refusal) => return Ok((refusal, true)),
             }
-            json!(
-                Box::pin(skills::set(
-                    db,
-                    &reader,
-                    &chat.user_id,
-                    &agent.id,
-                    &selection,
-                    confirmed
-                ))
-                .await?
-            )
         }
     };
     Ok((value, false))
 }
 
+async fn missing_skill(
+    db: &mongodb::Database,
+    chat: &ChatAuthority,
+    agent: &crate::models::assistant_agent::AssistantAgent,
+    args: &Value,
+) -> AppResult<(Value, bool)> {
+    use crate::services::assistant_access_policy as policy;
+    let (label, attached) = if let Some(skill) = args["skill"].as_str() {
+        let version = args["version"].as_str();
+        let attached = agent.skills.iter().any(|pin| {
+            (pin.skill_id == skill || pin.name == skill)
+                && version.is_none_or(|version| pin.version == version)
+        });
+        (skill.to_owned(), attached)
+    } else {
+        let selection: Result<skills::Selection, _> =
+            serde_json::from_value(args["selection"].clone());
+        match selection {
+            Ok(selection) => {
+                let attached = !selection.skills.is_empty()
+                    && selection.skills.iter().all(|wanted| {
+                        agent.skills.iter().any(|pin| {
+                            pin.skill_id == wanted.skill_id && pin.version == wanted.version
+                        })
+                    });
+                let label = selection
+                    .skills
+                    .iter()
+                    .map(|pin| pin.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                (label, attached)
+            }
+            Err(_) => {
+                return Err(AppError::ValidationError("Invalid skill selection".into()));
+            }
+        }
+    };
+    if attached {
+        return Ok((
+            json!({
+                "status": "already_attached",
+                "skill": label,
+                "request_created": false,
+                "instructions": format!(
+                    "The skill {} is already attached to you: read it with nyxid__skill_read and use it. No request was created.",
+                    crate::services::assistant_nyxagent::identifier(&label)
+                ),
+            }),
+            false,
+        ));
+    }
+    acks::audit_missing_access(db, chat, None, policy::AccessArea::Skills.scope()).await;
+    Ok((
+        policy::missing_access(
+            policy::AccessArea::Skills,
+            Some(&label),
+            &agent.id,
+            Some("not_attached"),
+        ),
+        true,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raw_skill_publication_matches_only_content_writes() {
+        use http::Method;
+        for (verb, path, expected) in [
+            (Method::POST, "/api/v1/skills", true),
+            (Method::POST, "api/v1/skills/?skip_validation=true", true),
+            (Method::POST, "/api/v1/skills/pull", true),
+            (
+                Method::PUT,
+                "/api/v1/skills/0c263626-03ee-4937-a3b5-aace86e15b30",
+                true,
+            ),
+            (
+                Method::GET,
+                "/api/v1/skills/0c263626-03ee-4937-a3b5-aace86e15b30",
+                false,
+            ),
+            (Method::POST, "/api/v1/skill-format/validate", false),
+            (Method::GET, "/api/v1/skill-search", false),
+            (Method::PUT, "/api/v1/skills/x/permissions", false),
+            (Method::PUT, "/api/v1/skills/pull", false),
+            (Method::POST, "/api/v1/skills/abc/refresh", true),
+            (Method::PUT, "/api/v1/skills/abc/source", true),
+            (Method::GET, "/api/v1/skills/abc/source", false),
+        ] {
+            assert_eq!(
+                raw_skill_publication(&verb, path),
+                expected,
+                "{verb} {path}"
+            );
+        }
+    }
     use crate::services::{
         agent_skill_service::OrnnReader, assistant_authority_tests::orchestrator_fixture,
     };
     use mongodb::bson::doc;
     use wiremock::{Mock, MockServer, ResponseTemplate, matchers::path};
+
+    fn authority(
+        role: crate::models::assistant_conversation::AgentRole,
+        guest: bool,
+    ) -> ChatAuthority {
+        ChatAuthority {
+            channel_adapter_origin: None,
+            invocation_controlled: false,
+            invocation_id: None,
+            platform_thread: false,
+            platform_origin: None,
+            report_to: None,
+            with_nyxbot: false,
+            org_agent_access: None,
+            turn_id: None,
+            turn_stopped: false,
+            turn_live: true,
+            machine_node_ids: vec![],
+            saved_login_ids: vec![],
+            conversation_id: "c".into(),
+            user_id: "u".into(),
+            api_key_id: "k".into(),
+            role,
+            agent_id: "a".into(),
+            agent_name: "a".into(),
+            guest,
+            confirmation_policy: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn guest_skill_mutation_is_denied_before_state_access() {
+        let f = orchestrator_fixture("guest_skill_mutation").await;
+        let err = super::dispatch(
+            &f.state,
+            &authority(
+                crate::models::assistant_conversation::AgentRole::Orchestrator,
+                true,
+            ),
+            "set_agent_skills",
+            &json!({}),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("owner turns"));
+        f.state.db.drop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn specialist_learning_mutation_is_denied() {
+        let f = orchestrator_fixture("specialist_learning_mutation").await;
+        let err = super::dispatch(
+            &f.state,
+            &authority(
+                crate::models::assistant_conversation::AgentRole::Subagent,
+                false,
+            ),
+            "learning_run_now",
+            &json!({}),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("managed"));
+        f.state.db.drop().await.unwrap();
+    }
 
     #[tokio::test]
     async fn agent_skills_ornn_requires_live_person_identity_and_refuses_master_credentials() {
@@ -645,6 +1142,21 @@ mod tests {
             .unwrap();
         collection.update_one(doc!{"_id":&service.id},doc!{"$set":{"identity_propagation_mode":"jwt","auth_method":"bearer","service_category":"internal","credential_encrypted":mongodb::bson::Binary{subtype:mongodb::bson::spec::BinarySubtype::Generic,bytes:encrypted}}}).await.unwrap();
         assert!(skills::search(&reader, "private", 1).await.is_err());
+        assert!(matches!(
+            reader
+                .classified(
+                    http::Method::GET,
+                    "/api/v1/skill-search?scope=private&mode=keyword&pageSize=1&page=1&q=private",
+                    vec![]
+                )
+                .await,
+            OrnnOutcome::ProxyError
+        ));
+        assert!(matches!(
+            reader.get("/api/v1/skill-search?scope=private&mode=keyword&pageSize=1&page=1&q=private").await,
+            Err(AppError::Forbidden(message))
+                if message == "Skill unavailable through your Ornn access; check the connection and retry"
+        ));
         assert_eq!(upstream.received_requests().await.unwrap().len(), 1);
         // Missing principal must never become an anonymous Ornn request.
         collection
@@ -667,6 +1179,19 @@ mod tests {
             .await
             .is_err()
         );
+        // Owner identity errors keep their own status, as before classification.
+        assert!(matches!(
+            Reader {
+                state: &f.state,
+                person: "not-a-person-id",
+                thread_key: None,
+                scopes: None,
+                chat: None,
+            }
+            .get("/api/v1/skill-search")
+            .await,
+            Err(AppError::NotFound(message)) if message == "Conversation not found"
+        ));
         assert_eq!(upstream.received_requests().await.unwrap().len(), 1);
         // Ornn visibility refusal is preserved without returning upstream bodies.
         upstream.reset().await;
@@ -679,6 +1204,80 @@ mod tests {
                 .await
                 .is_err()
         );
+        assert!(matches!(
+            reader
+                .classified(
+                    http::Method::GET,
+                    "/api/v1/skills/128393f3-d528-4ce2-b197-f1b13cb8fd5b?version=1.0",
+                    vec![]
+                )
+                .await,
+            OrnnOutcome::Response { status: 404, .. }
+        ));
+        let not_visible = |result: AppResult<Vec<u8>>| {
+            matches!(result, Err(AppError::Forbidden(message))
+                if message == "Skill unavailable or not visible through your Ornn access")
+        };
+        let version = "/api/v1/skills/128393f3-d528-4ce2-b197-f1b13cb8fd5b?version=1.0";
+        assert!(not_visible(reader.get(version).await));
+        assert!(matches!(
+            reader
+                .classified(
+                    http::Method::DELETE,
+                    "/api/v1/skills/128393f3-d528-4ce2-b197-f1b13cb8fd5b",
+                    vec![]
+                )
+                .await,
+            OrnnOutcome::LocalRefusal(OrnnLocalRefusal::OperationNotAllowed)
+        ));
+        assert!(matches!(
+            reader
+                .request(
+                    http::Method::DELETE,
+                    "/api/v1/skills/128393f3-d528-4ce2-b197-f1b13cb8fd5b",
+                    vec![]
+                )
+                .await,
+            Err(AppError::Forbidden(message))
+                if message == "This Ornn operation is not available to agent learning"
+        ));
+        // Every non-2xx keeps the visibility refusal, including server errors
+        // and oversized problem bodies; publication still sees the status.
+        for response in [
+            ResponseTemplate::new(500),
+            ResponseTemplate::new(400).set_body_string("private detail".repeat(2000)),
+        ] {
+            upstream.reset().await;
+            Mock::given(path("/api/v1/skills/128393f3-d528-4ce2-b197-f1b13cb8fd5b"))
+                .respond_with(response)
+                .mount(&upstream)
+                .await;
+            assert!(matches!(
+                reader.classified(http::Method::GET, version, vec![]).await,
+                OrnnOutcome::Response {
+                    status: 400 | 500,
+                    code: OrnnCode::Unknown,
+                    ..
+                }
+            ));
+            assert!(not_visible(reader.get(version).await));
+        }
+        upstream.reset().await;
+        Mock::given(path("/api/v1/skills/128393f3-d528-4ce2-b197-f1b13cb8fd5b"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_bytes(vec![b'a'; skills::MAX_ARCHIVE + 1]),
+            )
+            .mount(&upstream)
+            .await;
+        assert!(matches!(
+            reader.classified(http::Method::GET, version, vec![]).await,
+            OrnnOutcome::Interrupted
+        ));
+        assert!(matches!(
+            reader.get(version).await,
+            Err(AppError::ValidationError(message))
+                if message == "Ornn response exceeded the skill size limit or was interrupted"
+        ));
         // Native reads retain runtime approvals; browser preview remains an
         // explicit human read. No upstream bytes flow before the owner decides.
         upstream.reset().await;
@@ -758,6 +1357,72 @@ mod tests {
         assert_eq!(pending.get_str("requester_type").unwrap(), "api_key");
         assert_eq!(upstream.received_requests().await.unwrap().len(), before);
         drop(task);
+        let mut live_chat = f.chat.clone();
+        live_chat.turn_id = Some(uuid::Uuid::new_v4().to_string());
+        let state = f.state.clone();
+        let owner = f.owner.clone();
+        let key = f.chat.api_key_id.clone();
+        let live = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
+            skills::search(
+                &Reader {
+                    state: &state,
+                    person: &owner,
+                    thread_key: Some(&key),
+                    scopes: None,
+                    chat: Some(std::sync::Arc::new(live_chat)),
+                },
+                "snapshot",
+                1,
+            )
+            .await
+        }));
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let count = f
+                    .state
+                    .db
+                    .collection::<mongodb::bson::Document>(
+                        crate::models::approval_request::COLLECTION_NAME,
+                    )
+                    .count_documents(
+                        doc! {"user_id": &f.owner, "service_id": &service.id, "status": "pending"},
+                    )
+                    .await
+                    .unwrap();
+                if count >= 2 {
+                    break;
+                }
+                assert!(
+                    !live.is_finished(),
+                    "Live agent read stopped waiting for approval"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("live agent approval request");
+        assert!(!live.is_finished());
+        drop(live);
+        assert_eq!(upstream.received_requests().await.unwrap().len(), before);
+        collection
+            .delete_one(doc! {"_id":&service.id})
+            .await
+            .unwrap();
+        assert!(matches!(
+            reader
+                .classified(
+                    http::Method::GET,
+                    "/api/v1/skill-search?scope=private&mode=keyword&pageSize=1&page=1&q=private",
+                    vec![]
+                )
+                .await,
+            OrnnOutcome::LocalRefusal(OrnnLocalRefusal::ServiceUnavailable)
+        ));
+        assert!(matches!(
+            reader.get("/api/v1/skill-search").await,
+            Err(AppError::Forbidden(message))
+                if message == "Ornn is unavailable; connect your Ornn access and retry"
+        ));
         f.state.db.drop().await.unwrap();
     }
 }

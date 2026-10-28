@@ -1,3 +1,4 @@
+import { useConnectionDown } from "@/hooks/use-connection-down";
 import { useState, useSyncExternalStore, type ComponentProps } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
@@ -7,9 +8,10 @@ import {
   type SidebarGroups,
 } from "@/components/assistant/assistant-sidebar";
 import { NewAgentDialog } from "@/components/assistant/nyxbot-agent-forms";
+import { AgentDetailsSheet } from "@/components/assistant/nyxbot-agent-details";
 import { NewGroupDialog } from "@/components/assistant/nyxbot-group-forms";
 import { useFeature } from "@/hooks/use-feature-flag";
-import { useNyxAgentAssistantChat } from "@/hooks/use-assistant-nyxagent";
+import { useNyxAgentThreads } from "@/hooks/use-assistant-nyxagent";
 import { selectedAgentOf, useNyxBotAgents } from "@/hooks/use-nyxbot-agents";
 import { useNyxBotGroups } from "@/hooks/use-nyxbot-groups";
 import { FEATURE_FLAG } from "@/lib/feature-flags";
@@ -21,8 +23,6 @@ import { groupWithDisplayNames } from "@/lib/assistant/nyxbot-labels";
 import { parseAssistantSearch } from "@/lib/assistant/search";
 import { useAuthStore } from "@/stores/auth-store";
 import type { Conversation } from "@/types/assistant";
-
-const noop = () => undefined;
 
 export function AssistantEngineSidebar({
   engine,
@@ -41,27 +41,25 @@ export function AssistantEngineSidebar({
   });
   const directEnabled = useFeature(FEATURE_FLAG.DIRECT_CHAT_ENGINE);
   const nyxagentEnabled = useFeature(FEATURE_FLAG.NYXAGENT_ENGINE);
-  const agents = useNyxBotAgents(nyxagentEnabled);
   const groups = useNyxBotGroups(nyxagentEnabled);
-  const [creatingAgent, setCreatingAgent] = useState(false);
+  const [creatingAgent, setCreatingAgent] = useState<"personal" | "org">();
+  const orgAgentsEnabled = useFeature(FEATURE_FLAG.ORG_AGENTS);
   const [creatingGroup, setCreatingGroup] = useState(false);
+  const [detailsAgentId, setDetailsAgentId] = useState<string>();
   const openThread = search.draft ? undefined : search.c;
   const openGroup = onChatRoute ? search.g : undefined;
   const home = onChatRoute && !search.c && !search.draft && !search.agent && !search.g;
+  const openThreadAgentId = useSyncExternalStore(
+    nyxAgentTransport.subscribe,
+    () => nyxAgentTransport.getConversation(openThread)?.agent?.id,
+  );
+  const agents = useNyxBotAgents(nyxagentEnabled);
   // An open group expands no agent; otherwise the open thread's agent, the
   // agent in the URL, or NyxBot.
   const selectedAgent = openGroup
     ? undefined
-    : selectedAgentOf(
-        agents.data?.agents,
-        nyxAgentTransport.getConversation(openThread)?.agent?.id,
-        search.agent,
-      );
-  const nyx = useNyxAgentAssistantChat({
-    enabled: nyxagentEnabled,
-    onConversationAdopted: noop,
-    threadsAgentId: selectedAgent?.id,
-  });
+    : selectedAgentOf(agents.data?.agents, openThreadAgentId, search.agent);
+  const nyx = useNyxAgentThreads({ agentId: selectedAgent?.id, enabled: nyxagentEnabled });
   const actorKey = ["assistant", "actor", userId, "sidebar"];
   // The earlier engines' chats are not listed in NyxAgent mode, so they are
   // not fetched either.
@@ -120,7 +118,9 @@ export function AssistantEngineSidebar({
         // An agent lands on its latest thread (or a new one when it has none).
         onSelectAgent: (agentId) => goTo({ agent: agentId }),
         onNewThread: (agentId) => goTo({ draft: true, agent: agentId }),
-        onNewAgent: () => setCreatingAgent(true),
+        onAgentDetails: setDetailsAgentId,
+        onNewAgent: setCreatingAgent,
+        canCreateOrgAgent: orgAgentsEnabled,
         homeActive: home,
         onHome: () => goTo({}),
       }
@@ -137,11 +137,20 @@ export function AssistantEngineSidebar({
         onNewGroup: () => setCreatingGroup(true),
       }
     : undefined;
-  const loadError = agents.error
-    ? `Could not load agents. ${agents.error.message}`
-    : groups.error
-      ? `Could not load groups. ${groups.error.message}`
-      : undefined;
+  // Offline, the window's banner says it once; the lists refresh when the
+  // connection returns. A dropped connection is not a sent message here.
+  const online = !useConnectionDown();
+  const loadFailure = (what: string, error: Error) =>
+    error.message.startsWith("Connection interrupted")
+      ? `Could not load ${what}. Check your connection; they reload when it's back.`
+      : `Could not load ${what}. ${error.message}`;
+  const loadError = !online
+    ? undefined
+    : agents.error
+      ? loadFailure("agents", agents.error)
+      : groups.error
+        ? loadFailure("crews", groups.error)
+        : undefined;
 
   return (
     <>
@@ -153,10 +162,10 @@ export function AssistantEngineSidebar({
         conversations={[...rows.values()].sort((a, b) =>
           b.last_message_at.localeCompare(a.last_message_at),
         )}
-        onRename={nyx.renameConversation}
+        onRename={(id, title) => nyxAgentTransport.rename(id, title)}
         onDelete={async (id) => {
           if (isNyxAgentConversationId(id)) {
-            await nyx.deleteConversation(id);
+            await nyxAgentTransport.delete(id);
           } else if (isDirectConversationId(id)) {
             if (rows.get(id)?.active_turn) return;
             await directAssistantTransport.deleteConversation(id);
@@ -183,13 +192,26 @@ export function AssistantEngineSidebar({
       ) : null}
       {creatingAgent ? (
         <NewAgentDialog
-          onClose={() => setCreatingAgent(false)}
+          owner={creatingAgent}
+          onClose={() => setCreatingAgent(undefined)}
           onCreated={(created) => {
-            setCreatingAgent(false);
+            setCreatingAgent(undefined);
             goTo({ c: created.home_conversation_id });
           }}
         />
       ) : null}
+      <AgentDetailsSheet
+        agentId={detailsAgentId}
+        agents={agents.data?.agents ?? []}
+        open={detailsAgentId !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setDetailsAgentId(undefined);
+        }}
+        onDeleted={() => {
+          setDetailsAgentId(undefined);
+          goTo({});
+        }}
+      />
     </>
   );
 }

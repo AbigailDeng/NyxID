@@ -20,6 +20,13 @@ struct EntitledLago;
 
 #[async_trait::async_trait]
 impl LagoApi for EntitledLago {
+    async fn tax_config(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> crate::errors::AppResult<crate::services::billing::lago_client::LagoTaxConfig> {
+        Ok(crate::services::billing::taxes::zero_config())
+    }
     async fn ensure_customer(&self, input: &OwnerProvisionInput) -> AppResult<String> {
         Ok(input.external_customer_id.clone())
     }
@@ -105,6 +112,7 @@ async fn billed_fixture(label: &str, first_response: ResponseTemplate) -> Billed
         sync_status: PricingSyncStatus::Synced,
         sync_error: None,
         components: vec![],
+        operations: vec![],
     };
     catalog.billing = Some(ServiceBilling {
         byok_pricing: Some(lane("platform_svc_pool-review-api_byok")),
@@ -193,7 +201,11 @@ async fn billed_fixture(label: &str, first_response: ResponseTemplate) -> Billed
 }
 
 async fn settled_rows(fixture: &BilledFixture, expected: usize) -> Vec<UsageMeterRow> {
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+    // Release follows the attempt's own deadline (up to 20 s overall in these
+    // fixtures) plus MongoDB settlement. Observe for longer than that budget so
+    // a loaded four-slot CI runner cannot turn a correct release into a timeout;
+    // the assertions on what was released are unchanged.
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
             let rows: Vec<UsageMeterRow> = fixture
                 .proxy
@@ -524,10 +536,15 @@ async fn pool_proxy_billing_releases_proven_unsent_hold_before_byok_admission() 
 
 #[tokio::test]
 async fn pool_proxy_billing_unknown_timeout_releases_hold_without_inventing_usage() {
+    // Admission shares the attempt deadline. A one-second budget can expire
+    // during real MongoDB admission under parallel fixture/index creation,
+    // exercising proven-unsent behavior instead of the post-dispatch timeout
+    // this test must cover. Keep the vendor slower than a generous admission
+    // and attempt budget; assertions below still require actual dispatch.
     let fixture = billed_fixture(
         "pool_billing_unknown",
         ResponseTemplate::new(200)
-            .set_delay(std::time::Duration::from_secs(3))
+            .set_delay(std::time::Duration::from_secs(30))
             .set_body_json(json!({"usage": {"total_tokens": 1}})),
     )
     .await;
@@ -539,8 +556,8 @@ async fn pool_proxy_billing_unknown_timeout_releases_hold_without_inventing_usag
         .update_one(
             doc! { "_id": &fixture.proxy.pool_id },
             doc! { "$set": {
-                "failover.retry_on": ["timeout"], "failover.per_attempt_timeout_ms": 1_000,
-                "failover.overall_deadline_ms": 2_000,
+                "failover.retry_on": ["timeout"], "failover.per_attempt_timeout_ms": 10_000,
+                "failover.overall_deadline_ms": 20_000,
             } },
         )
         .await
@@ -549,8 +566,19 @@ async fn pool_proxy_billing_unknown_timeout_releases_hold_without_inventing_usag
         Ok(response) => response,
         Err(error) => error.into_response(),
     };
-    assert!(response.status().is_server_error());
-    assert_eq!(fixture.first.received_requests().await.unwrap().len(), 1);
+    let status = response.status();
+    assert!(status.is_server_error());
+    let body = axum::body::to_bytes(response.into_body(), 8192)
+        .await
+        .unwrap();
+    let error_code =
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap_or_default()["error_code"]
+            .clone();
+    assert_eq!(
+        fixture.first.received_requests().await.unwrap().len(),
+        1,
+        "must exercise a dispatched timeout; status={status}, error_code={error_code}"
+    );
     assert!(fixture.second.received_requests().await.unwrap().is_empty());
     let rows = settled_rows(&fixture, 1).await;
     assert!(
@@ -640,7 +668,10 @@ async fn pool_proxy_paused_consumer_renews_lease_and_lease_loss_closes_provider(
     let initial = rows.find_one(doc! {}).await.unwrap().unwrap();
     assert!(!initial.released);
     let initial_lease = initial.pool_attempt.as_ref().unwrap().lease_until;
-    tokio::time::timeout(std::time::Duration::from_secs(14), async {
+    // The heartbeat renews every 10 s. Observe two full intervals plus margin,
+    // because a loaded CI runner can delay one tick past a single interval
+    // without the renewal ever stopping. The renewal itself is still required.
+    tokio::time::timeout(std::time::Duration::from_secs(25), async {
         loop {
             let current = rows
                 .find_one(doc! { "_id": &initial.id })
@@ -723,4 +754,111 @@ async fn pool_proxy_paused_consumer_renews_lease_and_lease_loss_closes_provider(
     );
     drop(response);
     db.drop().await.unwrap();
+}
+
+#[tokio::test]
+async fn pool_attempts_price_the_matched_operation_on_each_member_lane() {
+    use crate::models::service_billing::OperationPrice;
+    let fixture = billed_fixture(
+        "pool_operation_price",
+        ResponseTemplate::new(429).set_body_json(json!({
+            "error": { "message": "quota exhausted", "type": "rate_limit_error" }
+        })),
+    )
+    .await;
+    let db = &fixture.proxy.state.db;
+    let mut catalog = db
+        .collection::<DownstreamService>("downstream_services")
+        .find_one(doc! { "slug": "pool-review-api" })
+        .await
+        .unwrap()
+        .unwrap();
+    db.collection::<crate::models::service_endpoint::ServiceEndpoint>(
+        crate::models::service_endpoint::COLLECTION_NAME,
+    )
+    .insert_one(crate::test_utils::test_service_endpoint(
+        &catalog.id,
+        "perform",
+        "POST",
+        "/perform",
+    ))
+    .await
+    .unwrap();
+    // The base rate (5) exceeds the one-credit wallet; only the operation
+    // price (1) can admit either attempt.
+    let lane = |suffix: &str| LanePricing {
+        metric: BillingMetric::Requests,
+        credits_per_unit: "5".into(),
+        lago_metric_code: format!("platform_svc_pool-review-api_{suffix}"),
+        sync_status: PricingSyncStatus::Synced,
+        sync_error: None,
+        components: vec![],
+        operations: vec![OperationPrice {
+            operation: "perform".into(),
+            credits_per_unit: "1".into(),
+            lago_metric_code: format!("platform_svc_pool-review-api_{suffix}_op_perform"),
+            sync_status: PricingSyncStatus::Synced,
+            sync_error: None,
+        }],
+    };
+    catalog.billing = Some(ServiceBilling {
+        byok_pricing: Some(lane("byok")),
+        platform_key_pricing: Some(lane("pk")),
+        ..Default::default()
+    });
+    db.collection::<DownstreamService>("downstream_services")
+        .replace_one(doc! { "_id": &catalog.id }, &catalog)
+        .await
+        .unwrap();
+    let now = mongodb::bson::DateTime::now();
+    for suffix in ["byok", "pk"] {
+        let base = format!("platform_svc_pool-review-api_{suffix}");
+        db.collection::<Document>("billing_rate_cache")
+            .update_one(
+                doc! { "_id": format!("{base}:*") },
+                doc! { "$set": { "credits_per_unit_micros": 5_000_000_i64 } },
+            )
+            .await
+            .unwrap();
+        db.collection::<Document>("billing_rate_cache")
+            .insert_one(doc! {
+                "_id": format!("{base}_op_perform:*"), "lago_metric_code": format!("{base}_op_perform"),
+                "credits_per_unit_micros": 1_000_000_i64, "synced_at": now,
+            })
+            .await
+            .unwrap();
+    }
+    let response = call(&fixture.proxy, "{}").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["x-nyxid-pool-attempts"], "2");
+    to_bytes(response.into_body(), 8192).await.unwrap();
+    let rows = settled_rows(&fixture, 2).await;
+    for (class, code) in [
+        (
+            CredentialClass::NyxidManagedMaster,
+            "platform_svc_pool-review-api_pk_op_perform",
+        ),
+        (
+            CredentialClass::UserOwned,
+            "platform_svc_pool-review-api_byok_op_perform",
+        ),
+    ] {
+        let row = rows
+            .iter()
+            .find(|row| row.credential_class == class)
+            .unwrap();
+        assert_eq!(row.lago_metric_code, code);
+        assert_eq!(row.operation.as_deref(), Some("perform"));
+        assert_eq!(row.reserved_credits, Credits::from_whole(1));
+    }
+    let backup = rows
+        .iter()
+        .find(|row| row.credential_class == CredentialClass::UserOwned)
+        .unwrap();
+    assert_eq!(backup.status, UsageStatus::Finalized);
+    assert_eq!(
+        backup.funding.as_ref().unwrap().total_charge,
+        Some(Credits::from_whole(1))
+    );
+    fixture.proxy.state.db.drop().await.unwrap();
 }

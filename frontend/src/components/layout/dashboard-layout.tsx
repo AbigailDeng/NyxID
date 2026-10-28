@@ -1,7 +1,6 @@
 import { Suspense, useState, useEffect, useCallback, useMemo, createContext, useContext } from "react";
 import { Outlet, Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { Sidebar, AssistantNavEntry, APPROVALS_NAV, DEVELOPER_NAV, ADMIN_NAV, getVisibleMainNav, isNavActive } from "@/components/dashboard/sidebar";
-import { canAdminWrite, hasAdminRead } from "@/types/api";
+import { Sidebar, AssistantNavEntry, APPROVALS_NAV, DEVELOPER_NAV, getVisibleAdminNav, getVisibleMainNav, isNavActive } from "@/components/dashboard/sidebar";
 import {
   CommandPalette,
   ALL_ITEMS as SEARCH_ITEMS,
@@ -97,7 +96,7 @@ export function DashboardLayout() {
   // flash the wrong thing.
   const onboarding = useShouldShowOnboarding();
   // Shared channel onboarding must stay reachable through setup and bot routing.
-  const isChannelBotRoute = pathname === "/channel-bots" || pathname.startsWith("/channel-bots/");
+  const isChannelBotRoute = pathname === "/channel-bots" || pathname.startsWith("/channel-bots/") || pathname === "/onboarding/setups" || pathname.startsWith("/onboarding/setups/");
   if (onboarding.status === "loading") return null;
   if (onboarding.status === "show" && !isChannelBotRoute && !(import.meta.env.DEV && import.meta.env.VITE_ROUTING_PREVIEW === "1")) return <OnboardingTakeover />;
 
@@ -125,7 +124,7 @@ export function DashboardLayout() {
           </div>
 
           <main
-            className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain px-4 pt-4 sm:px-6 sm:pt-6 md:px-8 lg:px-10"
+            className="relative flex-1 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain px-4 pt-4 sm:px-6 sm:pt-6 md:px-8 lg:px-10"
             style={{ paddingBottom: "max(2rem, var(--sab))" }}
           >
             <div className="w-full">
@@ -163,6 +162,7 @@ const SECTION_TITLES: Record<string, string> = {
   dashboard: "dashboard",
   billing: "billing & usage",
   keys: "ai services",
+  tools: "tools",
   orgs: "org",
   nodes: "nodes",
   "channel-bots": "channel bots",
@@ -205,7 +205,12 @@ function TopBar({
   }
 
   const ROOT_PATHS = new Set([
-    "/dashboard", "/keys", "/orgs", "/nodes", "/channel-bots",
+    "/dashboard",
+    "/keys",
+    "/tools",
+    "/orgs",
+    "/nodes",
+    "/channel-bots",
     "/settings", "/guide", "/approvals/settings", "/approvals/history",
     "/approvals/grants", "/developer/apps", "/ai-setup", "/integration-guide",
   ]);
@@ -405,9 +410,10 @@ function MobileNav({
   const navigate = useNavigate();
   const logoutMutation = useLogout();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const isAdmin = hasAdminRead(user);
+  // Usage-only role holders (no admin read access) get just the Usage entry.
+  const adminNav = getVisibleAdminNav(user);
   const mainNav = getVisibleMainNav(user);
-  const allItems = [...mainNav, ...APPROVALS_NAV, ...DEVELOPER_NAV, ...(isAdmin ? ADMIN_NAV : [])];
+  const allItems = [...mainNav, ...APPROVALS_NAV, ...DEVELOPER_NAV, ...adminNav];
   const [searchQuery, setSearchQuery] = useState("");
 
   const searchResults = useMemo(() => {
@@ -556,7 +562,7 @@ function MobileNav({
               ))}
             </div>
 
-            {isAdmin && (
+            {(adminNav.length > 0) && (
               <>
                 <div className="px-4 my-3">
                   <span className="text-10 font-medium uppercase tracking-[1.5px] text-text-tertiary">
@@ -564,7 +570,7 @@ function MobileNav({
                   </span>
                 </div>
                 <div className="flex flex-col gap-0.5">
-                  {ADMIN_NAV.filter((item) => !["/admin/platform-credentials", "/admin/upload-retention"].includes(item.to) || canAdminWrite(user)).map((item) => (
+                  {adminNav.map((item) => (
                     <MobileNavItem
                       key={item.to}
                       item={item}

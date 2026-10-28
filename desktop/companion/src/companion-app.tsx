@@ -657,22 +657,27 @@ export function CompanionApp({ runtime: suppliedRuntime }: CompanionAppProps) {
     const id = voiceHistoryId;
     const owner = connectedChatOwnerId;
     const requests = new Set(voiceRequestIds);
+    const settledRequests = new Set<string>();
     // The server may finalize a last utterance during media shutdown.
     let quietUntil = Date.now() + 6000;
+    function discoverRequests(history: NyxIdChatHistory) {
+      for (const entry of history.messages) {
+        if (
+          entry.requestId &&
+          entry.executionPending &&
+          !settledRequests.has(entry.requestId) &&
+          !requests.has(entry.requestId)
+        ) {
+          requests.add(entry.requestId);
+          quietUntil = Date.now() + 6000;
+        }
+      }
+    }
     async function refreshVoiceHistory() {
       try {
-        const history = await runtime.nyxIdChatHistory(id);
+        let history = await runtime.nyxIdChatHistory(id);
         if (!alive || chatOwnerId.current !== owner) return;
-        for (const entry of history.messages) {
-          if (
-            entry.requestId &&
-            entry.executionPending &&
-            !requests.has(entry.requestId)
-          ) {
-            requests.add(entry.requestId);
-            quietUntil = Date.now() + 6000;
-          }
-        }
+        discoverRequests(history);
         const states = await Promise.all(
           [...requests].map((requestId) =>
             runtime.nyxIdVoiceRequest(id, requestId),
@@ -686,18 +691,53 @@ export function CompanionApp({ runtime: suppliedRuntime }: CompanionAppProps) {
         const awaitingPublication = states.some(
           (request) =>
             request.state === "completed" &&
+            !request.result_message_id &&
             !history.messages.some(
               (entry) =>
                 entry.role === "assistant" && entry.turnId === request.turn_id,
             ),
         );
-        setChatMessages(messagesFromHistory(history));
-        setVoicePendingRequestIds(pending.map((request) => request.id));
-        setVoiceWorkPending(
-          pending.length > 0 || awaitingPublication || Date.now() < quietUntil,
-        );
         if (
           pending.length === 0 &&
+          !awaitingPublication &&
+          Date.now() >= quietUntil
+        ) {
+          // Publication may have committed after the first history read. Read
+          // once more before returning control to the composer.
+          history = await runtime.nyxIdChatHistory(id);
+          if (!alive || chatOwnerId.current !== owner) return;
+          discoverRequests(history);
+        }
+        for (const request of states) {
+          if (
+            request.state === "cancelled" ||
+            (request.state === "completed" &&
+              (request.result_message_id ||
+                history.messages.some(
+                  (entry) =>
+                    entry.role === "assistant" &&
+                    entry.turnId === request.turn_id,
+                )))
+          ) {
+            requests.delete(request.id);
+            settledRequests.add(request.id);
+          }
+        }
+        const pendingIds = [
+          ...pending.map((request) => request.id),
+          ...[...requests].filter(
+            (requestId) => !states.some((request) => request.id === requestId),
+          ),
+        ];
+        setChatMessages(messagesFromHistory(history));
+        setVoicePendingRequestIds(pendingIds);
+        setVoiceWorkPending(
+          pendingIds.length > 0 ||
+            awaitingPublication ||
+            Date.now() < quietUntil,
+        );
+        if (
+          pendingIds.length === 0 &&
           !awaitingPublication &&
           Date.now() >= quietUntil
         ) {

@@ -14,11 +14,15 @@ type ExtensibleString<T extends string> = T | (string & Record<never, never>);
 
 export type ChatMessageRole = ExtensibleString<"user" | "assistant">;
 export type ChatMessageStatus = ExtensibleString<
-  "complete" | "streaming" | "error"
+  "complete" | "streaming" | "error" | "stopped"
 >;
 export type StoredChatMessageStatus = ExtensibleString<"complete" | "error">;
 
 export interface ChatMessage {
+  readonly cmaOperations?: readonly import("@/schemas/cma-operation").CmaOperation[];
+  readonly recovery?: import("@/schemas/assistant-nyxagent").NyxAgentHistory["messages"][number]["recovery"];
+  readonly feedback?: { readonly vote: "up" | "down"; readonly comment?: string | null } | null;
+  readonly continuation_of?: string | null;
   readonly steering?: import("@/schemas/assistant-nyxagent").NyxAgentSteering | null;
   readonly artifacts?: ArtifactContentBlock[];
   readonly id: string;
@@ -31,6 +35,17 @@ export interface ChatMessage {
   readonly authorName?: string | null;
   readonly authorizationBlockers?: ChatAuthorizationBlocker[];
   readonly error?: string | null;
+  /** NyxID display metadata; never model-authored reply content. */
+  readonly systemNote?: "capacity_wait";
+  readonly waitingForCapacity?: boolean;
+  /** Waiting for one of the owner's other replies to finish. */
+  readonly queued?: boolean;
+  readonly capacityWaitStartedAt?: string | null;
+  readonly capacityWaitDeadline?: string | null;
+  readonly channelDelivery?: { readonly status: string; readonly heard_prefix_chars?: number | null; readonly heard_prefix_matches_sent: boolean } | null;
+  readonly turnMetadata?: { readonly attempts?: number | null; readonly capacityWaitMs?: number | null } | null;
+  readonly errorDetail?: { readonly failureReason?: import("@/schemas/assistant-nyxagent").NyxAgentFailureReason | null; readonly attempts?: number | null; readonly capacityWaitMs?: number | null; readonly upstreamCode?: string | null; readonly stage: string; readonly httpStatus?: number | null; readonly upstreamRequestId?: string | null; readonly responseId?: string | null; readonly continuations: number; readonly turnId: string; readonly occurredAt?: string } | null;
+  readonly errorCode?: string | null;
   readonly events?: RuntimeEvent[];
   readonly pendingApproval?: RuntimeToolApprovalRequestInfo;
   readonly pendingRunIntervention?: RuntimeRunInterventionInfo;
@@ -41,9 +56,18 @@ export interface ChatMessage {
   readonly images?: readonly ChatImage[];
   /** A user message written in a chat app: its platform. */
   readonly via?: string | null;
+  readonly activityTotal?: number;
+  readonly turnStatus?: import("./turn-status").TurnStatus | null;
+  /** Settled permission decisions and automatic receipts of this reply's turn. */
+  readonly decisions?: readonly import("@/schemas/assistant-nyxagent").NyxAgentAcknowledgement[];
+  /** Who started the turn this message opens (`trigger` for an automation). */
+  readonly origin?: string | null;
+  /** The automation behind an automation-started message. */
+  readonly automation?: { readonly triggerId: string; readonly runId: string; readonly label: string } | null;
 }
 
 export interface ChatImage {
+  readonly origin?: "tool" | "user_upload";
   readonly expired?: boolean;
   readonly imageInput?: "sent" | "unavailable";
   readonly id: string;
