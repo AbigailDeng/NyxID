@@ -6,11 +6,11 @@ import {
 } from "react-native-safe-area-context";
 import {
   CalendarClock,
-  ChartNoAxesCombined,
-  Folder,
   Monitor,
   Plug,
   Search,
+  ScanQrCode,
+  Terminal,
   Settings,
   ShieldCheck,
   SquarePen,
@@ -45,9 +45,7 @@ const destinations = [
   { route: "Automations", label: "Automations", Icon: CalendarClock },
   { route: "Machines", label: "Machines", Icon: Monitor },
   { route: "Plugins", label: "Plugins", Icon: Plug },
-  { label: "Artifacts", Icon: Folder },
-  { route: "Activity", label: "Approvals", Icon: ShieldCheck },
-  { label: "Activity", Icon: ChartNoAxesCombined },
+  { route: "Activity", label: "Activity", Icon: ShieldCheck },
 ] as const;
 
 type Props = {
@@ -56,6 +54,7 @@ type Props = {
   initialFocusRef?: Ref<View>;
   onNavigate: (route: WorkspaceRoute) => void;
   onHome: () => void;
+  onQuickAction: (action: "scanner" | "terminal") => void;
   onBrowse: (route: "WorkspaceSearch" | "WorkspaceRecents") => void;
   currentChat?: WorkspaceChatTarget;
   onOpenChat: (target: WorkspaceChatTarget) => void;
@@ -68,6 +67,7 @@ export function WorkspaceDrawer({
   initialFocusRef,
   onNavigate,
   onHome,
+  onQuickAction,
   onBrowse,
   currentChat,
   onOpenChat,
@@ -157,22 +157,53 @@ export function WorkspaceDrawer({
               accessibilityRole="header"
               style={[styles.section, { color: colors.textPrimary }]}
             >
+              Quick actions
+            </Text>
+            {(
+              [
+                { label: "Scan QR code", Icon: ScanQrCode, action: "scanner" },
+                {
+                  label: "Terminal login code",
+                  Icon: Terminal,
+                  action: "terminal",
+                },
+              ] as const
+            ).map(({ label, Icon, action }) => (
+              <Pressable
+                key={action}
+                accessibilityRole="button"
+                accessibilityLabel={label}
+                onPress={() => onQuickAction(action)}
+                style={({ pressed }) => [
+                  styles.row,
+                  {
+                    backgroundColor: pressed ? colors.navActive : "transparent",
+                  },
+                ]}
+              >
+                <Icon size={20} color={colors.textSecondary} />
+                <Text style={[styles.rowText, { color: colors.textPrimary }]}>
+                  {label}
+                </Text>
+              </Pressable>
+            ))}
+            <Text
+              accessibilityRole="header"
+              style={[styles.section, { color: colors.textPrimary }]}
+            >
               Workspace
             </Text>
             {destinations.map((item) => {
-              const route = "route" in item ? item.route : undefined;
+              const route = item.route;
               const selected = route === currentRoute;
               const Icon = item.Icon;
               return (
                 <Pressable
                   key={item.label}
                   accessibilityRole="button"
-                  accessibilityLabel={`${item.label}${!route ? ", coming soon" : route === "Activity" && count ? `, ${count} pending` : ""}`}
-                  accessibilityState={{ selected, disabled: !route }}
-                  disabled={!route}
-                  onPress={() => {
-                    if (route) onNavigate(route);
-                  }}
+                  accessibilityLabel={`${item.label}${route === "Activity" && count ? `, ${count} pending` : ""}`}
+                  accessibilityState={{ selected }}
+                  onPress={() => onNavigate(route)}
                   style={({ pressed }) => [
                     styles.row,
                     {
@@ -181,24 +212,14 @@ export function WorkspaceDrawer({
                     },
                   ]}
                 >
-                  <Icon
-                    size={20}
-                    color={route ? colors.textSecondary : colors.textMuted}
-                  />
+                  <Icon size={20} color={colors.textSecondary} />
                   <Text
                     numberOfLines={1}
-                    style={[
-                      styles.rowText,
-                      { color: route ? colors.textPrimary : colors.textMuted },
-                    ]}
+                    style={[styles.rowText, { color: colors.textPrimary }]}
                   >
                     {item.label}
                   </Text>
-                  {!route ? (
-                    <Text style={[styles.meta, { color: colors.textMuted }]}>
-                      Soon
-                    </Text>
-                  ) : route === "Activity" && count ? (
+                  {route === "Activity" && count ? (
                     <Text
                       style={[
                         styles.count,
@@ -325,7 +346,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   rowText: { flex: 1, fontFamily: fonts.bodySemi, fontSize: 15 },
-  meta: { fontFamily: fonts.bodyRegular, fontSize: 10 },
   count: {
     fontFamily: fonts.bodySemi,
     fontSize: 11,

@@ -16,7 +16,7 @@ in `navigationHierarchy.ts` and `workspaceChatNavigation.ts`.
 | Tabs / Plugins | Connectors and Skills; existing local overview/advanced/history/skill/version/draft/review subflows stay inside the drawer; ServiceSetup reuses connection setup. |
 | Tabs / Services | Existing connections/catalog and local setup/detail/credential/removal states inside the drawer. |
 | Tabs / Machines | Personal/org Admin inventory and read-only local ceiling/detail; `/assistant/machines?machine={id}` selects local detail; `?tab=logins` selects Saved logins. Cold entry retains Assistant underneath; local Back returns to inventory. Managed/hosted/setup routes hand off to Web. |
-| Tabs / Activity | Approvals/grants/history. Challenge notifications enter this module or its existing detail state through the shared guard/deferred-navigation path. |
+| Tabs / Activity | Activity: Incoming pending requests, then History grouped by local day; Active grants is a secondary page. Challenge notifications enter this module or its existing detail state through the shared guard/deferred-navigation path. |
 | Tabs / AccountSettings | Settings, notifications, appearance, device-local Display, analytics, account actions and legal/security links. |
 | SheetStack / Pages | Retains the seven module routes above. Initial module is Agents. |
 | SheetStack / AgentCreate | Personal specialist form; dirty dismissal confirmation and pending-write guard. |
@@ -32,7 +32,7 @@ in `navigationHierarchy.ts` and `workspaceChatNavigation.ts`.
 | SheetStack / AutomationEditor | Create/edit automation; cold fallback Automations. |
 | SheetStack / AutomationRuns | Existing run history; cold fallback Automations. |
 | SheetStack / AutomationPreferences | Existing preferences; cold fallback Automations. |
-| SheetStack / ActivityDetail | Approval challenge details; cold fallback Approvals. |
+| SheetStack / ActivityDetail | Approval challenge details; cold fallback Activity. |
 | SheetStack / UsageCredits | Read-only Usage & credits from Settings or the side-menu account area. `/assistant?panel=billing&panelPeriod=24h\|7d\|30d` opens this drawer screen; `/account/usage?period=&ownerId=` is the native route. Cold nested Back returns to Settings; Close restores the addressed chat/crew. |
 | SheetStack / AccountSecurity | Existing security/MFA flows; cold fallback Settings. |
 | SheetStack / DeviceLogin | Signed-in QR/device approval; scanner is local state. Verification stays above the keyboard; in-flight writes block dismissal. |
@@ -105,3 +105,7 @@ account-scoped memory; it never moves them into another composer. Every New
 chat starts empty and keeps the selected agent. The home composer sends to a
 new NyxBot conversation. Crew headers have no private New chat control: they
 continue the existing crew conversation with its current recipient semantics.
+
+### Sidebar decisions (2026-10-28)
+
+The base sidebar places Quick actions (Scan QR code, Terminal login code) above Workspace. Workspace contains Automations, Machines, Plugins, Activity with its live pending count, and Create new agent. Disabled coming-soon destinations are removed. Quick actions open the existing guarded account sheets over the expanded sidebar, preserving its offset and scroll position; Settings has account identity and Usage & credits without duplicate quick actions. Root swaps have no native fade or inner animation: the new opaque page lays out and paints before the slab closes once in300ms. The route-table topology above is being migrated to ContentStack as described in STREAM_A.

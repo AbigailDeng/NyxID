@@ -70,6 +70,7 @@ import {
 } from "./linking";
 import {
   isWorkspaceSidebarRoot,
+  openWorkspaceSheetAction,
   workspaceDestinationMatches,
   workspaceContentIdentity,
   challengeNavigationAction,
@@ -517,6 +518,8 @@ function ThemedAppShell({
     useRef<ReturnType<typeof workspaceFocus.capture>>(undefined);
   const pendingDrawerNavigation = useRef<NavigationAction | null>(null);
   const didNavigate = useRef(false);
+  const awaitingPaint = useRef<string | null>(null);
+  const paintedPage = useRef<string | null>(null);
   const priorSheet = useRef<{ open: boolean; content: string }>({
     open: false,
     content: "",
@@ -537,7 +540,8 @@ function ThemedAppShell({
         content !== priorSheet.current.content)
     ) {
       didNavigate.current = true;
-      setDrawerOpen(false);
+      awaitingPaint.current = content;
+      if (paintedPage.current === content) setDrawerOpen(false);
     }
     priorSheet.current = { open: next.sheetOpen, content };
     workspaceFocus.context(next.primaryKey, next.sheetOpen);
@@ -548,6 +552,8 @@ function ThemedAppShell({
   useEffect(() => {
     if (!isAuthenticated) {
       pendingDrawerNavigation.current = null;
+      awaitingPaint.current = null;
+      paintedPage.current = null;
       didNavigate.current = false;
       drawerOrigin.current = undefined;
       pendingMenuFocus.current = undefined;
@@ -581,6 +587,7 @@ function ThemedAppShell({
   };
   const onDrawerDismiss = useCallback(() => {
     pendingDrawerNavigation.current = null;
+    awaitingPaint.current = null;
     pendingMenuFocus.current = didNavigate.current
       ? undefined
       : drawerOrigin.current;
@@ -676,6 +683,16 @@ function ThemedAppShell({
             }}
             onNavigate={navigateFromDrawer}
             onHome={() => navigateFromDrawer("Assistant")}
+            onQuickAction={(action) => {
+              if (!authenticatedNow.current || !navigationRef.isReady()) return;
+              navigationRef.dispatch(
+                action === "scanner"
+                  ? openWorkspaceSheetAction("DeviceLogin", {
+                      start_scanner: true,
+                    })
+                  : openWorkspaceSheetAction("AgentKeyLogin", { mint: true }),
+              );
+            }}
             onBrowse={(name) => {
               if (navigationRef.isReady())
                 selectDestination(
@@ -725,6 +742,19 @@ function ThemedAppShell({
             onEdgeBackChange={onEdgeBackChange}
             onNavigationCancelled={() => {
               pendingDrawerNavigation.current = null;
+              awaitingPaint.current = null;
+            }}
+            onWorkspacePagePainted={(identity) => {
+              paintedPage.current = identity;
+              if (
+                authenticatedNow.current &&
+                awaitingPaint.current === identity &&
+                workspaceContentIdentity(navigationRef.getRootState()) ===
+                  identity
+              ) {
+                awaitingPaint.current = null;
+                setDrawerOpen(false);
+              }
             }}
             suppressWorkspaceAnimation={drawerPresented}
             renderWorkspace={renderWorkspace}

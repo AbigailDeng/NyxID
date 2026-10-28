@@ -533,11 +533,22 @@ Popover/Select surface.
 
 ### Native assistant workspace
 
-The React Native workspace presents supported signed-in management destinations
-in one retained pull-up stack. Personal, contextual and group conversations stay
-full-screen. See
+The React Native workspace has a base sidebar and an opaque content slab. Home,
+chats and workspace pages push horizontally inside that slab. Only Settings,
+account pages and QR/terminal quick actions use the retained pull-up surface. See
 [the complete native route inventory](mobile/docs/NATIVE_WORKSPACE_ROUTES.md).
 
+- The sidebar uses sentence-case headings and Quick actions above Workspace.
+  Workspace contains Automations, Machines, Plugins, Activity (live pending count)
+  and Create new agent; no coming-soon destinations. Activity shows Incoming
+  followed by date-grouped History, with Active grants as a secondary page.
+  Logo and the pinned Chat pill open Home. The Settings gear and Quick actions
+  present above the current sidebar/slab without changing its offset or scroll.
+  Their dismissal restores that exact state. Root selection swaps with no fade
+  or inner transition, waits for the opaque new page's layout and paint, then
+  closes the slab in a single300ms ease-out. Only the24pt root edge reveals it;
+  only the exposed slab sliver closes it. Finger releases spring; reduced motion
+  has no travel. The pinned controls have a measured bottom content spacer.
 - Drawer top is the window's safe-area top plus 10pt. Top corners are 24pt; the
   centered 36×4pt handle has a 44pt drag region. A dedicated translucent scrim
   stays fixed over retained chat and fades independently while the panel slides.

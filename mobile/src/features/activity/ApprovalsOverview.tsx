@@ -9,7 +9,10 @@ import {
 } from "react-native";
 import { ChevronRight, RefreshCw, ShieldCheck } from "lucide-react-native";
 import { ChallengeCard } from "../../components/ChallengeCard";
-import { HistoryCard } from "../../components/HistoryCard";
+import {
+  HistoryCard,
+  HistorySectionHeader,
+} from "../../components/HistoryCard";
 import type { ChallengeDetail } from "../../lib/api/types";
 import { radius, spacing, typeScale } from "../../theme/designTokens";
 import { useTheme } from "../../theme/ThemeContext";
@@ -39,10 +42,34 @@ function compareDates(
   return descending ? b - a : a - b;
 }
 
-function historyTime(item: ChallengeDetail) {
-  return item.decided_at && Number.isFinite(Date.parse(item.decided_at))
-    ? item.decided_at
-    : item.created_at;
+/** Main's local-day grouping, with a stable fallback for malformed legacy rows. */
+export function activityHistorySections(
+  items: readonly ChallengeDetail[],
+  now = new Date(),
+) {
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const groups = new Map<string, { title: string; data: ChallengeDetail[] }>();
+  for (const item of [...items].sort((a, b) =>
+    compareDates(a.created_at, b.created_at, true),
+  )) {
+    const date = new Date(item.created_at);
+    const valid = Number.isFinite(date.getTime());
+    const key = valid ? date.toDateString() : "unknown";
+    const title = !valid
+      ? "Date not recorded"
+      : key === now.toDateString()
+        ? "Today"
+        : key === yesterday.toDateString()
+          ? "Yesterday"
+          : date.toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+            });
+    if (!groups.has(key)) groups.set(key, { title, data: [] });
+    groups.get(key)!.data.push(item);
+  }
+  return [...groups.values()];
 }
 
 export function ApprovalsOverview({
@@ -78,23 +105,28 @@ export function ApprovalsOverview({
 }) {
   const { colors } = useTheme();
   const styles = createStyles(colors);
+  const dates = activityHistorySections(history.items);
   const sections = [
     {
       key: "pending",
-      title: "Waiting on you",
+      title: "Incoming",
+      historyDate: undefined,
+      lastHistory: false,
       data: [...pending.items].sort((a, b) =>
         compareDates(a.expires_at, b.expires_at),
       ),
       state: pending,
     },
-    {
-      key: "history",
-      title: "History",
-      data: [...history.items].sort((a, b) =>
-        compareDates(historyTime(a), historyTime(b), true),
-      ),
-      state: history,
-    },
+    ...(dates.length ? dates : [{ title: undefined, data: [] }]).map(
+      (group, index, all) => ({
+        key: index === 0 ? "history" : `history:${index}`,
+        title: "History",
+        historyDate: group.title,
+        data: group.data,
+        state: history,
+        lastHistory: index === all.length - 1,
+      }),
+    ),
   ];
 
   return (
@@ -119,7 +151,7 @@ export function ApprovalsOverview({
             </Text>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Refresh approvals"
+              accessibilityLabel="Refresh activity"
               accessibilityState={{
                 disabled: refreshDisabled,
                 busy: refreshing,
@@ -150,75 +182,84 @@ export function ApprovalsOverview({
           </Pressable>
         </View>
       }
-      renderSectionHeader={({ section }) => (
-        <View style={styles.sectionHeader}>
-          <View style={styles.headingRow}>
-            <Text accessibilityRole="header" style={styles.heading}>
-              {section.title}
-            </Text>
-            {section.key === "pending" && section.state.total != null && (
-              <Text style={styles.count}>{section.state.total}</Text>
-            )}
-          </View>
-          {section.state.isError && (
-            <View accessibilityRole="alert" style={styles.errorCard}>
-              <Text style={styles.description}>
-                Could not load{" "}
-                {section.key === "pending"
-                  ? "pending approvals"
-                  : "approval history"}
-                .
-                {section.data.length
-                  ? " Displayed requests may be out of date."
-                  : " Retry to check for requests."}
+      renderSectionHeader={({ section }) =>
+        section.key.startsWith("history:") ? (
+          <HistorySectionHeader title={section.historyDate!} />
+        ) : (
+          <View style={styles.sectionHeader}>
+            <View style={styles.headingRow}>
+              <Text accessibilityRole="header" style={styles.heading}>
+                {section.title}
               </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Retry ${section.key === "pending" ? "pending approvals" : "approval history"}`}
-                disabled={offline}
-                onPress={section.state.onRetry}
-                style={[styles.textButton, offline && styles.disabled]}
-              >
-                <Text style={styles.linkText}>Retry</Text>
-              </Pressable>
-            </View>
-          )}
-          {offline && !section.data.length ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyDescription}>
-                Connect to check{" "}
-                {section.key === "pending"
-                  ? "pending approvals"
-                  : "approval history"}
-                .
-              </Text>
-            </View>
-          ) : section.state.isLoading && !section.data.length ? (
-            <ActivityIndicator
-              accessibilityLabel={`Loading ${section.key === "pending" ? "pending approvals" : "approval history"}`}
-              color={colors.primary}
-              style={styles.loading}
-            />
-          ) : !section.data.length && !section.state.isError ? (
-            <View style={styles.emptyCard}>
-              {section.key === "pending" ? (
-                <>
-                  <ShieldCheck size={28} color={colors.success} />
-                  <Text style={styles.emptyTitle}>Nothing waiting on you</Text>
-                  <Text style={styles.emptyDescription}>
-                    Approval requests appear here when an action needs your
-                    sign-off.
-                  </Text>
-                </>
-              ) : (
-                <Text style={styles.emptyDescription}>
-                  Decided approvals will show up here.
-                </Text>
+              {section.key === "pending" && section.state.total != null && (
+                <Text style={styles.count}>{section.state.total}</Text>
               )}
             </View>
-          ) : null}
-        </View>
-      )}
+            {section.state.isError && (
+              <View accessibilityRole="alert" style={styles.errorCard}>
+                <Text style={styles.description}>
+                  Could not load{" "}
+                  {section.key === "pending"
+                    ? "pending approvals"
+                    : "approval history"}
+                  .
+                  {section.data.length
+                    ? " Displayed requests may be out of date."
+                    : " Retry to check for requests."}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Retry ${section.key === "pending" ? "pending approvals" : "approval history"}`}
+                  disabled={offline}
+                  onPress={section.state.onRetry}
+                  style={[styles.textButton, offline && styles.disabled]}
+                >
+                  <Text style={styles.linkText}>Retry</Text>
+                </Pressable>
+              </View>
+            )}
+            {offline && !section.data.length ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyDescription}>
+                  Connect to check{" "}
+                  {section.key === "pending"
+                    ? "pending approvals"
+                    : "approval history"}
+                  .
+                </Text>
+              </View>
+            ) : section.state.isLoading && !section.data.length ? (
+              <ActivityIndicator
+                accessibilityLabel={`Loading ${section.key === "pending" ? "pending approvals" : "approval history"}`}
+                color={colors.primary}
+                style={styles.loading}
+              />
+            ) : !section.data.length && !section.state.isError ? (
+              <View style={styles.emptyCard}>
+                {section.key === "pending" ? (
+                  <>
+                    <ShieldCheck size={28} color={colors.success} />
+                    <Text style={styles.emptyTitle}>
+                      Nothing waiting on you
+                    </Text>
+                    <Text style={styles.emptyDescription}>
+                      Approval requests appear here when an action needs your
+                      sign-off.
+                    </Text>
+                  </>
+                ) : (
+                  <Text style={styles.emptyDescription}>
+                    Decided approvals will show up here.
+                  </Text>
+                )}
+              </View>
+            ) : null}
+            {section.historyDate ? (
+              <HistorySectionHeader title={section.historyDate} />
+            ) : null}
+          </View>
+        )
+      }
       renderItem={({ item, section }) => (
         <View style={styles.item}>
           {section.key === "pending" ? (
@@ -240,7 +281,8 @@ export function ApprovalsOverview({
         </View>
       )}
       renderSectionFooter={({ section }) =>
-        section.state.hasNextPage ? (
+        section.state.hasNextPage &&
+        (section.key === "pending" || section.lastHistory) ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={

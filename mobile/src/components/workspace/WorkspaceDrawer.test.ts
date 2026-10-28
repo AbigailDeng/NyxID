@@ -33,11 +33,11 @@ function setup() {
     "lucide-react-native": Object.fromEntries(
       [
         "CalendarClock",
-        "ChartNoAxesCombined",
-        "Folder",
         "Monitor",
         "Plug",
         "Search",
+        "ScanQrCode",
+        "Terminal",
         "Settings",
         "ShieldCheck",
         "SquarePen",
@@ -66,6 +66,7 @@ function setup() {
     Drawer({
       visible: true,
       onHome: () => events.push("home"),
+      onQuickAction: (kind: string) => events.push(kind),
       onNavigate: (name: string) => events.push(name),
       onBrowse: (name: string) => events.push(name),
       onCreateAgent: () => events.push("create"),
@@ -132,7 +133,7 @@ test("sidebar header uses the logo and circular Search; Home is exclusive to log
   assert.equal(x.all().find((n) => n.type === "Logo")!.props.height, 28);
   x.h.unmount();
 });
-test("Workspace rows match the approved order, communicate coming-soon and show real pending count", () => {
+test("Quick actions precede Workspace with no placeholders and a live Activity pending count", () => {
   const x = setup();
   const header = nodes(x.list().props.scrollHeader);
   const title = header.find((n) => n.props.children === "Workspace")!;
@@ -148,23 +149,28 @@ test("Workspace rows match the approved order, communicate coming-soon and show 
       .filter((n) => n.type === "Pressable")
       .map((n) => n.props.accessibilityLabel),
     [
+      "Scan QR code",
+      "Terminal login code",
       "Automations",
       "Machines",
       "Plugins",
-      "Artifacts, coming soon",
-      "Approvals, 3 pending",
-      "Activity, coming soon",
+      "Activity, 3 pending",
       "Create new agent",
     ],
   );
-  assert.equal(x.label("Artifacts, coming soon").props.disabled, true);
   assert.equal(
-    x.label("Activity, coming soon").props.accessibilityState.disabled,
-    true,
+    header.some((n) =>
+      /coming soon|Soon|Artifacts/.test(
+        n.props.accessibilityLabel ?? n.props.children ?? "",
+      ),
+    ),
+    false,
   );
+  x.label("Scan QR code").props.onPress();
+  x.label("Terminal login code").props.onPress();
   x.label("Machines").props.onPress();
   x.label("Create new agent").props.onPress();
-  assert.deepEqual(x.events, ["Machines", "create"]);
+  assert.deepEqual(x.events, ["scanner", "terminal", "Machines", "create"]);
   const footer = x.list().props.scrollFooter;
   assert.equal(footer.type, "Recents");
   footer.props.onSeeAll();

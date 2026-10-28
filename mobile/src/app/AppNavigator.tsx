@@ -1,3 +1,4 @@
+import { WorkspacePageSurface } from "./WorkspacePageSurface";
 import { workspaceContentAnimation } from "../components/workspace/workspacePushState";
 import {
   WorkspaceRecentsScreen,
@@ -287,9 +288,13 @@ function AgentSkillsRoute({ route }: ContentScreenProps<"AgentSkills">) {
 
 /** Home, chats and workspace pages share the horizontally pushed content slab. */
 const WorkspaceRootSwapContext = createContext(false);
+const WorkspacePagePaintedContext = createContext<(identity: string) => void>(
+  () => {},
+);
 
 function WorkspaceNavigator() {
   const rootSwap = useContext(WorkspaceRootSwapContext);
+  const onPainted = useContext(WorkspacePagePaintedContext);
   const onOpenMenu = useContext(WorkspaceMenuContext);
   const { colors } = useTheme();
   const reducedMotion = useReducedMotion();
@@ -308,11 +313,15 @@ function WorkspaceNavigator() {
         contentStyle: { backgroundColor: colors.bg },
         headerShadowVisible: false,
         animation: workspaceContentAnimation(reducedMotion, rootSwap),
+        animationTypeForReplace: "push",
       })}
-      screenLayout={({ children }) => (
-        <WorkspaceInteractionSurface style={{ flex: 1 }}>
+      screenLayout={({ children, route }) => (
+        <WorkspacePageSurface
+          identity={JSON.stringify([route.key, route.name, route.params])}
+          onPainted={onPainted}
+        >
           {children}
-        </WorkspaceInteractionSurface>
+        </WorkspacePageSurface>
       )}
     >
       <ContentStack.Screen
@@ -359,7 +368,7 @@ function WorkspaceNavigator() {
         <ContentStack.Screen
           name="Activity"
           component={ActivityScreen}
-          options={{ title: "Approvals" }}
+          options={{ title: "Activity" }}
         />
         <ContentStack.Screen
           name="WorkspaceSearch"
@@ -700,6 +709,7 @@ export function AppNavigator({
   onNavigationGuardChange,
   onEdgeBackChange,
   onNavigationCancelled,
+  onWorkspacePagePainted,
   suppressWorkspaceAnimation = false,
   renderWorkspace,
 }: {
@@ -707,6 +717,7 @@ export function AppNavigator({
   onNavigationGuardChange: WorkspaceNavigationGuardChange;
   onEdgeBackChange: WorkspaceEdgeBackChange;
   onNavigationCancelled: () => void;
+  onWorkspacePagePainted: (identity: string) => void;
   suppressWorkspaceAnimation?: boolean;
   renderWorkspace: (children: React.ReactNode) => React.ReactElement;
 }) {
@@ -730,96 +741,108 @@ export function AppNavigator({
             <WorkspaceNavigationCancelledContext.Provider
               value={onNavigationCancelled}
             >
-              <WorkspaceRootSwapContext.Provider
-                value={suppressWorkspaceAnimation}
+              <WorkspacePagePaintedContext.Provider
+                value={onWorkspacePagePainted}
               >
-                <Stack.Navigator
-                  initialRouteName={isAuthenticated ? "Workspace" : "Auth"}
-                  screenOptions={{
-                    headerShown: false,
-                    headerStyle: { backgroundColor: colors.bg },
-                    headerTintColor: colors.textPrimary,
-                    headerTitleStyle: {
-                      fontFamily: fonts.displaySemi,
-                      fontSize: 18,
-                    },
-                    headerShadowVisible: false,
-                    contentStyle: { backgroundColor: colors.bg },
-                    headerBackButtonDisplayMode: "minimal",
-                  }}
+                <WorkspaceRootSwapContext.Provider
+                  value={suppressWorkspaceAnimation}
                 >
-                  {isAuthenticated ? (
-                    <Stack.Group navigationKey="workspace">
+                  <Stack.Navigator
+                    initialRouteName={isAuthenticated ? "Workspace" : "Auth"}
+                    screenOptions={{
+                      headerShown: false,
+                      headerStyle: { backgroundColor: colors.bg },
+                      headerTintColor: colors.textPrimary,
+                      headerTitleStyle: {
+                        fontFamily: fonts.displaySemi,
+                        fontSize: 18,
+                      },
+                      headerShadowVisible: false,
+                      contentStyle: { backgroundColor: colors.bg },
+                      headerBackButtonDisplayMode: "minimal",
+                    }}
+                  >
+                    {isAuthenticated ? (
+                      <Stack.Group navigationKey="workspace">
+                        <Stack.Screen
+                          name="Workspace"
+                          component={WorkspaceNavigator}
+                          layout={({ children }) => renderWorkspace(children)}
+                        />
+                        <Stack.Screen
+                          name="WorkspaceSheet"
+                          component={SettingsSheetRoute}
+                          options={{
+                            presentation: "transparentModal",
+                            // The surface animates its panel and stationary scrim independently.
+                            animation: "none",
+                            gestureEnabled: false,
+                            headerShown: false,
+                            contentStyle: { backgroundColor: "transparent" },
+                          }}
+                        />
+                        <Stack.Screen
+                          name="MachineDesktop"
+                          component={MachineDesktopRoute}
+                          options={{
+                            presentation: "fullScreenModal",
+                            animation: reducedMotion ? "none" : "fade",
+                            headerShown: false,
+                            gestureEnabled: false,
+                          }}
+                        />
+                      </Stack.Group>
+                    ) : (
                       <Stack.Screen
-                        name="Workspace"
-                        component={WorkspaceNavigator}
-                        layout={({ children }) => renderWorkspace(children)}
+                        name="Auth"
+                        navigationKey="auth"
+                        component={AuthHomeScreen}
+                        options={{ title: "NyxID Sign In" }}
+                      />
+                    )}
+                    <Stack.Group
+                      navigationKey={
+                        isAuthenticated ? "signed-in" : "signed-out"
+                      }
+                    >
+                      <Stack.Screen
+                        name="TermsOfService"
+                        component={
+                          isAuthenticated
+                            ? SheetEntryRoute
+                            : TermsOfServiceScreen
+                        }
+                        options={{ title: "Terms of Service" }}
                       />
                       <Stack.Screen
-                        name="WorkspaceSheet"
-                        component={SettingsSheetRoute}
-                        options={{
-                          presentation: "transparentModal",
-                          // The surface animates its panel and stationary scrim independently.
-                          animation: "none",
-                          gestureEnabled: false,
-                          headerShown: false,
-                          contentStyle: { backgroundColor: "transparent" },
-                        }}
+                        name="PrivacyPolicy"
+                        component={
+                          isAuthenticated
+                            ? SheetEntryRoute
+                            : PrivacyPolicyScreen
+                        }
+                        options={{ title: "Privacy Policy" }}
                       />
                       <Stack.Screen
-                        name="MachineDesktop"
-                        component={MachineDesktopRoute}
-                        options={{
-                          presentation: "fullScreenModal",
-                          animation: reducedMotion ? "none" : "fade",
-                          headerShown: false,
-                          gestureEnabled: false,
-                        }}
+                        name="DeviceLogin"
+                        component={
+                          isAuthenticated ? SheetEntryRoute : DeviceLoginScreen
+                        }
+                        options={{ title: "Approve Device Login" }}
+                      />
+                      <Stack.Screen
+                        name="AgentKeyLogin"
+                        component={
+                          isAuthenticated
+                            ? SheetEntryRoute
+                            : AgentKeyLoginScreen
+                        }
+                        options={{ title: "Agent Key Login" }}
                       />
                     </Stack.Group>
-                  ) : (
-                    <Stack.Screen
-                      name="Auth"
-                      navigationKey="auth"
-                      component={AuthHomeScreen}
-                      options={{ title: "NyxID Sign In" }}
-                    />
-                  )}
-                  <Stack.Group
-                    navigationKey={isAuthenticated ? "signed-in" : "signed-out"}
-                  >
-                    <Stack.Screen
-                      name="TermsOfService"
-                      component={
-                        isAuthenticated ? SheetEntryRoute : TermsOfServiceScreen
-                      }
-                      options={{ title: "Terms of Service" }}
-                    />
-                    <Stack.Screen
-                      name="PrivacyPolicy"
-                      component={
-                        isAuthenticated ? SheetEntryRoute : PrivacyPolicyScreen
-                      }
-                      options={{ title: "Privacy Policy" }}
-                    />
-                    <Stack.Screen
-                      name="DeviceLogin"
-                      component={
-                        isAuthenticated ? SheetEntryRoute : DeviceLoginScreen
-                      }
-                      options={{ title: "Approve Device Login" }}
-                    />
-                    <Stack.Screen
-                      name="AgentKeyLogin"
-                      component={
-                        isAuthenticated ? SheetEntryRoute : AgentKeyLoginScreen
-                      }
-                      options={{ title: "Agent Key Login" }}
-                    />
-                  </Stack.Group>
-                </Stack.Navigator>
-              </WorkspaceRootSwapContext.Provider>
+                  </Stack.Navigator>
+                </WorkspaceRootSwapContext.Provider>
+              </WorkspacePagePaintedContext.Provider>
             </WorkspaceNavigationCancelledContext.Provider>
           </WorkspaceEdgeBackContext.Provider>
         </WorkspaceNavigationGuardContext.Provider>

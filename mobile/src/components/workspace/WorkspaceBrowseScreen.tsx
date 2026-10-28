@@ -96,7 +96,7 @@ export function WorkspaceSearchScreen() {
     <ScreenContainer>
       <View style={styles.list}>
         <Text style={[styles.note, { color: colors.textMuted }]}>
-          Workspace search is coming soon.
+          Search agents, crews and recent chats.
         </Text>
       </View>
     </ScreenContainer>

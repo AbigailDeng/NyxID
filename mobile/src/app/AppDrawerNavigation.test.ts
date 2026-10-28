@@ -280,9 +280,19 @@ function setup() {
     background,
     shell: () => find("WorkspacePushShell"),
     navigator: () => find("AppNavigator"),
-    commitLast: () => {
+    commitLast: (paint = true) => {
       rootState = apply(rootState, dispatched.at(-1)!);
       find("NavigationContainer").props.onStateChange();
+      flush();
+      if (paint) {
+        find("AppNavigator").props.onWorkspacePagePainted(
+          workspaceContentIdentity(rootState),
+        );
+        flush();
+      }
+    },
+    paint: (identity = workspaceContentIdentity(rootState)) => {
+      find("AppNavigator").props.onWorkspacePagePainted(identity);
       flush();
     },
     open: () => {
@@ -400,7 +410,15 @@ test("every main destination swaps under the open slab with no inner animation, 
       comparable(env.dispatched),
       comparable([choice.action(before)]),
     );
-    env.commitLast();
+    env.commitLast(false);
+    assert.equal(
+      env.shell().props.visible,
+      true,
+      "root state alone is not a native paint",
+    );
+    env.paint("stale-page");
+    assert.equal(env.shell().props.visible, true);
+    env.paint();
     assert.equal(
       env.shell().props.visible,
       false,
@@ -526,6 +544,8 @@ test("a content destination inside Settings closes the sidebar only after the sh
   );
   env.changedNavigation();
   assert.equal(env.shell().props.obscured, false);
+  assert.equal(env.shell().props.visible, true);
+  env.paint();
   assert.equal(env.shell().props.visible, false);
 });
 
@@ -658,4 +678,33 @@ test("root-swap comparison ignores unrelated state events and matches exact agen
   );
   assert.equal(workspaceContentAnimation(true, false), "none");
   assert.equal(workspaceContentAnimation(false, false), "slide_from_right");
+});
+
+test("sidebar Quick actions present above the unchanged expanded base", () => {
+  for (const action of ["scanner", "terminal"]) {
+    const env = setup();
+    env.readyNavigation();
+    env.open();
+    const before = content(env.state());
+    env.drawer().props.onQuickAction(action);
+    env.commitLast();
+    assert.equal(env.shell().props.visible, true);
+    assert.equal(env.shell().props.obscured, true);
+    assert.strictEqual(content(env.state()), before);
+    const sheet = env
+      .state()
+      .routes.find((r) => r.name === "WorkspaceSheet")!.state!;
+    const page = sheet.routes[sheet.index ?? sheet.routes.length - 1]!;
+    assert.equal(
+      page.name,
+      action === "scanner" ? "DeviceLogin" : "AgentKeyLogin",
+    );
+    assert.deepEqual(
+      structuredClone(page.params),
+      action === "scanner" ? { start_scanner: true } : { mint: true },
+    );
+    env.setState(apply(env.state(), dismissWorkspaceSheetAction(env.state())));
+    env.changedNavigation();
+    assert.equal(env.shell().props.visible, true);
+  }
 });

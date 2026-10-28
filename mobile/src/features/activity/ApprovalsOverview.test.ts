@@ -106,14 +106,21 @@ function setup(overrides: Record<string, unknown> = {}) {
       ShieldCheck: "ShieldCheck",
     },
     "../../components/ChallengeCard": { ChallengeCard: "ChallengeCard" },
-    "../../components/HistoryCard": { HistoryCard: "HistoryCard" },
+    "../../components/HistoryCard": {
+      HistoryCard: "HistoryCard",
+      HistorySectionHeader: "HistorySectionHeader",
+    },
     "../../theme/designTokens": { radius: {}, spacing: {}, typeScale: {} },
     "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
   });
-  const { ApprovalsOverview } = harness.load(
+  const { ApprovalsOverview, activityHistorySections } = harness.load(
     fileURLToPath(new URL("./ApprovalsOverview.tsx", import.meta.url)),
   ) as {
     ApprovalsOverview: (props: Record<string, unknown>) => Element;
+    activityHistorySections: (
+      items: ChallengeDetail[],
+      now: Date,
+    ) => { title: string; data: ChallengeDetail[] }[];
   };
   const root = harness.mount(() =>
     ApprovalsOverview({
@@ -152,7 +159,17 @@ function setup(overrides: Record<string, unknown> = {}) {
     assert.ok(found, `Expected control: ${label}`);
     return found;
   };
-  return { root, sections, section, header, footer, row, find, callbacks };
+  return {
+    root,
+    sections,
+    section,
+    header,
+    footer,
+    row,
+    find,
+    callbacks,
+    activityHistorySections,
+  };
 }
 
 test("one inbox contains pending and history with server totals and a secondary grants entry", () => {
@@ -163,7 +180,7 @@ test("one inbox contains pending and history with server totals and a secondary 
   assert.equal(env.root.type, "SectionList");
   assert.deepEqual(
     Array.from(env.sections, (item) => item.title),
-    ["Waiting on you", "History"],
+    ["Incoming", "History"],
   );
   assert.match(textContent(env.header("pending")), /43/);
   assert.match(
@@ -204,7 +221,7 @@ test("pending orders imminent expiry first and invalid or missing expiry last wi
   );
 });
 
-test("history uses latest decision time then creation fallback and leaves unusable dates at the end", () => {
+test("history groups by creation day newest first, with malformed legacy dates last", () => {
   const env = setup({
     history: list({
       items: [
@@ -225,9 +242,19 @@ test("history uses latest decision time then creation fallback and leaves unusab
       ],
     }),
   });
+  assert.ok(
+    elements(env.header("history")).some(
+      (n) => n.type === "HistorySectionHeader",
+    ),
+  );
   assert.deepEqual(
-    Array.from(env.section("history").data, (item) => item.id),
-    ["latest", "fallback", "old", "invalid", "missing"],
+    Array.from(
+      env.sections
+        .filter((s) => s.key !== "pending")
+        .flatMap((s) => Array.from(s.data)),
+      (item) => item.id,
+    ),
+    ["old", "fallback", "latest", "invalid", "missing"],
   );
 });
 
@@ -365,7 +392,7 @@ test("offline and in-flight states disable mutations and requests while keeping 
     history: list({ isError: true, hasNextPage: true }),
   });
   assert.equal(
-    env.find(env.root.props.ListHeaderComponent, "Refresh approvals").props
+    env.find(env.root.props.ListHeaderComponent, "Refresh activity").props
       .disabled,
     true,
   );
@@ -413,7 +440,7 @@ test("manual refresh and pull-to-refresh remain separate signals and unknown gra
   );
   const refresh = env.find(
     env.root.props.ListHeaderComponent,
-    "Refresh approvals",
+    "Refresh activity",
   );
   assert.equal(refresh.props.accessibilityState.disabled, false);
   assert.equal(refresh.props.accessibilityState.busy, true);
@@ -444,4 +471,31 @@ test("an offline inbox without cached rows asks to connect rather than claiming 
     textContent(env.header("history")),
     /Decided approvals will show up here/,
   );
+});
+
+test("Activity history uses main's Today/Yesterday/date labels and paginates only after the last date", () => {
+  const env = setup({
+    history: list({
+      hasNextPage: true,
+      items: [
+        challenge("old", { created_at: "2026-10-01T12:00:00" }),
+        challenge("today", { created_at: "2026-10-28T12:00:00" }),
+        challenge("yesterday", { created_at: "2026-10-27T12:00:00" }),
+      ],
+    }),
+  });
+  const dates = env.activityHistorySections(
+    [
+      challenge("today", { created_at: "2026-10-28T12:00:00" }),
+      challenge("yesterday", { created_at: "2026-10-27T12:00:00" }),
+      challenge("old", { created_at: "2026-10-01T12:00:00" }),
+    ],
+    new Date("2026-10-28T18:00:00"),
+  );
+  assert.deepEqual(
+    Array.from(dates, (g) => g.title),
+    ["Today", "Yesterday", "Oct 1"],
+  );
+  assert.equal(env.footer("history"), null);
+  assert.ok(env.footer(env.sections.at(-1)!.key));
 });
