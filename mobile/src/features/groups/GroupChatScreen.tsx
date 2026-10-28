@@ -64,10 +64,7 @@ import {
 import { sanitizeAssistantMessageContent } from "../assistant/assistantChatContent";
 import { GroupPendingCard } from "./GroupPendingCard";
 import { GroupMachineReceipts } from "./GroupMachineReceipts";
-import {
-  AssistantMessageFooter,
-  AssistantMessageTime,
-} from "../assistant/AssistantMessageFooter";
+import { AssistantMessageFooter } from "../assistant/AssistantMessageFooter";
 import { useAssistantUploads } from "../assistant/useAssistantUploads";
 import {
   appendDictation,
@@ -425,35 +422,6 @@ function GroupChat({
       /* no implicit retry */
     }
   }
-  const feedbackEnabled =
-    chat.active &&
-    !!group &&
-    !chat.isError &&
-    !chat.sending &&
-    !uploads.session.sending;
-  async function feedback(
-    messageId: string,
-    vote?: "up" | "down",
-    comment?: string,
-  ) {
-    const message = chat.data?.messages.find((row) => row.id === messageId);
-    if (
-      !feedbackEnabled ||
-      !chat.available() ||
-      message?.role !== "agent" ||
-      !message.text.trim()
-    )
-      return false;
-    try {
-      return await chat.feedback(
-        messageId,
-        vote ? { vote, comment } : undefined,
-      );
-    } catch {
-      // The runtime retains the confirmed vote and exposes the action error.
-      return false;
-    }
-  }
   const working =
     group?.members.filter((member) =>
       group.working_agent_ids.includes(member.id),
@@ -602,8 +570,6 @@ function GroupChat({
                   ? undefined
                   : onOpenAgent
               }
-              feedbackEnabled={feedbackEnabled}
-              onFeedback={(vote, comment) => feedback(item.id, vote, comment)}
               onDisclosure={() => {
                 transcriptScroll.pause();
               }}
@@ -625,10 +591,6 @@ function GroupChat({
         />
         <ScrollEdgeFades edges={transcriptEdges.edges} color={colors.bg} />
       </View>
-      <JumpToLatest
-        visible={transcriptScroll.showJump}
-        onPress={transcriptScroll.follow}
-      />
       {!!group && !!chat.data?.pending_actions.length && (
         <ScrollView
           accessibilityLabel="Actions waiting for you"
@@ -677,6 +639,10 @@ function GroupChat({
           })}
         </ScrollView>
       )}
+      <JumpToLatest
+        visible={transcriptScroll.showJump}
+        onPress={transcriptScroll.follow}
+      />
       {group && (
         <View style={[styles.composerArea, chatColumn]}>
           {!recipients.ids.length && (
@@ -889,16 +855,12 @@ function GroupMessage({
   title,
   onOpenAgent,
   onDisclosure,
-  feedbackEnabled,
-  onFeedback,
 }: {
   group?: Group;
   message: GroupMessage;
   title: (id: string, fallback: string) => string;
   onOpenAgent?: (id: string) => void;
   onDisclosure: () => void;
-  feedbackEnabled: boolean;
-  onFeedback: (vote?: "up" | "down", comment?: string) => Promise<boolean>;
 }) {
   const { colors } = useTheme();
   const user = message.role === "user";
@@ -951,7 +913,6 @@ function GroupMessage({
                 ? title(message.agent.id, message.agent.name)
                 : "Agent"}{" "}
           </Label>
-          {!user && <AssistantMessageTime value={message.created_at} />}
         </View>
       </Pressable>
       {user && !!message.recipient_agent_ids?.length && (
@@ -984,15 +945,8 @@ function GroupMessage({
         text={
           user ? message.text : sanitizeAssistantMessageContent(message.text)
         }
-        timestamp={user ? message.created_at : undefined}
+        timestamp={message.created_at}
         user={user}
-        feedback={message.feedback}
-        disabled={!feedbackEnabled}
-        onFeedback={
-          message.role === "agent" && !!message.text.trim()
-            ? onFeedback
-            : undefined
-        }
       />
     </View>
   );

@@ -79,7 +79,6 @@ import {
 import { sanitizeAssistantMessageContent } from "./assistantChatContent";
 import { AssistantWorkingContext } from "./AssistantWorkingContext";
 import { AssistantMessageFooter } from "./AssistantMessageFooter";
-import { canReplyFeedback } from "./assistantFeedback";
 import { AssistantAttachmentView } from "./AssistantAttachmentView";
 import { AssistantPendingUploads } from "./AssistantPendingUploads";
 import {
@@ -765,15 +764,6 @@ export function AssistantScreen({
           text={isUser ? item.text : sanitizeAssistantMessageContent(item.text)}
           timestamp={item.created_at}
           user={isUser}
-          feedback={item.feedback}
-          disabled={
-            !assistant.online || assistant.loadingOlder || assistant.loading
-          }
-          onFeedback={
-            canReplyFeedback(item, assistant.conversationId)
-              ? (vote, comment) => assistant.feedback(item.id, vote, comment)
-              : undefined
-          }
         />
       </View>
     );

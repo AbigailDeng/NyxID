@@ -3,15 +3,16 @@ import { Alert, Pressable, StyleSheet, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { Check, Copy } from "lucide-react-native";
 import { useTheme } from "../../theme/ThemeContext";
-import { TOUCH_TARGET } from "../../theme/designTokens";
 
 /** Copy the exact message body, preserving links, Markdown and code. */
 export function AssistantCopyButton({
   text,
   partial = false,
+  afterDate = false,
 }: {
   text: string;
   partial?: boolean;
+  afterDate?: boolean;
 }) {
   const { colors } = useTheme();
   const [copiedText, setCopiedText] = useState<string>();
@@ -60,6 +61,13 @@ export function AssistantCopyButton({
       }
       accessibilityState={{ disabled: copying }}
       disabled={copying}
+      // Split the horizontal expansion at half the 8pt gap before the date.
+      hitSlop={{
+        top: 10,
+        bottom: 10,
+        left: afterDate ? 4 : 16,
+        right: afterDate ? 16 : 4,
+      }}
       onPress={() => void copy()}
       style={({ pressed }) => [
         styles.button,
@@ -82,12 +90,11 @@ export function AssistantCopyButton({
 
 const styles = StyleSheet.create({
   button: {
-    minHeight: TOUCH_TARGET,
-    minWidth: TOUCH_TARGET,
+    width: 24,
+    height: 24,
+    padding: 4,
     alignSelf: "flex-start",
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 8,
   },
 });

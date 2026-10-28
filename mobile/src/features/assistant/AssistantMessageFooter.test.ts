@@ -3,7 +3,6 @@ import test from "node:test";
 import { URL, fileURLToPath } from "node:url";
 import { hookHarness } from "./assistantHookTestHarness";
 import { messageTime } from "./messageTime";
-import { canReplyFeedback } from "./assistantFeedback";
 type E = { type: any; props: Record<string, any> };
 const nodes = (n: any): E[] =>
   n?.props ? [n, ...[n.props.children].flat(Infinity).flatMap(nodes)] : [];
@@ -19,9 +18,8 @@ function expand(n: any): any {
   };
 }
 function setup(props: any) {
-  const modules = { copy: {}, feedback: {} };
+  const modules = { copy: {} };
   const alerts: any[] = [],
-    saved: any[] = [],
     copied: string[] = [];
   const h = hookHarness<E>({
     "react/jsx-runtime": {
@@ -61,7 +59,6 @@ function setup(props: any) {
       ["ActionButton", "Card", "Field", "Label"].map((n) => [n, n]),
     ),
     "./AssistantCopyButton": modules.copy,
-    "./AssistantReplyFeedback": modules.feedback,
   });
   Object.assign(
     modules.copy,
@@ -69,136 +66,80 @@ function setup(props: any) {
       fileURLToPath(new URL("./AssistantCopyButton.tsx", import.meta.url)),
     ),
   );
-  Object.assign(
-    modules.feedback,
-    h.load(
-      fileURLToPath(new URL("./AssistantReplyFeedback.tsx", import.meta.url)),
-    ),
-  );
   const C = h.load(
     fileURLToPath(new URL("./AssistantMessageFooter.tsx", import.meta.url)),
   ).AssistantMessageFooter as any;
-  const feedback = async (...args: any[]) => {
-    saved.push(args);
-    return true;
-  };
-  h.mount(() => expand(C({ onFeedback: feedback, ...props })));
-  return { h, saved, copied, alerts, all: () => nodes(h.value()) };
+  h.mount(() => expand(C(props)));
+  return { h, copied, alerts, all: () => nodes(h.value()) };
 }
-test("reply footer has a single horizontal Copy/up/down/time row with icon-only 44pt controls", async () => {
-  const x = setup({
-    text: "A useful reply",
-    timestamp: "2026-10-27T01:00:00Z",
-  });
-  const all = x.all();
-  const controls = all.filter((n) => n.type === "Pressable");
-  assert.deepEqual(
-    controls.map((n) => n.props.accessibilityLabel).slice(0, 3),
-    ["Copy message", "Helpful", "Not helpful"],
-  );
-  const row = x.h.value().props.children[0];
-  assert.equal(row.props.style.flexDirection, "row");
-  assert.equal(row.props.children[0].props.accessibilityLabel, "Copy message");
-  assert.equal(
-    row.props.children[1].props.accessibilityLabel,
-    "Reply feedback",
-  );
-  assert.equal(row.props.children[2].props.accessibilityRole, "text");
-  assert.equal(all.filter((n) => n.type === "Text").length, 1);
-  const stamp = all.find((n) => n.type === "Text")!;
-  assert.equal(stamp.props.style[0].fontSize, 11);
-  assert.equal(stamp.props.style[1].color, "tertiary");
-  for (const control of controls.slice(0, 3)) {
-    const style =
-      typeof control.props.style === "function"
-        ? control.props.style({ pressed: false })[0]
-        : control.props.style;
-    assert.ok((style.width ?? style.minWidth) >= 44);
-    assert.ok((style.height ?? style.minHeight) >= 44);
+test("private and crew reply footers contain only compact Copy and date, 8pt apart and below the body", async () => {
+  for (const reply of ["Private reply", "Crew reply"]) {
+    const x = setup({ text: reply, timestamp: "2026-10-27T01:00:00Z" });
+    const row = x.h.value();
+    assert.equal(row.props.style[0].flexDirection, "row");
+    assert.equal(row.props.style[0].gap, 8);
+    assert.equal(row.props.style[0].marginTop, 8);
+    const all = x.all();
+    const controls = all.filter((n) => n.type === "Pressable");
+    assert.equal(controls.length, 2);
+    assert.equal(controls[0]!.props.accessibilityLabel, "Copy message");
+    assert.equal(controls[1]!.props.accessibilityRole, "text");
+    assert.equal(
+      all.some((n) => ["Up", "Down", "Modal", "Field"].includes(n.type)),
+      false,
+    );
+    const copy = controls[0]!;
+    const style = copy.props.style({ pressed: false })[0];
+    assert.equal(style.width, 24);
+    assert.equal(style.height, 24);
+    assert.equal(
+      style.width + copy.props.hitSlop.left + copy.props.hitSlop.right,
+      44,
+    );
+    assert.equal(
+      style.height + copy.props.hitSlop.top + copy.props.hitSlop.bottom,
+      44,
+    );
+    assert.equal(
+      copy.props.hitSlop.right,
+      4,
+      "copy expansion stops before the date",
+    );
+    assert.ok(
+      all.some(
+        (n) =>
+          n.type === "Copy" &&
+          n.props.size === 16 &&
+          n.props.color === "tertiary",
+      ),
+    );
+    const stamp = all.find((n) => n.type === "Text")!;
+    assert.equal(stamp.props.style[0].fontSize, 11);
+    assert.equal(stamp.props.style[1].color, "tertiary");
+    assert.equal(controls[1]!.props.style.minWidth, undefined);
+    copy.props.onPress();
+    await x.h.settle();
+    assert.deepEqual(x.copied, [reply]);
+    assert.ok(x.all().some((n) => n.props.accessibilityLabel === "Copied"));
+    controls[1]!.props.onLongPress();
+    assert.match(x.alerts[0][1], /2026/);
+    x.h.unmount();
   }
-  assert.ok(
-    all.some(
-      (n) =>
-        n.type === "Copy" &&
-        n.props.size === 16 &&
-        n.props.color === "tertiary",
-    ),
-  );
-  assert.equal(all.find((n) => n.type === "Modal")!.props.visible, false);
-  controls[0]!.props.onPress();
-  await x.h.settle();
-  assert.deepEqual(x.copied, ["A useful reply"]);
-  assert.ok(x.all().some((n) => n.props.accessibilityLabel === "Copied"));
-  controls[3]!.props.onLongPress();
-  assert.match(x.alerts[0][1], /2026/);
-  x.h.unmount();
 });
-test("feedback details appear after the vote; selected success/error tones and withdrawal match web", async () => {
-  const x = setup({ text: "Reply" });
-  const press = (label: string) => {
-    x.all()
-      .find((n) => n.props.accessibilityLabel === label)!
-      .props.onPress();
-    x.h.flush();
-  };
-  press("Helpful");
-  await x.h.settle();
-  assert.equal(x.saved[0][0], "up");
-  assert.equal(x.all().find((n) => n.type === "Modal")!.props.visible, true);
-  assert.ok(
-    x.all().some((n) => n.type === "Up" && n.props.color === "success"),
-  );
-  press("Helpful");
-  await x.h.settle();
-  assert.equal(x.saved[1][0], undefined);
-  assert.equal(x.all().find((n) => n.type === "Modal")!.props.visible, false);
-  press("Not helpful");
-  await x.h.settle();
-  assert.ok(
-    x.all().some((n) => n.type === "Down" && n.props.color === "error"),
-  );
-  x.h.unmount();
-});
-test("human footer preserves time-before-Copy order; crew agent actions omit duplicated attribution time", () => {
-  const user = setup({
+test("human footer keeps time-before-Copy order with the same compact spacing", () => {
+  const x = setup({
     user: true,
     text: "Human",
     timestamp: "2026-10-27T01:00:00Z",
   });
+  assert.equal(x.h.value().props.children[0].props.accessibilityRole, "text");
   assert.equal(
-    user.h.value().props.children[0].props.accessibilityRole,
-    "text",
-  );
-  assert.equal(
-    user.h.value().props.children[1].props.accessibilityLabel,
+    x.h.value().props.children[1].props.accessibilityLabel,
     "Copy message",
   );
-  user.h.unmount();
-  const crew = setup({ text: "Crew agent" });
-  assert.ok(!crew.all().some((n) => n.props.accessibilityRole === "text"));
-  assert.ok(crew.all().some((n) => n.props.accessibilityLabel === "Helpful"));
-  crew.h.unmount();
-});
-test("feedback eligibility excludes replay, legacy, failed, stopped, system and continuation rows", () => {
-  const id = `nyxa-${"a".repeat(32)}`;
-  const message = {
-    role: "assistant",
-    status: "completed",
-    error_code: null,
-    text: "Reply",
-  };
-  assert.equal(canReplyFeedback(message, id), true);
-  assert.equal(canReplyFeedback(message, id, true), false);
-  for (const parent of [undefined, "legacy-thread"])
-    assert.equal(canReplyFeedback(message, parent), false);
-  for (const patch of [
-    { status: "failed" },
-    { error_code: "cancelled" },
-    { role: "orchestrator" },
-    { text: " " },
-    { continuation_of: "decision" },
-  ])
-    assert.equal(canReplyFeedback({ ...message, ...patch }, id), false);
+  assert.equal(x.h.value().props.style[0].gap, 8);
+  assert.equal(x.h.value().props.children[1].props.hitSlop.left, 4);
+  x.h.unmount();
 });
 test("message-time parity: local calendar day/month/year, locale and full daylight-saving time labels", () => {
   const now = Date.parse("2026-10-28T04:00:00Z");

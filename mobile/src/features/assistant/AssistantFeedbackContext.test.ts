@@ -2,11 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { URL, fileURLToPath } from "node:url";
 import { hookHarness, deferred } from "./assistantHookTestHarness";
-import {
-  feedbackComment,
-  feedbackNoteLimit,
-  FEEDBACK_REASONS,
-} from "./assistantFeedback";
 import { assistantContextSchema } from "./assistantTypes";
 
 type Element = { type: unknown; props: Record<string, any> };
@@ -80,69 +75,6 @@ function setup(
     text: () => words(h.value()),
   };
 }
-test("feedback reason order and note bound match the web including all reasons", () => {
-  assert.equal(
-    feedbackComment(["Not accurate", "Bad response"], " wrong date "),
-    "Not accurate, Bad response — wrong date",
-  );
-  assert.equal(feedbackComment([], " detail "), "detail");
-  for (const vote of ["up", "down"] as const)
-    assert.equal(
-      feedbackComment(
-        FEEDBACK_REASONS[vote],
-        "x".repeat(feedbackNoteLimit(vote)),
-      ).length,
-      1000,
-    );
-});
-test("shared real feedback saves a vote immediately, sends ordered reasons/details and withdraws", async () => {
-  const calls: any[] = [];
-  const x = setup("./AssistantReplyFeedback.tsx", "AssistantReplyFeedback", {
-    onSave: async (...a: any[]) => {
-      calls.push(a);
-      return true;
-    },
-  });
-  x.press("Not helpful");
-  await x.h.settle();
-  assert.equal(calls[0][0], "down");
-  assert.equal(x.find("Not helpful").props.accessibilityState.selected, true);
-  x.press("Bad response");
-  x.press("Not accurate");
-  x.find("Details (optional)").props.onChangeText(" wrong date ");
-  x.h.flush();
-  x.press("Submit");
-  await x.h.settle();
-  assert.equal(calls[1][1], "Not accurate, Bad response — wrong date");
-  assert.match(x.text(), /Thanks for the feedback/);
-  x.press("Not helpful");
-  await x.h.settle();
-  assert.equal(calls[2][0], undefined);
-  x.h.unmount();
-});
-test("failed vote rolls back, closes optional form and concurrent taps cannot duplicate", async () => {
-  const wait = deferred<boolean>();
-  let calls = 0;
-  const x = setup("./AssistantReplyFeedback.tsx", "AssistantReplyFeedback", {
-    feedback: { vote: "up" },
-    onSave: () => {
-      calls++;
-      return wait.promise;
-    },
-  });
-  x.press("Not helpful");
-  x.press("Not helpful");
-  assert.equal(calls, 1);
-  wait.resolve(false);
-  await x.h.settle();
-  assert.equal(x.find("Helpful").props.accessibilityState.selected, true);
-  assert.match(x.text(), /Unable to save feedback. Try again/);
-  assert.equal(
-    nodes(x.h.value()).find((n) => n.type === "Modal")!.props.visible,
-    false,
-  );
-  x.h.unmount();
-});
 const id = `nyxa-${"a".repeat(32)}`;
 const context = assistantContextSchema.parse({
   conversation_id: id,
@@ -257,36 +189,34 @@ test("working context disables active-turn reset and fences stale account reset 
   assert.equal(done, 0);
   x.h.unmount();
 });
-test("feedback and working context use existing API routes and validate context identity", async () => {
+test("working context uses existing API routes and validate context identity", async () => {
   const calls: any[] = [];
   let mismatch = false;
   const h = hookHarness({
     "./http": {
       requestJson: async (path: string, options: any) => {
         calls.push({ path, options });
-        return path.endsWith("feedback")
-          ? { vote: "up" }
-          : {
-              ...context,
-              conversation_id: mismatch ? `nyxa-${"b".repeat(32)}` : id,
-            };
+        return {
+          ...context,
+          conversation_id: mismatch ? `nyxa-${"b".repeat(32)}` : id,
+        };
       },
     },
   });
   const api = h.load(
     fileURLToPath(new URL("../../lib/api/assistantApi.ts", import.meta.url)),
   ).assistantApi as any;
-  await api.feedback(id, "message/a", "up", "Useful");
-  await api.feedback(id, "message/a");
   await api.context(id);
   await api.resetContext(id);
   assert.equal(
     calls[0].path,
-    `/assistant/nyxagent/conversations/${id}/messages/message%2Fa/feedback`,
+    `/assistant/nyxagent/conversations/${id}/context`,
   );
-  assert.equal(calls[0].options.method, "PUT");
-  assert.equal(calls[1].options.method, "DELETE");
-  assert.equal(calls[3].options.method, "POST");
+  assert.equal(
+    calls[1].path,
+    `/assistant/nyxagent/conversations/${id}/context/reset`,
+  );
+  assert.equal(calls[1].options.method, "POST");
   mismatch = true;
   await assert.rejects(api.context(id), /context mismatch/);
 });

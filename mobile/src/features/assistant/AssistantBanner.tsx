@@ -106,25 +106,34 @@ export function JumpToLatest({
   const { colors } = useTheme();
   if (!visible) return null;
   return (
-    <View style={{ alignItems: "center" }}>
+    <View
+      pointerEvents="box-none"
+      style={{ height: 0, zIndex: 20, alignItems: "center" }}
+    >
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Jump to latest"
+        accessibilityLabel="Jump to latest message"
+        hitSlop={6}
         onPress={onPress}
         style={{
-          minHeight: 44,
-          flexDirection: "row",
+          position: "absolute",
+          bottom: 12,
+          width: 32,
+          height: 32,
           alignItems: "center",
-          gap: 8,
-          paddingHorizontal: 16,
-          borderRadius: 24,
-          borderWidth: 1,
+          justifyContent: "center",
+          borderRadius: 16,
+          borderWidth: 0.5,
           borderColor: colors.border,
-          backgroundColor: colors.card,
+          backgroundColor: `${colors.bg}f2`,
+          shadowColor: "#000000",
+          shadowOpacity: 0.12,
+          shadowOffset: { width: 0, height: 1 },
+          shadowRadius: 2,
+          elevation: 2,
         }}
       >
-        <ArrowDown size={14} color={colors.textSecondary} />
-        <Label style={{ fontSize: 12 }}>Jump to latest</Label>
+        <ArrowDown size={16} color={colors.textMuted} />
       </Pressable>
     </View>
   );

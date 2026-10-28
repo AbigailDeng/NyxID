@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   groupCreateSchema,
-  groupFeedbackInputSchema,
   groupFeedbackSchema,
   groupIdSchema,
   groupMessagesPageSchema,
@@ -317,108 +316,17 @@ test("acknowledgement decisions use their conversation resource and reject a mis
   await assert.rejects(api.decide(action, "deny"), /mismatch/);
 });
 
-test("feedback comments preserve omission and explicit clearing with the server's Unicode limit", () => {
-  assert.deepEqual(groupFeedbackInputSchema.parse({ vote: "up" }), {
-    vote: "up",
-  });
-  assert.deepEqual(
-    groupFeedbackInputSchema.parse({ vote: "down", comment: "" }),
-    { vote: "down", comment: "" },
-  );
-  assert.equal(
-    groupFeedbackInputSchema.safeParse({
-      vote: "down",
-      comment: "🪴".repeat(1000),
-    }).success,
-    true,
-  );
-  assert.equal(
-    groupFeedbackInputSchema.safeParse({
-      vote: "down",
-      comment: "🪴".repeat(1001),
-    }).success,
-    false,
-  );
-  assert.equal(
-    groupFeedbackInputSchema.safeParse({
-      vote: "down",
-      comment: ` \n${"x".repeat(1000)}\u202e\u0007 `,
-    }).success,
-    true,
-  );
-  assert.equal(
-    groupFeedbackInputSchema.safeParse({ vote: "other" }).success,
-    false,
-  );
-  assert.equal(
-    groupFeedbackInputSchema.safeParse({ vote: "up", comment: null }).success,
-    false,
-  );
-  assert.equal(
-    groupFeedbackInputSchema.safeParse({ vote: "up", message_id: ACK }).success,
-    false,
-  );
+test("history still accepts server feedback metadata without native mutation controls", () => {
   assert.deepEqual(
     groupFeedbackSchema.parse({ vote: "up", comment: null, updated_at: NOW }),
     { vote: "up", comment: null, updated_at: NOW },
   );
   assert.equal(
-    groupFeedbackSchema.safeParse({ vote: "up", comment: null }).success,
+    groupFeedbackSchema.safeParse({
+      vote: "other",
+      comment: null,
+      updated_at: NOW,
+    }).success,
     false,
   );
-});
-
-test("group feedback PUT returns server-normalized state and DELETE accepts an empty 204", async () => {
-  const calls: { path: string; options?: RequestOptions }[] = [];
-  const api = createGroupsApi(async (path, options) => {
-    calls.push({ path, options });
-    if (options?.method === "DELETE") return null;
-    return { vote: "down", comment: "Needs a citation", updated_at: NOW };
-  });
-  const result = await api.feedback(ID, ACK, {
-    vote: "down",
-    comment: " Needs a citation ",
-  });
-  assert.deepEqual(result, {
-    vote: "down",
-    comment: "Needs a citation",
-    updated_at: NOW,
-  });
-  assert.deepEqual(calls[0], {
-    path: `/assistant/nyxagent/groups/${ID}/messages/${ACK}/feedback`,
-    options: {
-      method: "PUT",
-      body: { vote: "down", comment: " Needs a citation " },
-    },
-  });
-  await api.feedback(ID, ACK, { vote: "up" });
-  assert.deepEqual(calls[1]?.options?.body, { vote: "up" });
-  await api.feedback(ID, ACK, { vote: "down", comment: "" });
-  assert.deepEqual(calls[2]?.options?.body, { vote: "down", comment: "" });
-  assert.equal(await api.removeFeedback(ID, ACK), null);
-  assert.deepEqual(calls[3], {
-    path: `/assistant/nyxagent/groups/${ID}/messages/${ACK}/feedback`,
-    options: { method: "DELETE" },
-  });
-});
-
-test("feedback rejects invalid references before dispatch and propagates failed/malformed mutations", async () => {
-  let calls = 0;
-  const api = createGroupsApi(async () => {
-    calls += 1;
-    return { vote: "up", comment: null, updated_at: "invalid" };
-  });
-  await assert.rejects(api.feedback(ID, `${ACK}/feedback`, { vote: "up" }));
-  await assert.rejects(api.removeFeedback(`${ID}/messages`, ACK));
-  await assert.rejects(
-    api.feedback(ID, ACK, { vote: "up", comment: "x".repeat(1001) }),
-  );
-  assert.equal(calls, 0);
-  await assert.rejects(api.feedback(ID, ACK, { vote: "up" }));
-  assert.equal(calls, 1);
-  const offline = createGroupsApi(async () => {
-    throw new Error("offline");
-  });
-  await assert.rejects(offline.feedback(ID, ACK, { vote: "up" }), /offline/);
-  await assert.rejects(offline.removeFeedback(ID, ACK), /offline/);
 });

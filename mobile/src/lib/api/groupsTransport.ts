@@ -6,8 +6,6 @@ import {
 } from "../../features/assistant/assistantTypes";
 import {
   groupCreateSchema,
-  groupFeedbackInputSchema,
-  groupFeedbackSchema,
   groupIdSchema,
   groupIdentitySchema,
   groupListSchema,
@@ -20,7 +18,6 @@ import {
   groupSchema,
   groupUpdateSchema,
   type GroupCreate,
-  type GroupFeedbackInput,
   type GroupPendingAction,
   type GroupPostRequest,
   type GroupUpdate,
@@ -52,22 +49,6 @@ export function createGroupsApi(request: JsonRequest) {
     return z
       .object({ members: z.array(groupOrganizationMemberSchema) })
       .parse(await request(`/orgs/${id}/members`, { signal })).members;
-  }
-  const feedbackPath = (id: string, messageId: string) =>
-    `${path(id)}/messages/${z.string().uuid().parse(messageId)}/feedback`;
-  async function feedback(
-    id: string,
-    messageId: string,
-    input: GroupFeedbackInput,
-  ) {
-    const body = groupFeedbackInputSchema.parse(input);
-    return groupFeedbackSchema.parse(
-      await request(feedbackPath(id, messageId), { method: "PUT", body }),
-    );
-  }
-  async function removeFeedback(id: string, messageId: string): Promise<null> {
-    await request(feedbackPath(id, messageId), { method: "DELETE" });
-    return null;
   }
   return {
     async list(signal?: AbortSignal) {
@@ -131,11 +112,6 @@ export function createGroupsApi(request: JsonRequest) {
     orgs: organizations,
     organizationMembers,
     orgMembers: organizationMembers,
-    feedback,
-    putFeedback: feedback,
-    setFeedback: feedback,
-    removeFeedback,
-    deleteFeedback: removeFeedback,
     async decide(input: GroupPendingAction, decision: "allow" | "deny") {
       const action = groupPendingActionSchema.parse(input);
       z.enum(["allow", "deny"]).parse(decision);

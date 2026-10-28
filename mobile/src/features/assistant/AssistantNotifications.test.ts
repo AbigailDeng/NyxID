@@ -42,7 +42,13 @@ function render(
     },
     "../../theme/ThemeContext": {
       useTheme: () => ({
-        colors: { dangerTone: {}, warningTone: {}, successTone: {} },
+        colors: {
+          bg: "#09090b",
+          textMuted: "tertiary",
+          dangerTone: {},
+          warningTone: {},
+          successTone: {},
+        },
       }),
     },
     "../../components/workspace/WorkspaceUI": {
@@ -85,8 +91,29 @@ test("request error dismissal hides only that message; jump action has a 44pt ac
   y.h.render();
   const control = y
     .nodes()
-    .find((n) => n.props.accessibilityLabel === "Jump to latest")!;
-  assert.equal(control.props.style.minHeight, 44);
+    .find((n) => n.props.accessibilityLabel === "Jump to latest message")!;
+  assert.equal(control.props.style.width, 32);
+  assert.equal(control.props.style.height, 32);
+  assert.equal(control.props.style.borderRadius, 16);
+  assert.equal(control.props.style.width + control.props.hitSlop * 2, 44);
+  assert.equal(control.props.style.backgroundColor, "#09090bf2");
+  assert.equal(control.props.style.bottom, 12);
+  assert.equal(
+    y.h.value().props.style.height,
+    0,
+    "floats above composer without changing layout",
+  );
+  assert.equal(y.text(), "", "icon only");
+  assert.ok(
+    y
+      .nodes()
+      .some(
+        (n) =>
+          n.type === "Arrow" &&
+          n.props.size === 16 &&
+          n.props.color === "tertiary",
+      ),
+  );
   control.props.onPress();
   assert.equal(jumps, 1);
   y.h.unmount();

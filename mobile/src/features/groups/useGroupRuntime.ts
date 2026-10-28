@@ -216,34 +216,6 @@ export function useGroupChat(groupId: string) {
       setError(undefined);
     }
   }
-  async function feedback(
-    messageId: string,
-    input?: { vote: "up" | "down"; comment?: string },
-  ) {
-    return (
-      (await perform(async () => {
-        const saved = input
-          ? await groupsApi.feedback(groupId, messageId, input)
-          : await groupsApi.removeFeedback(groupId, messageId);
-        if (alive()) {
-          client.setQueryData<GroupMessagesPage>(key, (latest) =>
-            latest
-              ? {
-                  ...latest,
-                  messages: latest.messages.map((message) =>
-                    message.id === messageId
-                      ? { ...message, feedback: saved }
-                      : message,
-                  ),
-                }
-              : latest,
-          );
-          void client.invalidateQueries({ queryKey: key, exact: true });
-        }
-        return true;
-      })) === true
-    );
-  }
   return {
     ...availability,
     ...query,
@@ -253,7 +225,6 @@ export function useGroupChat(groupId: string) {
     actionError: error,
     post,
     recoverDelivery,
-    feedback,
     perform,
     loadOlder,
   };

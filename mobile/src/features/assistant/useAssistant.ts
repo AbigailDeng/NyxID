@@ -1,4 +1,3 @@
-import { canReplyFeedback } from "./assistantFeedback";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
@@ -92,7 +91,6 @@ export function useAssistant(
   const sendOperation = useRef<object | undefined>(undefined);
   const decisionLock = useRef(false);
   const lastDecision = useRef(0);
-  const feedbackLocks = useRef(new Set<string>());
   const consumedRetries = useRef(new Set<string>());
   const previousAgent = useRef(routeAgentId);
   const previousAcknowledgement = useRef(initialAcknowledgementId);
@@ -657,53 +655,6 @@ export function useAssistant(
     }
   }
 
-  async function feedback(
-    messageId: string,
-    vote?: "up" | "down",
-    comment?: string,
-  ) {
-    const id = selected.current;
-    const localEpoch = epoch.current;
-    const operation = reopenSequence.current;
-    const message = latestHistory.current?.messages.find(
-      (row) => row.id === messageId,
-    );
-    const key = `${id}:${messageId}`;
-    if (
-      !id ||
-      !activeRef.current ||
-      !message ||
-      !canReplyFeedback(message, id) ||
-      feedbackLocks.current.has(key)
-    )
-      return false;
-    feedbackLocks.current.add(key);
-    try {
-      const saved = await assistantApi.feedback(id, messageId, vote, comment);
-      if (
-        !mounted.current ||
-        !activeRef.current ||
-        selected.current !== id ||
-        epoch.current !== localEpoch ||
-        reopenSequence.current !== operation
-      )
-        return false;
-      const current = latestHistory.current;
-      if (current)
-        updateHistory({
-          ...current,
-          messages: current.messages.map((row) =>
-            row.id === messageId ? { ...row, feedback: saved } : row,
-          ),
-        });
-      return true;
-    } catch {
-      return false;
-    } finally {
-      feedbackLocks.current.delete(key);
-    }
-  }
-
   async function rename(title: string) {
     const id = selected.current;
     if (!id || mutating) return false;
@@ -810,7 +761,6 @@ export function useAssistant(
     retry,
     decide,
     stop,
-    feedback,
     rename,
     remove,
     loadOlder,

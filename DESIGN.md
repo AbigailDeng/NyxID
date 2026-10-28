@@ -548,6 +548,9 @@ full-screen. See
 - Native private-user messages have neutral card fill, a 1pt border, 38pt leading
   inset and corners 12/12/3/12. Private chat omits redundant “You”; group speakers,
   real specialist attribution, orchestration, updates, via and guidance remain.
+  Native reply footers show only an icon Copy action and a local day/month date,
+  8pt apart and 8pt below the body. Reply feedback votes are omitted on native by
+  user decision (2026-10-28); full timestamps remain accessible on long press.
   Assistant prose stays unboxed. All chat composers share a filled 26pt pill:
   full-width text sits above a toolbar with Attach, optional mentions, dictation
   and a trailing Send/Stop circle inside a 44pt target. Attach offers Photos and

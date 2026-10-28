@@ -10,7 +10,6 @@ export const MAX_GROUP_MEMBERS = 8;
 export const MAX_GROUP_PARTICIPANTS = 16;
 export const MAX_GROUP_NAME = 60;
 export const MAX_GROUP_MESSAGE = 32_768;
-export const GROUP_FEEDBACK_COMMENT_MAX = 1000;
 export const GROUP_MAX_MEMBERS = MAX_GROUP_MEMBERS;
 export const GROUP_MAX_PARTICIPANTS = MAX_GROUP_PARTICIPANTS;
 export const GROUP_NAME_MAX = MAX_GROUP_NAME;
@@ -62,26 +61,6 @@ export const groupFeedbackSchema = z.object({
   comment: z.string().nullable(),
   updated_at: instant,
 });
-export const groupFeedbackInputSchema = z
-  .object({
-    vote: z.enum(["up", "down"]),
-    // The server trims and removes controls/bidi characters before bounding
-    // the comment. Preserve omission: it retains an existing comment, while
-    // an explicit empty string clears it.
-    comment: z
-      .string()
-      .refine((value) => {
-        const sanitized = value
-          .trim()
-          .replace(
-            /[\p{Cc}\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2060\u2066\u2067\u2069]/gu,
-            "",
-          );
-        return [...sanitized].length <= GROUP_FEEDBACK_COMMENT_MAX;
-      }, "Keep feedback under 1,000 characters.")
-      .optional(),
-  })
-  .strict();
 export const groupMessageSchema = z.object({
   feedback: groupFeedbackSchema
     .partial({ comment: true, updated_at: true })
@@ -268,6 +247,5 @@ export type GroupOrganizationMember = z.infer<
 >;
 export type GroupIdentity = z.infer<typeof groupIdentitySchema>;
 export type GroupFeedback = z.infer<typeof groupFeedbackSchema>;
-export type GroupFeedbackInput = z.infer<typeof groupFeedbackInputSchema>;
 export type GroupOrg = GroupOrganization;
 export type GroupOrgMember = GroupOrganizationMember;

@@ -2,9 +2,7 @@ import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { useTheme } from "../../theme/ThemeContext";
 import { fonts } from "../../theme/designTokens";
 import { AssistantCopyButton } from "./AssistantCopyButton";
-import { AssistantReplyFeedback } from "./AssistantReplyFeedback";
 import { messageTime } from "./messageTime";
-import type { FeedbackVote } from "./assistantFeedback";
 
 export function AssistantMessageTime({
   value,
@@ -29,33 +27,19 @@ export function AssistantMessageTime({
   );
 }
 
-/** Assistant: Copy, votes, time. Human: time, Copy. Crew agents keep time in attribution. */
+/** Native replies intentionally offer Copy and date, without reply voting. */
 export function AssistantMessageFooter({
   text,
   timestamp,
   user,
-  feedback,
-  disabled,
-  onFeedback,
 }: {
   text: string;
   timestamp?: string | number | null;
   user?: boolean;
-  feedback?: { vote: FeedbackVote } | null;
-  disabled?: boolean;
-  onFeedback?: (vote?: FeedbackVote, comment?: string) => Promise<boolean>;
 }) {
-  const copy = <AssistantCopyButton text={text} />;
+  const copy = <AssistantCopyButton text={text} afterDate={user} />;
   const time = <AssistantMessageTime value={timestamp} />;
-  return onFeedback && !user ? (
-    <AssistantReplyFeedback
-      feedback={feedback}
-      disabled={disabled}
-      onSave={onFeedback}
-      beforeVotes={copy}
-      afterVotes={time}
-    />
-  ) : (
+  return (
     <View style={[styles.row, user && styles.userRow]}>
       {user ? time : copy}
       {user ? copy : time}
@@ -63,13 +47,16 @@ export function AssistantMessageFooter({
   );
 }
 const styles = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 4 },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 8,
+  },
   userRow: { justifyContent: "flex-end" },
   timeTarget: {
-    minHeight: 44,
-    minWidth: 44,
     justifyContent: "center",
-    paddingHorizontal: 4,
   },
   time: { fontFamily: fonts.bodyRegular, fontSize: 11 },
 });

@@ -1315,7 +1315,7 @@ test("header needs-you status takes precedence over active-turn running status",
   x.harness.unmount();
 });
 
-test("settled transcript wires the shared action footer and suppresses feedback for failed/stopped replies", () => {
+test("settled transcript keeps the compact footer without voting for completed/failed/stopped replies", () => {
   const x = setup(A, false);
   const item = {
     id: "reply",
@@ -1336,7 +1336,7 @@ test("settled transcript wires the shared action footer and suppresses feedback 
     )!;
   };
   assert.equal(render().props.timestamp, item.created_at);
-  assert.equal(typeof render().props.onFeedback, "function");
+  assert.equal(render().props.onFeedback, undefined);
   item.status = "failed";
   assert.equal(render().props.onFeedback, undefined);
   item.status = "completed";

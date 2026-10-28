@@ -1,7 +1,6 @@
 import { requestAuthenticatedResponse, requestJson } from "./http";
 import {
   recoverySchema,
-  feedbackSchema,
   assistantContextSchema,
   acknowledgementSchema,
   conversationIdSchema,
@@ -56,21 +55,6 @@ export const assistantApi = {
         `${path(id)}/messages/${encodeURIComponent(messageId)}/recovery`,
       ),
     );
-  },
-  async feedback(
-    id: string,
-    messageId: string,
-    vote?: "up" | "down",
-    comment?: string,
-  ) {
-    const result = await requestJson(
-      `${path(id)}/messages/${encodeURIComponent(messageId)}/feedback`,
-      {
-        method: vote ? "PUT" : "DELETE",
-        ...(vote ? { body: { vote, comment } } : {}),
-      },
-    );
-    return vote ? feedbackSchema.parse(result) : undefined;
   },
   async context(id: string, signal?: AbortSignal) {
     const value = assistantContextSchema.parse(
