@@ -240,3 +240,12 @@ uses PUT /assistant/nyxagent/settings with access_mode alone, directly as on Web
 write. Default controls offer Thinking (chat/research); assistant:model-controls
 exposes the real model list and read-only Reasoning unavailable state. Saved
 threads use the existing model PATCH; drafts retain a local model selection.
+
+The private/contextual “+” menu also offers Use a connection. It lists existing
+enabled personal and allowed organization keys, grouped by catalog service, with
+search and a removable “This message” chip. Submission adds the web's exact
+/service connection-id prefix; revoked/unreadable selections block send and voice
+entry yields to a selected connection. Scope changes and accepted sends clear the
+selection. iOS keeps Camera / Photos / Files / Use a connection in one action
+sheet. Android's three-button Alert limit uses Camera / Photos / More options,
+then Files / Use a connection / Cancel; crew attachments use the same menu.

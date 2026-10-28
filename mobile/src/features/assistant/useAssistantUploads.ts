@@ -420,9 +420,8 @@ export function useAssistantUploads({
             throw new Error(
               "This photo format needs the updated NyxID app. Choose a JPEG or PNG using Files.",
             );
-          const { ImageManipulator, SaveFormat } = await import(
-            "expo-image-manipulator"
-          );
+          const { ImageManipulator, SaveFormat } =
+            await import("expo-image-manipulator");
           const context = ImageManipulator.manipulate(file.uri);
           try {
             const image = await context.renderAsync();
@@ -487,9 +486,12 @@ export function useAssistantUploads({
       if (current.current) setPicking(false);
     }
   }
-  function choose() {
+  function choose(
+    additional: readonly [] | readonly [{ label: string; onPress: () => void }] = [],
+  ) {
     if (
       pickerLock.current ||
+      current.current !== session ||
       pendingPicker.current ||
       !live.current.enabled ||
       !live.current.focused ||
@@ -498,26 +500,63 @@ export function useAssistantUploads({
       session.sending
     )
       return;
+    const extra = additional.map((action) => ({
+      text: action.label,
+      onPress: () => {
+        if (
+          current.current !== session ||
+          epoch !== getAuthEpoch() ||
+          !live.current.enabled ||
+          !live.current.focused ||
+          !live.current.online ||
+          AppState.currentState !== "active" ||
+          session.sending
+        )
+          return;
+        action.onPress();
+      },
+    }));
     if (Platform.OS === "ios") {
       ActionSheetIOS.showActionSheetWithOptions(
         {
           title: "Add attachments",
-          options: ["Camera", "Photos", "Files", "Cancel"],
-          cancelButtonIndex: 3,
+          options: [
+            "Camera",
+            "Photos",
+            "Files",
+            ...extra.map((action) => action.text),
+            "Cancel",
+          ],
+          cancelButtonIndex: 3 + extra.length,
         },
         (index) => {
           if (index === 0) void pick("camera");
           if (index === 1) void pick("photos");
           if (index === 2) void pick("files");
+          if (index >= 3) extra[index - 3]?.onPress();
         },
       );
     } else {
-      Alert.alert("Add attachments", undefined, [
-        { text: "Camera", onPress: () => void pick("camera") },
-        { text: "Photos", onPress: () => void pick("photos") },
-        { text: "Files", onPress: () => void pick("files") },
-        { text: "Cancel", style: "cancel" },
-      ]);
+      // Android Alert supports at most three buttons. Back/outside dismisses
+      // this first menu; the second menu keeps Files and connection reachable.
+      Alert.alert(
+        "Add attachments",
+        undefined,
+        [
+          { text: "Camera", onPress: () => void pick("camera") },
+          { text: "Photos", onPress: () => void pick("photos") },
+          {
+            text: "More options…",
+            onPress: () =>
+              Alert.alert("More attachment options", undefined, [
+                { text: "Files", onPress: () => void pick("files") },
+                ...extra,
+                { text: "Cancel", style: "cancel" },
+              ]),
+          },
+        ],
+        { cancelable: true },
+      );
     }
   }
   return {

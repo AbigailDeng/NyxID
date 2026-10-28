@@ -144,6 +144,13 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
       events.push(["stop"]);
     },
   };
+  const connection = {
+    connection: undefined as any,
+    unavailable: false,
+    choose: () => events.push(["choose-connection"]),
+    prefix: (text: string) => text,
+    sent: () => events.push(["connection-sent"]),
+  };
   const uploads = {
     files: [] as any[],
     session: {
@@ -157,7 +164,7 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     blocked: false,
     picking: false,
     pick: async () => {},
-    choose: () => events.push(["choose-attachment"]),
+    choose: (extra?: any) => events.push(["choose-attachment", extra]),
     remove: (key: string) => {
       uploads.files = uploads.files.filter((file) => file.key !== key);
     },
@@ -296,6 +303,10 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
         props: { ...props, children: [props.scrollHeader, props.scrollFooter] },
       }),
     },
+    "./useComposerConnection": { useComposerConnection: () => connection },
+    "./ComposerConnectionPicker": {
+      ComposerConnectionPicker: "ConnectionPicker",
+    },
     "./NyxBotHome": { NyxBotHome: "NyxBotHome" },
     "./useAssistant": {
       useAssistant: (_id: unknown, _agent: unknown, adopt: typeof onAdopt) => {
@@ -431,6 +442,7 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     harness,
     assistant,
     uploads,
+    connection,
     props,
     events,
     drafts,
@@ -482,7 +494,7 @@ test("eligible native composers expose distinct attachments, dictation and voice
     assert.ok(x.button("Dictate message"));
     assert.equal(x.featureQueries.at(-1)?.enabled, true);
     x.button("Attach photos or files, or take a photo")!.props.onPress();
-    assert.deepEqual(x.events.at(-1), ["choose-attachment"]);
+    assert.equal(x.events.at(-1)?.[0], "choose-attachment");
     assert.equal(x.drafts.length, 0);
     x.harness.unmount();
   }
@@ -1663,4 +1675,36 @@ test("private and contextual composers bind permissions and model controls to th
     assert.equal(control().props.activeTurn, true);
     x.harness.unmount();
   }
+});
+
+test("private connection selection uses the shared chooser, prefixes sends, blocks unavailable keys and suppresses voice", async () => {
+  const x = setup(A);
+  x.button("Attach photos or files, or take a photo")!.props.onPress();
+  const extra = x.events.find(
+    ([name]) => name === "choose-attachment",
+  )![1] as any;
+  assert.equal(extra[0].label, "Use a connection");
+  extra[0].onPress();
+  assert.ok(x.events.some(([name]) => name === "choose-connection"));
+  x.connection.connection = { id: "key-a" };
+  x.connection.prefix = (text) => `/service key-a\n${text}`;
+  x.harness.render();
+  assert.equal(x.button("Open voice call"), undefined);
+  x.input().props.onChangeText("Use this account");
+  x.harness.flush();
+  x.connection.unavailable = true;
+  x.harness.render();
+  assert.equal(x.button("Send message")!.props.disabled, true);
+  x.connection.unavailable = false;
+  x.harness.render();
+  x.button("Send message")!.props.onPress();
+  await x.harness.settle();
+  assert.ok(
+    x.events.some(
+      ([name, text]) =>
+        name === "send" && text === "/service key-a\nUse this account",
+    ),
+  );
+  assert.ok(x.events.some(([name]) => name === "connection-sent"));
+  x.harness.unmount();
 });

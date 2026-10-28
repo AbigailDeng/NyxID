@@ -28,6 +28,7 @@ export const serviceConnectionSchema = z.object({
   api_key_id: z.string().nullish(),
   credential_missing: z.boolean().optional(),
   credential_binding: z.enum(["platform", "user"]).optional(),
+  catalog_service_id: z.string().nullish(),
   catalog_service_slug: z.string().nullish(),
   catalog_service_name: z.string().nullish(),
   catalog_icon_url: z.string().nullish(),

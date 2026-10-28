@@ -165,11 +165,21 @@ function harness(platform = "android") {
     choices: () => choices,
     iosOptions: () => iosOptions,
     alertTitle: () => alertTitle,
+    chooseExtra: (label: string) => {
+      if (platform === "ios")
+        iosChoice?.((iosOptions as any).options.indexOf(label));
+      else {
+        choices.find((b) => b.text === "More options…")?.onPress?.();
+        choices.find((b) => b.text === label)?.onPress?.();
+      }
+    },
     cancelChooser: () => {
       if (platform === "ios") iosChoice?.(3);
       else choices.find((b) => b.text === "Cancel")?.onPress?.();
     },
     choose: (source: "files" | "photos" | "camera") => {
+      if (platform !== "ios" && source === "files")
+        choices.find((b) => b.text === "More options…")?.onPress?.();
       if (platform === "ios")
         iosChoice?.(source === "camera" ? 0 : source === "photos" ? 1 : 2);
       else
@@ -248,7 +258,9 @@ test("plus chooser routes Camera, Photos and Files to their respective native pi
             ? x.iosOptions().options
             : x.choices().map((b) => b.text),
         ),
-        ["Camera", "Photos", "Files", "Cancel"],
+        platform === "ios"
+          ? ["Camera", "Photos", "Files", "Cancel"]
+          : ["Camera", "Photos", "More options…"],
       );
       x.choose(source);
       x.cameraPermission.resolve({ granted: true });
@@ -624,6 +636,37 @@ test("camera results keep the shared count and size limits", async () => {
         "full composer cannot open the camera",
       );
     }
+    x.h.unmount();
+  }
+});
+
+test("connection chooser action retains Camera/Photos/Files and rejects stale account or chat callbacks", () => {
+  for (const platform of ["ios", "android"]) {
+    const x = harness(platform);
+    let connections = 0;
+    x.h
+      .value()
+      .choose([{ label: "Use a connection", onPress: () => connections++ }]);
+    if (platform === "ios") {
+      assert.deepEqual(Array.from(x.iosOptions().options), [
+        "Camera",
+        "Photos",
+        "Files",
+        "Use a connection",
+        "Cancel",
+      ]);
+      assert.equal(x.iosOptions().cancelButtonIndex, 4);
+    } else assert.equal(x.choices().length, 3);
+    x.chooseExtra("Use a connection");
+    assert.equal(connections, 1);
+    assert.equal(x.calls.length, 0);
+    x.h
+      .value()
+      .choose([{ label: "Use a connection", onPress: () => connections++ }]);
+    x.props.enabled = false;
+    x.h.render();
+    x.chooseExtra("Use a connection");
+    assert.equal(connections, 1);
     x.h.unmount();
   }
 });

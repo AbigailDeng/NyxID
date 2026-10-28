@@ -5,6 +5,8 @@ import {
 import { AssistantSystemMessage } from "./AssistantSystemMessage";
 import { AssistantLinkContext } from "./AssistantLinkContext";
 import { AssistantComposerSettings } from "./AssistantComposerSettings";
+import { useComposerConnection } from "./useComposerConnection";
+import { ComposerConnectionPicker } from "./ComposerConnectionPicker";
 import { transcriptColumnStyle } from "../display/chatLayout";
 import { newAssistantChatParams } from "../../app/assistantChatParams";
 import { assistantDraftKey, assistantDraftStore } from "./assistantDraftStore";
@@ -306,6 +308,14 @@ export function AssistantScreen({
     enabled: canCompose,
     online: assistant.online,
   });
+  const connection = useComposerConnection(
+    draftKey,
+    !canCompose ||
+      uploads.session.sending ||
+      uploads.picking ||
+      openingVoice ||
+      !!voiceThread,
+  );
   const newChatDisabled =
     assistant.loading ||
     !assistant.agentId ||
@@ -328,6 +338,7 @@ export function AssistantScreen({
   });
   const canSend =
     canCompose &&
+    !connection.unavailable &&
     !dictation.active &&
     !uploads.session.sending &&
     !uploads.blocked &&
@@ -350,6 +361,7 @@ export function AssistantScreen({
     text: draft,
     attachmentCount: uploads.files.length,
     uploadBlocked:
+      !!connection.connection ||
       uploads.blocked ||
       uploads.picking ||
       uploads.session.sending ||
@@ -625,10 +637,13 @@ export function AssistantScreen({
         draft,
         updateDraft,
         getRevision: () => draftRevision.current,
-        send: (text) =>
-          uploads.session.submit((payload) =>
-            assistant.send(text, undefined, payload),
-          ),
+        send: async (text) => {
+          const accepted = await uploads.session.submit((payload) =>
+            assistant.send(connection.prefix(text), undefined, payload),
+          );
+          if (accepted) connection.sent();
+          return accepted;
+        },
       }),
     );
   }
@@ -1251,6 +1266,7 @@ export function AssistantScreen({
       ) : null}
       <View style={styles.composerInset}>
         <ChatComposerFrame style={[styles.composer, chatColumn]}>
+          <ComposerConnectionPicker state={connection} />
           <ComposerDictationReview dictation={dictation} />
           <AssistantPendingUploads
             files={uploads.files}
@@ -1290,7 +1306,11 @@ export function AssistantScreen({
                     uploads.session.sending ||
                     uploads.files.length >= 10
                   }
-                  onPress={uploads.choose}
+                  onPress={() =>
+                    uploads.choose([
+                      { label: "Use a connection", onPress: connection.choose },
+                    ])
+                  }
                 />
                 {mentionAction}
                 <AssistantComposerSettings
