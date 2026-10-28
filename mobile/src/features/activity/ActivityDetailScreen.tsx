@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useWorkspaceSheet } from "../../app/WorkspaceHeader";
+import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import { capture } from "../../lib/telemetry";
 import {
   AppState,
@@ -26,7 +26,6 @@ import { StatusBadge } from "../../components/StatusBadge";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { ApprovalEvidence } from "./ApprovalEvidence";
 import { mobileApi } from "../../lib/api/mobileApi";
-import { createIdempotencyKey } from "../../lib/api/idempotency";
 import {
   getChallengeActionState,
   getChallengeQueryErrorMessage,
@@ -79,7 +78,6 @@ function DetailRow({
 }
 
 export function ActivityDetailScreen({ navigation, route }: Props) {
-  const inWorkspaceSheet = Boolean(useWorkspaceSheet());
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const flowStyles = useMemo(() => createFlowStyles(colors), [colors]);
@@ -88,6 +86,10 @@ export function ActivityDetailScreen({ navigation, route }: Props) {
   const { isConnected } = useNetworkStatus();
   const [isLiveRefreshEnabled, setIsLiveRefreshEnabled] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const returnTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  useEffect(() => () => clearTimeout(returnTimer.current), []);
 
   // Same gate as ActivityScreen: suppress the in-app toast for the approval
   // that is already filling the screen.
@@ -227,11 +229,35 @@ export function ActivityDetailScreen({ navigation, route }: Props) {
   // approval data first resolves on this screen.
   const viewedAtRef = useRef<number | null>(null);
   const viewedEmittedRef = useRef<string | null>(null);
+  const decided = useRef(false);
+  const decidable = useRef(false);
+  decidable.current = data?.status === "PENDING";
+  useEffect(
+    () => () => {
+      if (viewedAtRef.current != null && decidable.current && !decided.current)
+        capture({
+          name: "ui.mobile_dialog_abandoned",
+          props: {
+            dialog_id: "approval_detail",
+            final_step: 1,
+            duration_ms: Math.max(0, Date.now() - viewedAtRef.current),
+          },
+        });
+    },
+    [],
+  );
   useEffect(() => {
     if (!data) return;
     if (viewedEmittedRef.current === data.id) return;
     viewedEmittedRef.current = data.id;
     viewedAtRef.current = Date.now();
+    capture({
+      name: "ui.mobile_dialog_opened",
+      props: {
+        dialog_id: "approval_detail",
+        entry_point: route.params.entryPoint ?? "deep_link",
+      },
+    });
     capture({
       name: "mobile.approval_viewed",
       props: {
@@ -240,7 +266,7 @@ export function ActivityDetailScreen({ navigation, route }: Props) {
         mode: data.approval_mode,
       },
     });
-  }, [data]);
+  }, [data, route.params.entryPoint]);
 
   const settingsQuery = useQuery({
     queryKey: ["notifications", "settings"],
@@ -253,7 +279,6 @@ export function ActivityDetailScreen({ navigation, route }: Props) {
         decision === "APPROVE"
           ? (settingsQuery.data?.grant_expiry_days ?? 30) * 86400
           : undefined;
-      const idempotencyKey = createIdempotencyKey("decision", challengeId);
       return mobileApi.submitDecision(challengeId, decision, durationSec);
     },
     onMutate: () => {
@@ -266,6 +291,7 @@ export function ActivityDetailScreen({ navigation, route }: Props) {
       return { decisionMs };
     },
     onSuccess: (_, decision, context) => {
+      decided.current = true;
       capture({
         name: "ui.mobile_decision_made",
         props: {
@@ -283,7 +309,8 @@ export function ActivityDetailScreen({ navigation, route }: Props) {
         message: decision === "APPROVE" ? "Approved" : "Denied",
         kind: "success",
       });
-      setTimeout(() => {
+      returnTimer.current = setTimeout(() => {
+        if (!navigation.isFocused()) return;
         if (navigation.canGoBack()) {
           navigation.goBack();
         } else {
@@ -294,6 +321,13 @@ export function ActivityDetailScreen({ navigation, route }: Props) {
     onError: (err) => {
       setToast({ message: getDecisionErrorMessage(err), kind: "error" });
     },
+  });
+
+  useWorkspaceBack({
+    active: false,
+    defaultRole: "back",
+    disabled: decideMutation.isPending,
+    onBack: navigation.goBack,
   });
 
   if (isLoading) {
@@ -314,13 +348,11 @@ export function ActivityDetailScreen({ navigation, route }: Props) {
             {getChallengeQueryErrorMessage(error)}
           </Text>
           <View style={styles.errorActions}>
-            {!inWorkspaceSheet && (
-              <PrimaryButton
-                label="Back"
-                kind="ghost"
-                onPress={() => navigation.goBack()}
-              />
-            )}
+            <PrimaryButton
+              label="Back"
+              kind="ghost"
+              onPress={() => navigation.goBack()}
+            />
             <PrimaryButton label="Retry" onPress={() => refetch()} />
           </View>
         </View>
@@ -350,24 +382,6 @@ export function ActivityDetailScreen({ navigation, route }: Props) {
           { paddingHorizontal: spacing.xxl },
         ]}
       >
-        {!inWorkspaceSheet && (
-          <>
-            <Pressable
-              onPress={() => {
-                capture({
-                  name: "ui.mobile_nav_target_opened",
-                  props: { target: "Activity", source: "back" },
-                });
-                navigation.goBack();
-              }}
-              style={styles.backBtn}
-            >
-              <Text style={styles.backText}>{"\u2190"} Back to Activity</Text>
-            </Pressable>
-
-            <Text style={styles.screenTitle}>Approval Detail</Text>
-          </>
-        )}
         {isGrantMode && (
           <Text style={styles.screenSub}>
             Review this request before creating reusable access for{" "}

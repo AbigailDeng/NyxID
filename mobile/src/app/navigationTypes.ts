@@ -58,6 +58,10 @@ export type WorkspaceContentParamList = Omit<
   ServiceSetup: { connectionId?: string; catalogSlug?: string };
   AgentSkills: { agentId: string };
   AgentMachines: { agentId: string };
+  AgentMachineEditor: { agentId: string; machineId: string };
+  MachineDetail: { machineId: string };
+  PluginConnections: { connectorId: string };
+  ActiveGrants: undefined;
   MachinePolicy: { machineId: string; ownerId: string };
   MachineActivity: { machineId: string; ownerId: string };
   AutomationDetail: { id: string };
@@ -66,7 +70,7 @@ export type WorkspaceContentParamList = Omit<
     | undefined;
   AutomationRuns: { id: string };
   AutomationPreferences: undefined;
-  ActivityDetail: { challengeId: string };
+  ActivityDetail: { challengeId: string; entryPoint?: string };
 };
 
 /** Only Settings and its account/quick-action pages use the pull-up surface. */
@@ -124,6 +128,10 @@ export const workspaceContentRouteNames: (keyof WorkspaceContentParamList)[] = [
   "ServiceSetup",
   "AgentSkills",
   "AgentMachines",
+  "AgentMachineEditor",
+  "MachineDetail",
+  "PluginConnections",
+  "ActiveGrants",
   "MachinePolicy",
   "MachineActivity",
   "AutomationDetail",

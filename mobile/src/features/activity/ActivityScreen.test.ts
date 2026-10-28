@@ -46,9 +46,11 @@ function setup({
   challengeId,
   connected = true,
   pending = [challenge("pending-real")],
+  grants = false,
   history = [challenge("history-real", { status: "APPROVED" })],
 }: {
   challengeId?: string;
+  grants?: boolean;
   connected?: boolean;
   pending?: ChallengeDetail[];
   history?: ChallengeDetail[];
@@ -63,8 +65,14 @@ function setup({
   let focused = true;
   let back: any;
   let refreshSignal: (() => void) | undefined;
-  const route = { params: { challengeId } };
+  const route = {
+    name: grants ? "ActiveGrants" : "Activity",
+    params: { challengeId },
+  };
   const navigation = {
+    push: (name: string, params?: unknown) =>
+      calls.push({ method: "push", args: [name, params] }),
+    goBack: () => calls.push({ method: "back", args: [] }),
     setOptions: (options: { title: string }) => titles.push(options.title),
     setParams: (params: { challengeId?: string }) =>
       Object.assign(route.params, params),
@@ -103,6 +111,8 @@ function setup({
     27,
   );
   const queryClient = {
+    setQueryData: (key: unknown, value: unknown) =>
+      calls.push({ method: "cache", args: [key, value] }),
     invalidateQueries: async (args: unknown) => {
       calls.push({ method: "invalidate", args: [args] });
     },
@@ -253,6 +263,10 @@ function setup({
   };
   return {
     harness,
+    grants: (value: boolean) => {
+      route.name = value ? "ActiveGrants" : "Activity";
+      harness.render();
+    },
     calls,
     mutationCalls,
     titles,
@@ -261,12 +275,6 @@ function setup({
     queries,
     route,
     overview: () => find((item) => item.type === "ApprovalsOverview"),
-    sheet: () =>
-      find(
-        (item) =>
-          typeof item.type === "function" &&
-          item.type.name === "ChallengeDetailSheet",
-      ),
     toast: () => find((item) => item.type === "ToastOverlay").props.toast,
     find,
     back: () => back,
@@ -291,27 +299,25 @@ function setup({
   };
 }
 
-test("drawer destination starts in the combined approval inbox and grant drill-in uses the native header back", () => {
+test("approval inbox and grant drill-in use separate horizontal routes with native Back", () => {
   const env = setup();
   try {
-    assert.equal(env.titles.at(-1), "Approvals");
     assert.equal(env.back().active, false);
     assert.equal(env.overview().props.pending.total, 43);
     assert.equal(env.overview().props.activeGrantCount, 27);
     assert.equal(env.overview().props.pending.items[0].id, "pending-real");
     assert.equal(env.overview().props.history.items[0].id, "history-real");
     env.overview().props.onOpenGrants();
-    env.harness.flush();
-    assert.equal(env.titles.at(-1), "Active grants");
-    assert.equal(env.back().active, true);
-    assert.equal(env.back().label, "Back to approvals");
+    assert.equal(env.calls.at(-1)?.args[0], "ActiveGrants");
+    env.grants(true);
+    assert.equal(env.back().defaultRole, "back");
     assert.equal(
       env.find((item) => item.type === "FlatList").props.data[0].id,
       "grant-real",
     );
     env.back().onBack();
-    env.harness.flush();
-    assert.equal(env.titles.at(-1), "Approvals");
+    assert.equal(env.calls.at(-1)?.method, "back");
+    env.grants(false);
     assert.equal(env.back().active, false);
     assert.ok(env.overview());
   } finally {
@@ -319,82 +325,69 @@ test("drawer destination starts in the combined approval inbox and grant drill-i
   }
 });
 
-test("reopening Approvals resets a previous grant subview while preserving a challenge deep-link sheet", async () => {
-  const env = setup({ challengeId: "pending-real" });
-  try {
-    assert.equal(env.sheet().props.challenge.id, "pending-real");
-    assert.equal(env.route.params.challengeId, undefined);
-    env.overview().props.onOpenGrants();
-    env.harness.flush();
-    env.blur();
-    env.focus();
-    assert.ok(env.overview());
-    assert.equal(env.back().active, false);
-    assert.equal(env.sheet().props.challenge.id, "pending-real");
-    assert.equal(
-      env.calls.some((item) => item.method === "getChallengeById"),
-      false,
-    );
-    assert.ok(env.activeChallenges.includes("pending-real"));
-  } finally {
-    env.unmount();
+test("pending and decided rows seed the shared detail cache and push the exact request", () => {
+  const env = setup();
+  for (const row of [
+    challenge("pending-real"),
+    challenge("history-real", { status: "APPROVED" }),
+  ]) {
+    env.overview().props.onOpenDetail(row, "pending_list");
+    assert.deepEqual(JSON.parse(JSON.stringify(env.calls.at(-1))), {
+      method: "push",
+      args: [
+        "ActivityDetail",
+        { challengeId: row.id, entryPoint: "pending_list" },
+      ],
+    });
+    assert.deepEqual(JSON.parse(JSON.stringify(env.calls.at(-2)?.args)), [
+      ["challenge", row.id],
+      row,
+    ]);
   }
+  env.unmount();
 });
 
-test("uncached notification deep links still fetch and open the requested approval", async () => {
+test("uncached notification deep links push the same detail route without a sheet or redundant request", async () => {
   const env = setup({ challengeId: "push-real" });
-  try {
-    await env.harness.settle();
-    assert.equal(env.sheet().props.challenge.id, "push-real");
-    assert.deepEqual(
-      env.calls.find((item) => item.method === "getChallengeById")?.args,
-      ["push-real"],
-    );
-    assert.equal(env.titles.at(-1), "Approvals");
-  } finally {
-    env.unmount();
-  }
+  await env.harness.settle();
+  assert.deepEqual(JSON.parse(JSON.stringify(env.calls.at(-1))), {
+    method: "push",
+    args: [
+      "ActivityDetail",
+      { challengeId: "push-real", entryPoint: "deep_link" },
+    ],
+  });
+  assert.equal(env.route.params.challengeId, undefined);
+  assert.equal(
+    env.calls.some((c) => c.method === "getChallengeById"),
+    false,
+  );
+  env.unmount();
 });
 
-test("inline and detail decisions preserve request id, approval mode and server decision API", async () => {
+test("inline approval decisions preserve id, mode, duration and the existing server path", async () => {
   const grant = challenge("grant-request", { approval_mode: "grant" });
   const env = setup({ pending: [grant] });
-  try {
-    env.overview().props.onDecide(grant, "APPROVE");
-    await env.harness.settle();
-    assert.equal(env.mutationCalls[0].id, "grant-request");
-    assert.equal(env.mutationCalls[0].decision, "APPROVE");
-    assert.equal(env.mutationCalls[0].approvalMode, "grant");
-    assert.deepEqual(
-      env.calls.find((item) => item.method === "submitDecision")?.args,
-      ["grant-request", "APPROVE", 7 * 86400],
-    );
-    assert.equal(env.toast().action.label, "View grants");
-    env.toast().action.onPress();
-    env.harness.flush();
-    assert.equal(env.back().active, true);
-    env.back().onBack();
-    env.harness.flush();
-    const single = challenge("single-request", {
-      approval_mode: "per_request",
-    });
-    env.overview().props.onOpenDetail(single, "pending_list");
-    env.harness.flush();
-    env.sheet().props.onDeny("single-request");
-    await env.harness.settle();
-    assert.equal(env.mutationCalls.at(-1).id, "single-request");
-    assert.equal(env.mutationCalls.at(-1).decision, "DENY");
-    assert.equal(env.mutationCalls.at(-1).approvalMode, "per_request");
-    assert.deepEqual(
-      env.calls.filter((item) => item.method === "submitDecision").at(-1)?.args,
-      ["single-request", "DENY", undefined],
-    );
-    assert.equal(env.toast().message, "Denied");
-    assert.equal(env.toast().action, undefined);
-    assert.equal(env.sheet().props.challenge, null);
-  } finally {
-    env.unmount();
-  }
+  await env.overview().props.onDecide(grant, "APPROVE");
+  await env.harness.settle();
+  assert.deepEqual(env.calls.find((c) => c.method === "submitDecision")?.args, [
+    "grant-request",
+    "APPROVE",
+    7 * 86400,
+  ]);
+  assert.equal(env.toast().action.label, "View grants");
+  env.toast().action.onPress();
+  assert.equal(env.calls.at(-1)?.args[0], "ActiveGrants");
+  const single = challenge("single-request");
+  env.overview().props.onDecide(single, "DENY");
+  await env.harness.settle();
+  assert.deepEqual(
+    env.calls.filter((c) => c.method === "submitDecision").at(-1)?.args,
+    ["single-request", "DENY", undefined],
+  );
+  assert.equal(env.toast().message, "Denied");
+  assert.equal(env.toast().action, undefined);
+  env.unmount();
 });
 
 test("manual inbox refresh fetches pending, history and the grants total together", async () => {
@@ -440,8 +433,7 @@ test("approval signals refresh all lists from the grants subview and queue one c
       }
     };
     env.harness.render();
-    env.overview().props.onOpenGrants();
-    env.harness.flush();
+    env.grants(true);
     env.signal();
     env.harness.flush();
     assert.equal(
@@ -495,7 +487,6 @@ test("offline root explains connectivity and disables refresh without hiding cac
     assert.ok(env.find((item) => item.type === "OfflineBanner"));
     assert.equal(env.overview().props.offline, true);
     assert.equal(env.overview().props.refreshDisabled, true);
-    assert.equal(env.sheet().props.isMutating, true);
     assert.equal(env.overview().props.pending.items[0].id, "pending-real");
     env.overview().props.onRefresh();
     await env.harness.settle();

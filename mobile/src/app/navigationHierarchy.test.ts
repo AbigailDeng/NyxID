@@ -56,6 +56,10 @@ const mainEntries = [
   ["ServiceSetup", { catalogSlug: "docs" }],
   ["AgentSkills", { agentId: "agent" }],
   ["AgentMachines", { agentId: "agent" }],
+  ["AgentMachineEditor", { agentId: "agent", machineId: "machine" }],
+  ["MachineDetail", { machineId: "machine" }],
+  ["PluginConnections", { connectorId: "connector" }],
+  ["ActiveGrants", undefined],
   ["MachinePolicy", { machineId: "machine", ownerId: "owner" }],
   ["MachineActivity", { machineId: "machine", ownerId: "owner" }],
   ["AutomationDetail", { id: "watch" }],
@@ -458,4 +462,37 @@ test("root pages reveal the sidebar while native nested pages and Settings retai
     "MachineDesktop",
   ])
     assert.equal(isWorkspaceSidebarRoot(name), false, name);
+});
+
+test("a shared entry retains an unmounted Settings target and its native Back parent", () => {
+  const base = fixture();
+  const root = {
+    ...base,
+    index: 2,
+    routes: [
+      ...base.routes,
+      {
+        name: "WorkspaceSheet",
+        key: "pending-settings",
+        params: { screen: "AccountSecurity" },
+      },
+      {
+        name: "DeviceLogin",
+        key: "external-code",
+        params: { user_code: "CODE" },
+      },
+    ],
+  };
+  const action = workspaceSharedEntryNavigationAction(root, "DeviceLogin", {
+    user_code: "CODE",
+  });
+  assert.ok(action);
+  const next = apply(root, action);
+  assert.equal(selected(next).key, "pending-settings");
+  assert.equal(selected(selected(next).state!).key, "external-code");
+  assert.deepEqual(
+    selected(next).state!.routes.map((r) => r.name),
+    ["AccountSettings", "AccountSecurity", "DeviceLogin"],
+  );
+  assert.deepEqual(next.routes[0], base.routes[0]);
 });

@@ -196,21 +196,26 @@ export function challengeNavigationAction(
 const contentParent = (name: string) =>
   name.startsWith("Machine")
     ? "Machines"
-    : name.startsWith("Automation")
-      ? "Automations"
-      : name === "ActivityDetail"
-        ? "Activity"
-        : name === "ServiceSetup"
-          ? "Plugins"
-          : [
-                "AgentDetail",
-                "AgentCreate",
-                "AgentMachines",
-                "AgentSkills",
-                "GroupEditor",
-              ].includes(name)
-            ? "Agents"
-            : undefined;
+    : name === "ActiveGrants"
+      ? "Activity"
+      : name === "PluginConnections"
+        ? "Plugins"
+        : name.startsWith("Automation")
+          ? "Automations"
+          : name === "ActivityDetail"
+            ? "Activity"
+            : name === "ServiceSetup"
+              ? "Plugins"
+              : [
+                    "AgentDetail",
+                    "AgentCreate",
+                    "AgentMachines",
+                    "AgentMachineEditor",
+                    "AgentSkills",
+                    "GroupEditor",
+                  ].includes(name)
+                ? "Agents"
+                : undefined;
 
 /** Cold links get Home and a module root; Settings keeps that slab underneath. */
 export function withWorkspaceFallback(

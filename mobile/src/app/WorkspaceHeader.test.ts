@@ -838,3 +838,24 @@ test("main-content discard callbacks lose authority on sign-out, blur and unmoun
     assert.equal(env.dispatched.length, 0, boundary);
   }
 });
+
+test("a dirty native leaf route confirms POP once and replays the exact action without a local Back loop", () => {
+  for (const type of ["GO_BACK", "POP"]) {
+    const env = setup({
+      inSheet: false,
+      active: false,
+      defaultRole: "back",
+      discardOnClose: { title: "Discard?", message: "Unsaved leaf" },
+    });
+    const action = { ...env.rootAction, type };
+    env.attempt(action);
+    assert.equal(env.alerts.length, 1);
+    env.choose("Keep editing");
+    assert.equal(env.dispatched.length, 0);
+    env.attempt(action);
+    env.choose("Discard");
+    assert.equal(env.dispatched.at(-1), action);
+    assert.equal(env.counts().localBacks, 0);
+    env.unmount();
+  }
+});

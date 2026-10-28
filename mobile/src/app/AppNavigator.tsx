@@ -251,6 +251,12 @@ function PluginsRoute({ route }: WorkspaceScreenProps<"Plugins">) {
   );
 }
 
+function PluginConnectionsRoute({
+  route,
+}: ContentScreenProps<"PluginConnections">) {
+  return <PluginsScreen connectorId={route.params.connectorId} />;
+}
+
 function ServiceSetupRoute({
   navigation,
   route,
@@ -383,6 +389,26 @@ function WorkspaceNavigator() {
             ? "Connect service"
             : "Manage connection",
         })}
+      />
+      <ContentStack.Screen
+        name="MachineDetail"
+        component={MachinesScreen}
+        options={{ title: "Machine" }}
+      />
+      <ContentStack.Screen
+        name="AgentMachineEditor"
+        component={AgentMachinesScreen}
+        options={{ title: "Machine access" }}
+      />
+      <ContentStack.Screen
+        name="PluginConnections"
+        component={PluginConnectionsRoute}
+        options={{ title: "Connections" }}
+      />
+      <ContentStack.Screen
+        name="ActiveGrants"
+        component={ActivityScreen}
+        options={{ title: "Active grants" }}
       />
       <ContentStack.Screen
         name="MachinePolicy"

@@ -59,7 +59,8 @@ const errorText = (error: unknown) =>
 export function PluginsScreen({
   agentId,
   initialTab = "connectors",
-}: { agentId?: string; initialTab?: Tab } = {}) {
+  connectorId,
+}: { agentId?: string; initialTab?: Tab; connectorId?: string } = {}) {
   const { colors } = useTheme();
   const navigation = useNavigation<WorkspaceNavigationProp>();
   const openChat = useOpenWorkspaceChat();
@@ -71,7 +72,7 @@ export function PluginsScreen({
   const [connectorTab, setConnectorTab] = useState<ConnectorTab>("added");
   const [queries, setQueries] = useState({ added: "", discover: "" });
   const query = queries[connectorTab];
-  const [manageId, setManageId] = useState<string>();
+  const manageId = connectorId;
   const [browserError, setBrowserError] = useState<string>();
   const [browserBusy, setBrowserBusy] = useState(false);
   const connections = useQuery({
@@ -125,9 +126,10 @@ export function PluginsScreen({
     navigation.setOptions({ title: manageItem?.name ?? "Plugins" });
   }, [navigation, manageItem?.name]);
   useWorkspaceBack({
-    active: Boolean(manageId),
+    active: false,
+    defaultRole: manageId ? "back" : "menu",
     label: "Back to plugins",
-    onBack: () => setManageId(undefined),
+    onBack: navigation.goBack,
   });
 
   function openConnector(item: ConnectorCardItem) {
@@ -135,7 +137,7 @@ export function PluginsScreen({
     if (item.added) {
       if (item.manageKeyIds?.length === 1)
         navigation.push("ServiceSetup", { connectionId: item.manageKeyIds[0] });
-      else setManageId(item.id);
+      else navigation.push("PluginConnections", { connectorId: item.id });
     } else if (item.connectSlug)
       navigation.push("ServiceSetup", { catalogSlug: item.connectSlug });
   }

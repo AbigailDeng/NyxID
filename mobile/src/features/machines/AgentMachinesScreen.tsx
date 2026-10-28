@@ -1,3 +1,4 @@
+import type { ContentScreenProps } from "../../app/navigationTypes";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { useRef, useState, type PropsWithChildren } from "react";
 import { View } from "react-native";
@@ -43,14 +44,15 @@ import {
 
 export function AgentMachinesScreen({
   route,
-}: {
-  route: { params: { agentId: string } };
-  navigation: { goBack(): void };
-}) {
+  navigation,
+}:
+  | ContentScreenProps<"AgentMachines">
+  | ContentScreenProps<"AgentMachineEditor">) {
   const runtime = useMachineRuntime();
   const client = useQueryClient();
   const openChat = useOpenWorkspaceChat();
-  const [selected, setSelected] = useState<string>();
+  const selected =
+    route.name === "AgentMachineEditor" ? route.params.machineId : undefined;
   const [notice, setNotice] = useState<string>();
   const refreshedAt = useRef(0);
   const queryKey = [
@@ -87,7 +89,7 @@ export function AgentMachinesScreen({
         agentName={query.data.agent.display_name ?? query.data.agent.name}
         features={query.data.features}
         unavailable={!!query.error}
-        onBack={() => setSelected(undefined)}
+        onBack={navigation.goBack}
         onRefresh={refresh}
         onSaved={(machines) => {
           client.setQueryData(queryKey, { ...query.data, machines });
@@ -107,7 +109,7 @@ export function AgentMachinesScreen({
   return (
     <AgentMachineListPage
       selected={!!selected}
-      onBack={() => setSelected(undefined)}
+      onBack={navigation.goBack}
       refreshing={query.isRefetching}
       onRefresh={() => {
         if (runtime.active) {
@@ -151,7 +153,12 @@ export function AgentMachinesScreen({
                 `Revision ${row.revision}`,
                 ...machineAccessState(row),
               ].join(". ")}
-              onPress={() => setSelected(row.node_id)}
+              onPress={() =>
+                navigation.push("AgentMachineEditor", {
+                  agentId: route.params.agentId,
+                  machineId: row.node_id,
+                })
+              }
             >
               <View style={machineStyles.row}>
                 <Label numberOfLines={1} style={machineStyles.name}>
@@ -206,7 +213,7 @@ function AgentMachineListPage({
   refreshing: boolean;
   onRefresh: () => void;
 }>) {
-  useWorkspaceBack({ active: selected, defaultRole: "back", onBack });
+  useWorkspaceBack({ active: false, defaultRole: "back", onBack });
   return (
     <WorkspacePage
       title="Agent machine access"
@@ -264,11 +271,10 @@ export function AgentMachineEditor({
     machine.protocol_v2 &&
     !selectionRequired(machine);
   useWorkspaceBack({
-    active: true,
+    active: Boolean(confirmMode),
     defaultRole: "back",
     disabled: write.busy,
-    onBack: () =>
-      confirmMode ? setConfirmMode(undefined) : confirmDiscard(dirty, onBack),
+    onBack: () => (confirmMode ? setConfirmMode(undefined) : onBack()),
     discardOnClose:
       dirty || confirmMode
         ? {

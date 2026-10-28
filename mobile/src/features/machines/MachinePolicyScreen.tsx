@@ -141,11 +141,10 @@ export function PolicyEditor({
     !baseline.allow_single_user_saved_logins &&
     !node.machine?.browser_isolated;
   useWorkspaceBack({
-    active: dirty || write.busy || confirmUpdate,
+    active: confirmUpdate,
     defaultRole: "back",
     disabled: write.busy,
-    onBack: () =>
-      confirmUpdate ? setConfirmUpdate(false) : confirmDiscard(dirty, onBack),
+    onBack: () => (confirmUpdate ? setConfirmUpdate(false) : onBack()),
     discardOnClose:
       dirty || confirmUpdate
         ? {

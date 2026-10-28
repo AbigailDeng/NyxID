@@ -33,6 +33,7 @@ import {
 import { ApiError } from "../../lib/api/ApiError";
 import { servicesApi } from "../../lib/api/servicesApi";
 import { NYXID_FRONTEND_URL } from "../../lib/env";
+import type { WorkspaceNavigationProp } from "../../app/navigationTypes";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import { fonts } from "../../theme/designTokens";
 import { useTheme } from "../../theme/ThemeContext";
@@ -71,7 +72,7 @@ export function ServicesScreen({
   onClose?: () => void;
 } = {}) {
   const { colors } = useTheme();
-  const navigation = useNavigation();
+  const navigation = useNavigation<WorkspaceNavigationProp>();
   const focused = useIsFocused();
   const queryClient = useQueryClient();
   const [foreground, setForeground] = useState(
@@ -90,6 +91,7 @@ export function ServicesScreen({
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [tokenOnlyRemoval, setTokenOnlyRemoval] = useState(false);
   const [replacement, setReplacement] = useState("");
+  const [formDirty, setFormDirty] = useState(false);
   const [managementTab, setManagementTab] = useState<
     "overview" | "advanced" | "history"
   >("overview");
@@ -184,6 +186,13 @@ export function ServicesScreen({
     active: onClose ? busy : Boolean(selectedId) || Boolean(adding),
     defaultRole: onClose ? "back" : "menu",
     disabled: busy,
+    discardOnClose:
+      formDirty || Boolean(replacement)
+        ? {
+            title: "Discard connection changes?",
+            message: "Your unsaved connection changes will be lost.",
+          }
+        : undefined,
     label: onClose ? "Back to plugins" : "Back to services",
     onBack: () => {
       if (!actionLock.current) closeDetail();
@@ -283,6 +292,7 @@ export function ServicesScreen({
         busy={busy}
         error={error}
         onRefresh={reload}
+        onDirty={setFormDirty}
         onSubmit={(values) =>
           void run(async () => {
             const connection = await servicesApi.create(
@@ -1027,9 +1037,9 @@ export function ServicesScreen({
               accessibilityRole="button"
               accessibilityLabel={`Manage ${connection.label}`}
               onPress={() => {
-                setSelectedId(connection.id);
-                setError(undefined);
-                setNotice(undefined);
+                navigation.push("ServiceSetup", {
+                  connectionId: connection.id,
+                });
               }}
             >
               <Card style={styles.serviceCard}>
@@ -1078,14 +1088,15 @@ export function ServicesScreen({
               accessibilityRole="button"
               accessibilityLabel={`Connect ${entry.name}`}
               onPress={() => {
-                setAdding(entry);
-                setError(undefined);
-                setNotice(undefined);
+                navigation.push("ServiceSetup", { catalogSlug: entry.slug });
               }}
             >
               <Card style={styles.serviceCard}>
                 <Text
-                  style={[styles.connectionStatus, { color: colors.primaryOnTint }]}
+                  style={[
+                    styles.connectionStatus,
+                    { color: colors.primaryOnTint },
+                  ]}
                 >
                   ●{" "}
                   {entry.platform_key?.available
@@ -1161,8 +1172,10 @@ function ConnectForm({
   error,
   onRefresh,
   onSubmit,
+  onDirty,
 }: {
   entry: CatalogEntry;
+  onDirty: (dirty: boolean) => void;
   busy: boolean;
   error?: string;
   onRefresh: () => Promise<void>;
@@ -1180,6 +1193,14 @@ function ConnectForm({
   const [endpointUrl, setEndpointUrl] = useState("");
   const [fields, setFields] = useState<Record<string, string>>({});
   const [platform, setPlatform] = useState(false);
+  const dirty =
+    label !== entry.name ||
+    Boolean(credential || endpointUrl || platform) ||
+    Object.values(fields).some(Boolean);
+  useEffect(() => {
+    onDirty(dirty);
+    return () => onDirty(false);
+  }, [dirty, onDirty]);
   const [linkError, setLinkError] = useState<string>();
   const [linkBusy, setLinkBusy] = useState(false);
   const linkLock = useRef(false);

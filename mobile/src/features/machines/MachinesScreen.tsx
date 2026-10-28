@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useState } from "react";
 import { View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import type { WorkspaceScreenProps } from "../../app/navigationTypes";
+import type { ContentScreenProps } from "../../app/navigationTypes";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import { SegmentControl } from "../../components/SegmentControl";
 import { SectionBadge } from "../../components/SectionBadge";
@@ -42,16 +42,21 @@ import {
 export function MachinesScreen({
   route,
   navigation,
-}: WorkspaceScreenProps<"Machines">) {
+}: ContentScreenProps<"Machines"> | ContentScreenProps<"MachineDetail">) {
   const runtime = useMachineRuntime();
-  const [selected, setSelected] = useState(route.params?.machine);
-  const [tab, setTab] = useState(route.params?.tab);
+  const selected =
+    route.name === "MachineDetail" ? route.params.machineId : undefined;
+  const tab = route.name === "Machines" ? route.params?.tab : undefined;
   const [refreshing, setRefreshing] = useState(false);
   const [handoffError, setHandoffError] = useState<string>();
-  useEffect(() => {
-    setSelected(route.params?.machine);
-    setTab(route.params?.tab);
-  }, [route.params]);
+  // Preserve the web query URL while detail gets real horizontal Back history.
+  useLayoutEffect(() => {
+    if (route.name === "Machines" && route.params?.machine) {
+      const machineId = route.params.machine;
+      navigation.setParams({ machine: undefined });
+      navigation.push("MachineDetail", { machineId });
+    }
+  }, [navigation, route.name, route.params]);
   const inventory = useQuery({
     queryKey: [...machineKeys(runtime.epoch), "inventory"],
     queryFn: ({ signal }) => machinesApi.inventory(signal),
@@ -69,8 +74,9 @@ export function MachinesScreen({
     [node?.name],
   );
   useWorkspaceBack({
-    active: !!selected,
-    onBack: () => setSelected(undefined),
+    active: false,
+    defaultRole: selected ? "back" : "menu",
+    onBack: navigation.goBack,
     options: headerOptions,
   });
   function activity(machine: MachineNode) {
@@ -101,7 +107,7 @@ export function MachinesScreen({
         inventory={inventory.data}
         handoffError={handoffError}
         onWeb={(path) => void handoff(path)}
-        onMachines={() => setTab(undefined)}
+        onMachines={() => navigation.setParams({ tab: undefined })}
       />
     );
   }
@@ -117,7 +123,7 @@ export function MachinesScreen({
           segments={machineTabs}
           activeIndex={0}
           onPress={(index) => {
-            if (index === 1) setTab("logins");
+            if (index === 1) navigation.setParams({ tab: "logins" });
           }}
         />
       )}
@@ -139,7 +145,9 @@ export function MachinesScreen({
                 key={machine.id}
                 label={`Details for ${machine.name}, ${machine.is_connected ? "Online" : "Offline"}, ${machine.owner.display_name}`}
                 summary={`${machineIsolationLabel(machine)}. ${machine.machine?.os}/${machine.machine?.arch}, version ${machine.metadata?.agent_version ?? "unknown"}`}
-                onPress={() => setSelected(machine.id)}
+                onPress={() =>
+                  navigation.push("MachineDetail", { machineId: machine.id })
+                }
                 actions={
                   <>
                     {machine.is_connected &&

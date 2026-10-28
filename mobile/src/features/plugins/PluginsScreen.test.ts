@@ -223,7 +223,8 @@ function setup({
   const { PluginsScreen } = harness.load(
     fileURLToPath(new URL("./PluginsScreen.tsx", import.meta.url)),
   ) as { PluginsScreen: (props?: unknown) => Element };
-  harness.mount(() => PluginsScreen());
+  const screenProps: { connectorId?: string } = {};
+  harness.mount(() => PluginsScreen(screenProps));
   const all = () => elements(harness.flush());
   const find = (predicate: (element: Element) => boolean) => {
     const result = all().find(predicate);
@@ -232,6 +233,10 @@ function setup({
   };
   return {
     harness,
+    connector: (id?: string) => {
+      screenProps.connectorId = id;
+      harness.render();
+    },
     calls,
     states,
     queries,
@@ -322,12 +327,12 @@ test("single connections, grouped connections, and catalog services retain their
     );
     env.control("Manage Cloudflare, Enabled").props.onPress();
     env.harness.flush();
-    assert.equal(env.back().active, true);
-    assert.equal(
-      env.calls.filter((call) => call.method === "push").length,
-      1,
-      "opening a grouped service only chooses a credential",
-    );
+    const groupPage = env.calls
+      .filter((call) => call.method === "push")
+      .at(-1)!;
+    assert.equal(groupPage.args[0], "PluginConnections");
+    env.connector((groupPage.args[1] as { connectorId: string }).connectorId);
+    assert.equal(env.back().defaultRole, "back");
     env.control("Manage Work Cloudflare").props.onPress();
     const grouped = env.calls.filter((call) => call.method === "push").at(-1)!;
     assert.equal(grouped.args[0], "ServiceSetup");
@@ -335,9 +340,9 @@ test("single connections, grouped connections, and catalog services retain their
       (grouped.args[1] as { connectionId: string }).connectionId,
       dnsWork.id,
     );
-    env.back().onBack();
+    env.connector();
     env.harness.flush();
-    assert.equal(env.back().active, false);
+    assert.equal(env.back().defaultRole, "menu");
     env.control("Discover connectors, 1").props.onPress();
     env.control("Connect Slack, Available to add").props.onPress();
     const available = env.calls

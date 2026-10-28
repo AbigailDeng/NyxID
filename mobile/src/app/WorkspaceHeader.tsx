@@ -283,11 +283,18 @@ export function useWorkspaceBack({
   }, []);
 
   useLayoutEffect(() => {
-    if (!focused || !active || sheet) return;
+    if (!focused || (!active && !discardOnClose) || sheet) return;
     const id = guardId.current;
     onEdgeBackChange(id, localBack);
     return () => onEdgeBackChange(id);
-  }, [focused, active, Boolean(sheet), localBack, onEdgeBackChange]);
+  }, [
+    focused,
+    active,
+    Boolean(discardOnClose),
+    Boolean(sheet),
+    localBack,
+    onEdgeBackChange,
+  ]);
 
   useLayoutEffect(() => {
     if (!focused) return;
@@ -367,7 +374,8 @@ export function useWorkspaceBack({
       const outerDismiss = sheet
         ? data.action.target === sheet.rootKey ||
           data.action.source === sheet.sheetKey
-        : ["RESET", "NAVIGATE", "REPLACE", "POP_TO"].includes(data.action.type);
+        : !active ||
+          ["RESET", "NAVIGATE", "REPLACE", "POP_TO"].includes(data.action.type);
       if (!outerDismiss) {
         localBack();
         return;
