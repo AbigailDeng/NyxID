@@ -100,9 +100,11 @@ test("request error dismissal hides only that message; jump action has a 44pt ac
   assert.equal(control.props.style.bottom, 12);
   assert.equal(
     y.h.value().props.style.height,
-    0,
-    "floats above composer without changing layout",
+    56,
+    "positive accessibility bounds contain the button and its expanded hit area",
   );
+  assert.equal(y.h.value().props.style.position, "absolute");
+  assert.equal(y.h.value().props.style.bottom, 0);
   assert.equal(y.text(), "", "icon only");
   assert.ok(
     y

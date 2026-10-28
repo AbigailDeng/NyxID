@@ -1,3 +1,4 @@
+import { transcriptColumnStyle } from "../display/chatLayout";
 import { assistantDraftStore } from "../assistant/assistantDraftStore";
 import { ChatHeaderFrame, ChatIdentity } from "../assistant/ChatIdentityHeader";
 import { AgentAvatar, AgentAvatarStack } from "../../components/AgentAvatar";
@@ -453,7 +454,10 @@ function GroupChat({
       scroll={false}
       contentStyle={styles.chatPage}
     >
-      <AssistantConnectionBanner onRetry={() => void chat.recoverDelivery()} />
+      <AssistantConnectionBanner
+        inset
+        onRetry={() => void chat.recoverDelivery()}
+      />
       {(chat.recoveryRequired ||
         chat.error ||
         chat.actionError ||
@@ -492,7 +496,7 @@ function GroupChat({
           horizontal
           style={styles.horizontalStrip}
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.members}
+          contentContainerStyle={[styles.members, { paddingHorizontal: 12 }]}
         >
           {group.members.map((member) => (
             <Pressable
@@ -518,7 +522,7 @@ function GroupChat({
           ))}
         </OverflowScrollView>
       )}
-      <View style={[styles.fill, chatColumn]}>
+      <View style={styles.fill}>
         <FlatList
           ref={list}
           style={styles.fill}
@@ -532,7 +536,10 @@ function GroupChat({
               ? { minIndexForVisible: 0 }
               : undefined
           }
-          contentContainerStyle={styles.transcript}
+          contentContainerStyle={[
+            styles.transcript,
+            transcriptColumnStyle(chatColumn.maxWidth),
+          ]}
           {...transcriptScroll.listProps}
           onLayout={(event) => {
             transcriptScroll.listProps.onLayout(event);
@@ -606,6 +613,10 @@ function GroupChat({
             ) : null
           }
         />
+        <JumpToLatest
+          visible={transcriptScroll.showJump}
+          onPress={transcriptScroll.follow}
+        />
         <ScrollEdgeFades edges={transcriptEdges.edges} color={colors.bg} />
       </View>
       {!!group && !!chat.data?.pending_actions.length && (
@@ -656,139 +667,143 @@ function GroupChat({
           })}
         </ScrollView>
       )}
-      <JumpToLatest
-        visible={transcriptScroll.showJump}
-        onPress={transcriptScroll.follow}
-      />
       {group && (
-        <View style={[styles.composerArea, chatColumn]}>
-          {!recipients.ids.length && (
-            <Label style={[styles.small, { color: colors.danger }]}>
-              Choose at least one recipient.
-            </Label>
-          )}
-          {!liveMembers.length && (
-            <Label muted>
-              All agents have been removed or destroyed. This crew is read-only.
-            </Label>
-          )}
-          {!canParticipate && (
-            <Label muted>
-              This crew is read-only for your current organization role.
-            </Label>
-          )}
-          {(uploads.error || uploads.notice) && (
-            <Label muted>{uploads.error ?? uploads.notice}</Label>
-          )}
-          <ChatComposerFrame>
-            <ComposerDictationReview dictation={dictation} />
-            <OverflowScrollView
-              fadeColor={colors.composerBg}
-              horizontal
-              style={styles.horizontalStrip}
-              keyboardShouldPersistTaps="handled"
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.recipients}
-            >
-              <Label muted style={styles.small}>
-                To
+        <View style={styles.composerInset}>
+          <View style={[styles.composerArea, chatColumn]}>
+            {!recipients.ids.length && (
+              <Label style={[styles.small, { color: colors.danger }]}>
+                Choose at least one recipient.
               </Label>
-              {recipients.ids.map((id) => {
-                const member = liveMembers.find((row) => row.id === id);
-                return member ? (
+            )}
+            {!liveMembers.length && (
+              <Label muted>
+                All agents have been removed or destroyed. This crew is
+                read-only.
+              </Label>
+            )}
+            {!canParticipate && (
+              <Label muted>
+                This crew is read-only for your current organization role.
+              </Label>
+            )}
+            {(uploads.error || uploads.notice) && (
+              <Label muted>{uploads.error ?? uploads.notice}</Label>
+            )}
+            <ChatComposerFrame>
+              <ComposerDictationReview dictation={dictation} />
+              <OverflowScrollView
+                fadeColor={colors.composerBg}
+                horizontal
+                style={styles.horizontalStrip}
+                keyboardShouldPersistTaps="handled"
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.recipients}
+              >
+                <Label muted style={styles.small}>
+                  To
+                </Label>
+                {recipients.ids.map((id) => {
+                  const member = liveMembers.find((row) => row.id === id);
+                  return member ? (
+                    <Pressable
+                      key={id}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove recipient ${title(id, member.name)}`}
+                      disabled={blocked}
+                      onPress={() =>
+                        editRecipients((old) => withRemoved(old, id))
+                      }
+                      style={[
+                        styles.recipient,
+                        {
+                          backgroundColor: colors.navActive,
+                          borderColor: colors.composerBorder,
+                        },
+                      ]}
+                    >
+                      <Label style={styles.small}>
+                        {title(id, member.name)}
+                      </Label>
+                      <X size={12} color={colors.textSecondary} />
+                    </Pressable>
+                  ) : null;
+                })}
+                {liveMembers.some(
+                  (member) => !recipients.ids.includes(member.id),
+                ) && (
                   <Pressable
-                    key={id}
                     accessibilityRole="button"
-                    accessibilityLabel={`Remove recipient ${title(id, member.name)}`}
+                    accessibilityLabel="Add recipient"
                     disabled={blocked}
-                    onPress={() =>
-                      editRecipients((old) => withRemoved(old, id))
-                    }
-                    style={[
-                      styles.recipient,
-                      {
-                        backgroundColor: colors.navActive,
-                        borderColor: colors.composerBorder,
-                      },
-                    ]}
+                    onPress={() => setPickingRecipients("add")}
+                    style={styles.addRecipient}
                   >
-                    <Label style={styles.small}>{title(id, member.name)}</Label>
-                    <X size={12} color={colors.textSecondary} />
+                    <Plus size={14} color={colors.primaryOnTint} />
+                    <Label
+                      style={[styles.small, { color: colors.primaryOnTint }]}
+                    >
+                      Add
+                    </Label>
                   </Pressable>
-                ) : null;
-              })}
-              {liveMembers.some(
-                (member) => !recipients.ids.includes(member.id),
-              ) && (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Add recipient"
-                  disabled={blocked}
-                  onPress={() => setPickingRecipients("add")}
-                  style={styles.addRecipient}
-                >
-                  <Plus size={14} color={colors.primaryOnTint} />
-                  <Label
-                    style={[styles.small, { color: colors.primaryOnTint }]}
-                  >
-                    Add
-                  </Label>
-                </Pressable>
-              )}
-            </OverflowScrollView>
-            <AssistantPendingUploads
-              files={uploads.files}
-              remove={removeAttachment}
-              disabled={chat.sending || uploads.session.sending}
-            />
-            <AssistantMentionInput
-              generation={composerGeneration}
-              accessibilityLabel="Message the crew"
-              placeholder="Message the crew"
-              value={draft}
-              mentions={mentions}
-              onChangeText={(value) => {
-                if (currentComposer.current === composerGeneration) edit(value);
-              }}
-              editable={!blocked && !!liveMembers.length}
-              style={[styles.input, { color: colors.textPrimary }]}
-              renderActions={(mentionAction) => (
-                <ChatComposerRow>
-                  <ComposerAttachButton
-                    label="Attach photos or files, or take a photo to crew"
-                    busy={uploads.picking}
-                    disabled={
-                      blocked ||
-                      dictation.active ||
-                      !liveMembers.length ||
-                      uploads.picking ||
-                      uploads.session.sending
-                    }
-                    onPress={uploads.choose}
-                  />
-                  {mentionAction}
-                  <View style={{ flex: 1 }} />
-                  <ComposerDictationButton
-                    dictation={dictation}
-                    disabled={blocked || uploads.picking || !liveMembers.length}
-                  />
-                  <ComposerSubmitButton
-                    kind="send"
-                    label="Send crew message"
-                    busy={chat.sending}
-                    disabled={!canSend}
-                    onPress={() => void send()}
-                  />
-                </ChatComposerRow>
-              )}
-            />
-          </ChatComposerFrame>
-          {[...resolvedDraft].length > 32768 && (
-            <Label style={[styles.small, { color: colors.danger }]}>
-              Keep the message within 32,768 characters, including attachment
-              references.
-            </Label>
-          )}
+                )}
+              </OverflowScrollView>
+              <AssistantPendingUploads
+                files={uploads.files}
+                remove={removeAttachment}
+                disabled={chat.sending || uploads.session.sending}
+              />
+              <AssistantMentionInput
+                generation={composerGeneration}
+                accessibilityLabel="Message the crew"
+                placeholder="Message the crew"
+                value={draft}
+                mentions={mentions}
+                onChangeText={(value) => {
+                  if (currentComposer.current === composerGeneration)
+                    edit(value);
+                }}
+                editable={!blocked && !!liveMembers.length}
+                style={[styles.input, { color: colors.textPrimary }]}
+                renderActions={(mentionAction) => (
+                  <ChatComposerRow>
+                    <ComposerAttachButton
+                      label="Attach photos or files, or take a photo to crew"
+                      busy={uploads.picking}
+                      disabled={
+                        blocked ||
+                        dictation.active ||
+                        !liveMembers.length ||
+                        uploads.picking ||
+                        uploads.session.sending
+                      }
+                      onPress={uploads.choose}
+                    />
+                    {mentionAction}
+                    <View style={{ flex: 1 }} />
+                    <ComposerDictationButton
+                      dictation={dictation}
+                      disabled={
+                        blocked || uploads.picking || !liveMembers.length
+                      }
+                    />
+                    <ComposerSubmitButton
+                      kind="send"
+                      label="Send crew message"
+                      busy={chat.sending}
+                      disabled={!canSend}
+                      onPress={() => void send()}
+                    />
+                  </ChatComposerRow>
+                )}
+              />
+            </ChatComposerFrame>
+            {[...resolvedDraft].length > 32768 && (
+              <Label style={[styles.small, { color: colors.danger }]}>
+                Keep the message within 32,768 characters, including attachment
+                references.
+              </Label>
+            )}
+          </View>
         </View>
       )}
       <Modal
@@ -1038,11 +1053,12 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 16,
   },
-  error: { gap: 6 },
-  pending: { maxHeight: 180 },
+  error: { gap: 6, marginHorizontal: 12 },
+  pending: { maxHeight: 180, marginHorizontal: 12 },
   pendingCard: { padding: 12, gap: 8 },
   actions: { flexDirection: "row", gap: 8 },
-  chatPage: { paddingHorizontal: 12, paddingTop: 0, paddingBottom: 4, gap: 8 },
+  composerInset: { paddingHorizontal: 12 },
+  chatPage: { paddingHorizontal: 0, paddingTop: 0, paddingBottom: 4, gap: 8 },
   composerArea: { gap: 6, paddingTop: 4 },
   recipients: { gap: 6, alignItems: "center", paddingHorizontal: 10 },
   recipient: {

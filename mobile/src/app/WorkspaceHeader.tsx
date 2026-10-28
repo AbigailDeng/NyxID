@@ -1,3 +1,7 @@
+import {
+  WORKSPACE_CLOSE_ICON_SIZE,
+  workspaceCloseControlStyle,
+} from "../components/workspace/workspaceCloseControl";
 import { WorkspaceInteractionSurface } from "../lib/accessibility/WorkspaceInteractionSurface";
 import { useWorkspaceAccessibility } from "../lib/accessibility/workspaceAccessibility";
 import { workspaceFocus } from "../lib/accessibility/workspaceFocus";
@@ -139,12 +143,12 @@ function WorkspaceHeaderButton({
       disabled={disabled}
       style={[
         styles.button,
-        close && { borderRadius: 22, backgroundColor: colors.navActive },
+        close && workspaceCloseControlStyle(colors.navActive),
         disabled && styles.disabled,
       ]}
     >
       {close ? (
-        <X color={colors.textPrimary} size={22} />
+        <X color={colors.textPrimary} size={WORKSPACE_CLOSE_ICON_SIZE} />
       ) : back ? (
         <ChevronLeft color={colors.textPrimary} size={24} />
       ) : (

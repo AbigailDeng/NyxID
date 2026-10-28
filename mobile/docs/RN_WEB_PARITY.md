@@ -79,8 +79,11 @@ to Settings, and unavailable cameras report a recoverable message. Captures reus
 the same conversion, attachment limits and upload session. Unsupported photo formats such as HEIC are converted to
 JPEG from selected cache copies, retaining the same upload validation and account
 ownership fences. Crew recipient chips and pending files stay inside the pill
-above the text. Chat pages use 12pt horizontal and 4pt bottom padding plus the
-system safe area. The side-navigation footer combines its bottom padding with
+above the text. Private, contextual and crew transcript viewports span the safe-area
+width, including wide windows, so scroll indicators stay at the window edge.
+Their centered content containers carry the 12pt horizontal padding and column
+maximum; the composer's own margins and the 4pt page bottom padding remain.
+The side-navigation footer combines its bottom padding with
 the safe-area clearance instead of stacking both. iOS sizes
 the multiline input to its text under the shared cap; Android applies the
 measured height. Display

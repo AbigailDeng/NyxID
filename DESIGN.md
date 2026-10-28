@@ -562,8 +562,10 @@ full-screen. See
   and a trailing Send/Stop circle inside a 44pt target. Attach offers Camera,
   Photos and Files through their native pickers. Dictation requires review before text is
   inserted into the draft and never sends a message automatically. Chat pages
-  use 12pt horizontal padding and 4pt bottom padding in addition to the system
-  safe area. The navigation account footer absorbs its bottom clearance into
+  use an edge-to-edge transcript viewport within the system safe area, so its
+  scroll indicator sits at the window edge. The centered transcript content
+  retains 12pt horizontal padding and the configured column maximum; composers
+  retain their own 12pt margins and pages keep 4pt bottom padding. The navigation account footer absorbs its bottom clearance into
   the safe-area inset rather than adding a second padded strip. The one-row
   private header stays compact; group name, ownership context and settings
   share one header, with member details retained.

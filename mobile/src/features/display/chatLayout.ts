@@ -43,3 +43,15 @@ export function composerHeightLimit(
 export function offersChatWidth(windowWidth: number) {
   return windowWidth >= 600;
 }
+
+/** The viewport stays at the safe-area edge; only its content is inset. */
+export function transcriptColumnStyle(
+  columnWidth = defaultChatLayout.columnWidth,
+) {
+  return {
+    width: "100%" as const,
+    maxWidth: columnWidth + 24,
+    alignSelf: "center" as const,
+    paddingHorizontal: 12,
+  };
+}

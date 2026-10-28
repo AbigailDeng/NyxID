@@ -108,7 +108,15 @@ export function JumpToLatest({
   return (
     <View
       pointerEvents="box-none"
-      style={{ height: 0, zIndex: 20, alignItems: "center" }}
+      style={{
+        position: "absolute",
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: 56,
+        zIndex: 20,
+        alignItems: "center",
+      }}
     >
       <Pressable
         accessibilityRole="button"
@@ -140,8 +148,10 @@ export function JumpToLatest({
 }
 export function AssistantConnectionBanner({
   onRetry,
+  inset = false,
 }: {
   onRetry: () => void;
+  inset?: boolean;
 }) {
   const { colors } = useTheme();
   const focused = useIsFocused();
@@ -179,20 +189,22 @@ export function AssistantConnectionBanner({
   }, [focused, isConnected, unreachable]);
   if (!focused || (!down && !reconnected)) return null;
   return (
-    <AssistantBanner
-      icon={
-        down ? (
-          <WifiOff size={14} color={colors.warningTone.text} />
-        ) : (
-          <Wifi size={14} color={colors.successTone.text} />
-        )
-      }
-    >
-      {!isConnected
-        ? "You're offline. NyxBot can't send, run or refresh until you reconnect. You're seeing what was already loaded."
-        : unreachable
-          ? "Can't reach NyxID. NyxBot can't send, run or refresh until the connection is back. You're seeing what was already loaded."
-          : "Back online."}
-    </AssistantBanner>
+    <View style={inset ? { marginHorizontal: 12 } : undefined}>
+      <AssistantBanner
+        icon={
+          down ? (
+            <WifiOff size={14} color={colors.warningTone.text} />
+          ) : (
+            <Wifi size={14} color={colors.successTone.text} />
+          )
+        }
+      >
+        {!isConnected
+          ? "You're offline. NyxBot can't send, run or refresh until you reconnect. You're seeing what was already loaded."
+          : unreachable
+            ? "Can't reach NyxID. NyxBot can't send, run or refresh until the connection is back. You're seeing what was already loaded."
+            : "Back online."}
+      </AssistantBanner>
+    </View>
   );
 }

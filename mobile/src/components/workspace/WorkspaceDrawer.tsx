@@ -1,3 +1,7 @@
+import {
+  WORKSPACE_CLOSE_ICON_SIZE,
+  workspaceCloseControlStyle,
+} from "./workspaceCloseControl";
 import { NyxidLogo } from "../brand/NyxidLogo";
 import { useRef } from "react";
 import {
@@ -120,9 +124,9 @@ export function WorkspaceDrawer({
             accessibilityRole="button"
             accessibilityLabel="Close navigation"
             onPress={onClose}
-            style={styles.iconButton}
+            style={workspaceCloseControlStyle(colors.navActive)}
           >
-            <X color={colors.textSecondary} size={20} />
+            <X color={colors.textPrimary} size={WORKSPACE_CLOSE_ICON_SIZE} />
           </Pressable>
         </View>
         <View style={styles.scroll}>
@@ -216,6 +220,7 @@ export function WorkspaceDrawer({
             onPress={onUsageCredits}
             style={({ pressed }) => [
               styles.row,
+              styles.footerRow,
               {
                 backgroundColor:
                   pressed || currentRoute === "UsageCredits"
@@ -225,10 +230,17 @@ export function WorkspaceDrawer({
             ]}
           >
             <WalletCards size={19} color={colors.textSecondary} />
-            <Text style={[styles.rowText, { color: colors.textPrimary }]}>
+            <Text
+              numberOfLines={1}
+              style={[
+                styles.rowText,
+                styles.footerLabel,
+                { color: colors.textPrimary },
+              ]}
+            >
               Usage & credits
             </Text>
-            <ChevronRight size={16} color={colors.textMuted} />
+            <ChevronRight size={18} color={colors.textSecondary} />
           </Pressable>
         </View>
         <Pressable
@@ -287,6 +299,8 @@ export function WorkspaceDrawer({
 }
 
 const styles = StyleSheet.create({
+  footerRow: { minHeight: 62 },
+  footerLabel: { flex: 1, minWidth: 0 },
   accountArea: { borderTopWidth: 1, paddingHorizontal: 16, paddingTop: 6 },
   panel: { flex: 1, borderRightWidth: 1 },
   brandRow: {
@@ -297,12 +311,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingVertical: 12,
-  },
-  iconButton: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
   },
   scroll: { flex: 1 },
   body: { padding: 16, gap: 6 },

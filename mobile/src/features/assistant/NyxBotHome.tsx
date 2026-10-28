@@ -117,7 +117,10 @@ export function NyxBotHome({
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
       {...scrollProps}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[
+        styles.content,
+        scrollProps?.contentContainerStyle,
+      ]}
     >
       <View style={styles.greeting}>
         <AgentAvatar

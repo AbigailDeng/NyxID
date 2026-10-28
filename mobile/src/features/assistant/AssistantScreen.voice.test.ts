@@ -1598,3 +1598,30 @@ test("History selection retains the source thread draft and restores the selecte
   assert.equal(x.input().props.value, "Other draft");
   x.harness.unmount();
 });
+
+test("private/contextual transcript viewport spans the safe area while content keeps its inset column", () => {
+  const x = setup("saved-chat");
+  const page = x.all().find((n) => n.type === "WorkspacePage")!;
+  const list = x.all().find((n) => n.type === "FlatList")!;
+  const viewport = x.all().find((n) => n.props.children.includes(list))!;
+  assert.equal(page.props.contentStyle.paddingHorizontal, 0);
+  for (const style of [list.props.style, viewport.props.style]) {
+    assert.equal(style.paddingHorizontal, undefined);
+    assert.equal(style.marginHorizontal, undefined);
+    assert.equal(style.maxWidth, undefined);
+    assert.equal(style.flex, 1);
+  }
+  const content = Object.assign({}, ...list.props.contentContainerStyle);
+  assert.equal(content.paddingHorizontal, 12);
+  assert.equal(content.maxWidth, 782);
+  assert.equal(content.width, "100%");
+  assert.equal(content.alignSelf, "center");
+  assert.equal(list.props.scrollIndicatorInsets, undefined);
+  assert.ok(
+    viewport.props.children.some((n: any) => n?.type === "JumpToLatest"),
+  );
+  assert.ok(
+    viewport.props.children.some((n: any) => n?.type === "ScrollEdgeFades"),
+  );
+  x.harness.unmount();
+});

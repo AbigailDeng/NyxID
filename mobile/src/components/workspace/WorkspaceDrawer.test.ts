@@ -60,6 +60,7 @@ function setup() {
       onHome: () => events.push("home"),
       onClose: () => events.push("close"),
       onNavigate: (name: string) => events.push(name),
+      onUsageCredits: () => events.push("usage"),
     }),
   );
   const all = () => [
@@ -84,5 +85,35 @@ test("side-menu logo is an accessible home target, independent from Close; Chats
     .find((n) => n.props.accessibilityLabel === "Close navigation")!
     .props.onPress();
   assert.deepEqual(x.events, ["home", "Assistant", "close"]);
+  x.h.unmount();
+});
+
+test("side-menu Close shares the drawer circle and account footer chevrons stay at the trailing edge", () => {
+  const x = setup();
+  const close = x
+    .all()
+    .find((n) => n.props.accessibilityLabel === "Close navigation")!;
+  assert.equal(close.props.style.width, 44);
+  assert.equal(close.props.style.height, 44);
+  assert.equal(close.props.style.borderRadius, 22);
+  assert.equal(nodes(close).find((n) => n.type === "X")?.props.size, 22);
+  const usage = x
+    .all()
+    .find((n) => n.props.accessibilityLabel === "Open usage and credits")!;
+  const style = Object.assign({}, ...usage.props.style({ pressed: false }));
+  assert.equal(style.minHeight, 62);
+  assert.equal(style.gap, 12);
+  const label = nodes(usage).find((n) => n.type === "Text")!;
+  assert.equal(label.props.style[1].flex, 1);
+  assert.equal(label.props.numberOfLines, 1);
+  const account = x
+    .all()
+    .find((n) => n.props.accessibilityLabel === "Open account settings")!;
+  const last = (n: E) => [n.props.children].flat(Infinity).at(-1);
+  assert.equal(last(usage).type, "ChevronRight");
+  assert.equal(last(account).type, "ChevronRight");
+  assert.equal(last(usage).props.size, last(account).props.size);
+  usage.props.onPress();
+  assert.deepEqual(x.events, ["usage"]);
   x.h.unmount();
 });

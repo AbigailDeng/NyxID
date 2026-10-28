@@ -161,6 +161,23 @@ test("crew header shows member identity and narrows recipients through its picke
     });
     return outer.type(outer.props);
   });
+  const page = h.value();
+  const list = nodes(page).find((n) => n.type === "FlatList")!;
+  const viewport = nodes(page).find((n) =>
+    [n.props.children].flat(Infinity).includes(list),
+  )!;
+  assert.equal(page.props.contentStyle.paddingHorizontal, 0);
+  for (const style of [list.props.style, viewport.props.style]) {
+    assert.equal(style.paddingHorizontal, undefined);
+    assert.equal(style.marginHorizontal, undefined);
+    assert.equal(style.maxWidth, undefined);
+    assert.equal(style.flex, 1);
+  }
+  const content = Object.assign({}, ...list.props.contentContainerStyle);
+  assert.equal(content.paddingHorizontal, 12);
+  assert.equal(content.maxWidth, 782);
+  assert.equal(content.alignSelf, "center");
+  assert.equal(list.props.scrollIndicatorInsets, undefined);
   const identity = () =>
     nodes(options.headerTitle()).find((n) => n.type === "ChatIdentity")!;
   assert.equal(identity().props.name, "Launch crew");

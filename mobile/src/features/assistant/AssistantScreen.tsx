@@ -1,3 +1,4 @@
+import { transcriptColumnStyle } from "../display/chatLayout";
 import { newAssistantChatParams } from "../../app/assistantChatParams";
 import { assistantDraftKey, assistantDraftStore } from "./assistantDraftStore";
 import { WorkspaceChatList } from "../../components/workspace/WorkspaceChatList";
@@ -833,7 +834,10 @@ export function AssistantScreen({
       scroll={false}
       contentStyle={styles.chatPage}
     >
-      <AssistantConnectionBanner onRetry={() => void assistant.recover()} />
+      <AssistantConnectionBanner
+        inset
+        onRetry={() => void assistant.recover()}
+      />
       {assistant.agentsError ? (
         <View style={styles.errorRow}>
           <Notice message={assistant.agentsError} tone="error" />
@@ -855,17 +859,22 @@ export function AssistantScreen({
         </View>
       ) : null}
       {destroyed ? (
-        <Notice message="This agent was destroyed. This chat is read-only." />
+        <View style={styles.errorRow}>
+          <Notice message="This agent was destroyed. This chat is read-only." />
+        </View>
       ) : null}
       {route?.params?.openLatest ? (
-        <Notice message={`Opening ${agentName}'s latest chat…`} />
+        <View style={styles.errorRow}>
+          <Notice message={`Opening ${agentName}'s latest chat…`} />
+        </View>
       ) : null}
-      <View key="transcript-column" style={[styles.fill, chatColumn]}>
+      <View key="transcript-column" style={styles.fill}>
         {homeVisible ? (
           <NyxBotHome
             key={getAuthEpoch()}
             scrollProps={{
               style: styles.fill,
+              contentContainerStyle: transcriptColumnStyle(chatColumn.maxWidth),
               scrollEventThrottle: 32,
               onLayout: (event) =>
                 transcriptEdges.layout(event.nativeEvent.layout.height),
@@ -918,7 +927,10 @@ export function AssistantScreen({
             ItemSeparatorComponent={TranscriptSeparator}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
-            contentContainerStyle={styles.transcript}
+            contentContainerStyle={[
+              styles.transcript,
+              transcriptColumnStyle(chatColumn.maxWidth),
+            ]}
             // Anchor stable history only while reading it. Native row anchoring
             // competes with keeping the newest live or newly saved reply visible.
             maintainVisibleContentPosition={
@@ -1181,6 +1193,10 @@ export function AssistantScreen({
             }
           />
         )}
+        <JumpToLatest
+          visible={!homeVisible && transcriptScroll.showJump}
+          onPress={transcriptScroll.follow}
+        />
         <ScrollEdgeFades edges={transcriptEdges.edges} color={colors.bg} />
       </View>
       {voiceThread && voiceThread === assistant.conversationId ? (
@@ -1200,110 +1216,108 @@ export function AssistantScreen({
           }}
         />
       ) : null}
-      <JumpToLatest
-        visible={!homeVisible && transcriptScroll.showJump}
-        onPress={transcriptScroll.follow}
-      />
-      <ChatComposerFrame style={[styles.composer, chatColumn]}>
-        <ComposerDictationReview dictation={dictation} />
-        <AssistantPendingUploads
-          files={uploads.files}
-          remove={uploads.remove}
-          disabled={running || uploads.session.sending}
-          showMentionHandles={false}
-        />
-        {uploads.error || uploads.notice ? (
-          <Label
-            style={{
-              color: uploads.error ? colors.danger : colors.textSecondary,
-            }}
-          >
-            {uploads.error ?? uploads.notice}
-          </Label>
-        ) : null}
-        <AssistantMentionInput
-          value={draft}
-          onChangeText={updateDraft}
-          generation={`${draftKey}:${composerGeneration}`}
-          editable={
-            !destroyed &&
-            !assistant.recoveryRequired &&
-            !route?.params?.openLatest
-          }
-          accessibilityLabel="Message to assistant"
-          placeholder={`Message ${agentName}`}
-          renderActions={(mentionAction) => (
-            <ChatComposerRow>
-              <ComposerAttachButton
-                label="Attach photos or files, or take a photo"
-                busy={uploads.picking}
-                disabled={
-                  !canCompose ||
-                  dictation.active ||
-                  uploads.picking ||
-                  uploads.session.sending ||
-                  uploads.files.length >= 10
-                }
-                onPress={uploads.choose}
-              />
-              {mentionAction}
-              <View style={{ flex: 1 }} />
-              <ComposerDictationButton
-                dictation={dictation}
-                disabled={
-                  !canCompose ||
-                  uploads.picking ||
-                  uploads.session.sending ||
-                  openingVoice ||
-                  !!voiceThread
-                }
-              />
-              {running && assistant.conversationId ? (
-                <ComposerSubmitButton
-                  kind="stop"
-                  label="Stop assistant"
+      <View style={styles.composerInset}>
+        <ChatComposerFrame style={[styles.composer, chatColumn]}>
+          <ComposerDictationReview dictation={dictation} />
+          <AssistantPendingUploads
+            files={uploads.files}
+            remove={uploads.remove}
+            disabled={running || uploads.session.sending}
+            showMentionHandles={false}
+          />
+          {uploads.error || uploads.notice ? (
+            <Label
+              style={{
+                color: uploads.error ? colors.danger : colors.textSecondary,
+              }}
+            >
+              {uploads.error ?? uploads.notice}
+            </Label>
+          ) : null}
+          <AssistantMentionInput
+            value={draft}
+            onChangeText={updateDraft}
+            generation={`${draftKey}:${composerGeneration}`}
+            editable={
+              !destroyed &&
+              !assistant.recoveryRequired &&
+              !route?.params?.openLatest
+            }
+            accessibilityLabel="Message to assistant"
+            placeholder={`Message ${agentName}`}
+            renderActions={(mentionAction) => (
+              <ChatComposerRow>
+                <ComposerAttachButton
+                  label="Attach photos or files, or take a photo"
+                  busy={uploads.picking}
                   disabled={
-                    stopProtected ||
-                    assistant.mutating ||
-                    conversation?.active_turn?.stop_requested
+                    !canCompose ||
+                    dictation.active ||
+                    uploads.picking ||
+                    uploads.session.sending ||
+                    uploads.files.length >= 10
                   }
-                  onPress={() => {
-                    if (composerPress.current("stop")) void assistant.stop();
-                  }}
+                  onPress={uploads.choose}
                 />
-              ) : voiceAvailable &&
-                (!voiceThread || voiceThread !== assistant.conversationId) ? (
-                <ComposerSubmitButton
-                  kind="voice"
-                  label="Open voice call"
-                  disabled={!canCompose || openingVoice}
-                  busy={openingVoice}
-                  onPress={() => void openVoice()}
+                {mentionAction}
+                <View style={{ flex: 1 }} />
+                <ComposerDictationButton
+                  dictation={dictation}
+                  disabled={
+                    !canCompose ||
+                    uploads.picking ||
+                    uploads.session.sending ||
+                    openingVoice ||
+                    !!voiceThread
+                  }
                 />
-              ) : (
-                <ComposerSubmitButton
-                  kind="send"
-                  label="Send message"
-                  disabled={!canSend}
-                  onPress={() => void sendDraft()}
-                />
-              )}
-            </ChatComposerRow>
-          )}
-        />
-        {assistant.recoveryRequired || uploads.blocked ? (
-          <Label muted style={styles.composerHint}>
-            {assistant.recoveryRequired
-              ? "Open the saved chat before continuing."
-              : "Wait for uploads or remove failed files."}
-          </Label>
-        ) : null}
-        {[...draft].length > 32768 ? (
-          <Label style={{ color: colors.danger }}>
-            Keep the message under 32,768 characters.
-          </Label>
-        ) : null}
-      </ChatComposerFrame>
+                {running && assistant.conversationId ? (
+                  <ComposerSubmitButton
+                    kind="stop"
+                    label="Stop assistant"
+                    disabled={
+                      stopProtected ||
+                      assistant.mutating ||
+                      conversation?.active_turn?.stop_requested
+                    }
+                    onPress={() => {
+                      if (composerPress.current("stop")) void assistant.stop();
+                    }}
+                  />
+                ) : voiceAvailable &&
+                  (!voiceThread || voiceThread !== assistant.conversationId) ? (
+                  <ComposerSubmitButton
+                    kind="voice"
+                    label="Open voice call"
+                    disabled={!canCompose || openingVoice}
+                    busy={openingVoice}
+                    onPress={() => void openVoice()}
+                  />
+                ) : (
+                  <ComposerSubmitButton
+                    kind="send"
+                    label="Send message"
+                    disabled={!canSend}
+                    onPress={() => void sendDraft()}
+                  />
+                )}
+              </ChatComposerRow>
+            )}
+          />
+          {assistant.recoveryRequired || uploads.blocked ? (
+            <Label muted style={styles.composerHint}>
+              {assistant.recoveryRequired
+                ? "Open the saved chat before continuing."
+                : "Wait for uploads or remove failed files."}
+            </Label>
+          ) : null}
+          {[...draft].length > 32768 ? (
+            <Label style={{ color: colors.danger }}>
+              Keep the message under 32,768 characters.
+            </Label>
+          ) : null}
+        </ChatComposerFrame>
+      </View>
 
       <Sheet
         visible={!!sheet}
@@ -1813,10 +1827,11 @@ const styles = StyleSheet.create({
   },
   thinking: { alignSelf: "flex-start", marginVertical: 10 },
   cardTitle: { fontFamily: fonts.bodySemi },
-  chatPage: { paddingHorizontal: 12, paddingTop: 0, paddingBottom: 4, gap: 8 },
+  composerInset: { paddingHorizontal: 12 },
+  chatPage: { paddingHorizontal: 0, paddingTop: 0, paddingBottom: 4, gap: 8 },
   composer: { marginBottom: 0 },
   composerHint: { fontSize: 11, lineHeight: 16, paddingHorizontal: 12 },
-  errorRow: { gap: 8 },
+  errorRow: { gap: 8, marginHorizontal: 12 },
   sheet: { flex: 1, paddingTop: 20 },
   sheetHeader: {
     flexDirection: "row",
