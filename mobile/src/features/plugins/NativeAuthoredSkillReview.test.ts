@@ -29,7 +29,7 @@ const acknowledgement = {
   id: params.acknowledgementId,
   authored_skill: { agent_id: "agent", proposal_id: "proposal" },
 };
-function setup(kind: "review" | "draft" | "launcher" | "page" = "review") {
+function setup(kind: "review" | "launcher" | "page" = "review") {
   const decision = deferred<unknown>();
   const pushed: { name: string; params: unknown }[] = [];
   let guard: any;
@@ -112,7 +112,6 @@ function setup(kind: "review" | "draft" | "launcher" | "page" = "review") {
     "../../lib/auth/authEpoch": { getAuthEpoch: () => 1 },
     "../../theme/designTokens": { fonts: {} },
     "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
-    "./PluginSkills": { SkillDraftEditor: "SkillDraftEditor" },
     "./authoredSkillReviewState": {
       AUTHORED_SKILL_ACTIONS: [{ action: "allow", label: "Allow publication" }],
       authoredReviewMatches: () => true,
@@ -136,8 +135,6 @@ function setup(kind: "review" | "draft" | "launcher" | "page" = "review") {
       });
     return exports.AuthoredSkillReviewContent!({
       acknowledgement,
-      editing: kind === "draft",
-      onEdit: () => navigation.push("AuthoredSkillDraft", params),
       onDecision: () => decision.promise,
     });
   });
@@ -152,8 +149,6 @@ function setup(kind: "review" | "draft" | "launcher" | "page" = "review") {
     },
     button: (label: string) =>
       find(harness.flush(), (row) => row.props.label === label),
-    editor: () =>
-      find(harness.flush(), (row) => row.type === "SkillDraftEditor"),
     content: () =>
       find(
         harness.flush(),
@@ -168,26 +163,19 @@ test("the in-chat skill launcher pushes the exact serializable review route", ()
   assert.deepEqual(env.pushed, [{ name: "AuthoredSkillReview", params }]);
   env.harness.unmount();
 });
-test("Edit pushes a child draft page and leaves the review content in place", () => {
+test("owner review shows readable files and NyxBot guidance, with no inline edit route", () => {
   const env = setup();
-  env.button("Edit before publishing").props.onPress();
-  assert.deepEqual(env.pushed, [{ name: "AuthoredSkillDraft", params }]);
-  assert.equal(env.guard().defaultRole, "back");
-  assert.equal(env.guard().active, false);
-  env.harness.unmount();
-});
-test("dirty drafts use the shared discard guard and submissions block leaving", () => {
-  const env = setup("draft");
-  env.editor().props.onDirty(true);
-  assert.equal(
-    env.guard().discardOnClose.title,
-    "Discard skill draft changes?",
+  assert.throws(
+    () => env.button("Edit before publishing"),
+    /Element not found/,
   );
-  env.editor().props.onBusy(true);
-  assert.equal(env.guard().disabled, true);
-  env.editor().props.onBusy(false);
-  assert.equal(env.guard().disabled, false);
-  env.editor().props.onDirty(false);
+  const guidance = find(
+    env.harness.flush(),
+    (row) => row.props.children === "To change this skill, ask NyxBot.",
+  );
+  assert.ok(guidance);
+  assert.deepEqual(env.pushed, []);
+  assert.equal(env.guard().defaultRole, "back");
   assert.equal(env.guard().discardOnClose, undefined);
   env.harness.unmount();
 });

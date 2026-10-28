@@ -87,36 +87,6 @@ export const skillHistorySchema = z.object({
     )
     .default([]),
 });
-export const skillDraftSchema = z.object({
-  schema_version: z.number().default(1),
-  kind: z.enum(["new", "improve", "none"]).default("new"),
-  name: z.string(),
-  description: z.string(),
-  skill_md: z.string(),
-  rationale: z.string(),
-  safety_notes: z.string(),
-  files: z
-    .array(z.object({ path: z.string(), content: z.string() }))
-    .default([]),
-  base_skill: skillPinSchema.nullish(),
-});
-export type SkillDraft = z.infer<typeof skillDraftSchema>;
-export const skillProposalsSchema = z.object({
-  proposals: z.array(
-    z.object({
-      id: z.string(),
-      revision: z.number().default(0),
-      status: z.string(),
-      card_conversation_id: z.string().nullish(),
-      acknowledgement_id: z.string().nullish(),
-      draft: skillDraftSchema.nullish(),
-    }),
-  ),
-});
-export type SkillProposal = z.infer<
-  typeof skillProposalsSchema
->["proposals"][number];
-
 export type SkillChange =
   | {
       type: "attach";
@@ -124,8 +94,7 @@ export type SkillChange =
       selected: SkillVersion;
       preview: SkillPreview;
     }
-  | { type: "detach"; skillId: string }
-  | { type: "toggle"; skillId: string; disabled: boolean };
+  | { type: "detach"; skillId: string };
 
 /** An exact package selection and a server revision fence are both required. */
 export function buildSkillSelection(current: AgentSkills, change: SkillChange) {
@@ -168,14 +137,7 @@ export function buildSkillSelection(current: AgentSkills, change: SkillChange) {
     );
   return {
     expected_revision: current.revision,
-    skills:
-      change.type === "detach"
-        ? current.skills.filter((pin) => pin.skill_id !== change.skillId)
-        : current.skills.map((pin) =>
-            pin.skill_id === change.skillId
-              ? { ...pin, disabled: change.disabled }
-              : pin,
-          ),
+    skills: current.skills.filter((pin) => pin.skill_id !== change.skillId),
   };
 }
 

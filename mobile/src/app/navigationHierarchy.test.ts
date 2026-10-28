@@ -55,9 +55,7 @@ const mainEntries = [
   ["GroupEditor", { groupId: "crew" }],
   ["ServiceSetup", { catalogSlug: "docs" }],
   ["AgentSkills", { agentId: "agent" }],
-  ...(
-    ["SkillDetail", "SkillVersions", "SkillHistory", "SkillDraft"] as const
-  ).map(
+  ...(["SkillDetail", "SkillVersions", "SkillHistory"] as const).map(
     (name) =>
       [
         name,
@@ -65,11 +63,10 @@ const mainEntries = [
           agentId: "agent",
           skillId: "skill",
           name: "Exact skill",
-          proposalId: "proposal",
         },
       ] as const,
   ),
-  ...(["AuthoredSkillReview", "AuthoredSkillDraft"] as const).map(
+  ...(["AuthoredSkillReview"] as const).map(
     (name) =>
       [
         name,

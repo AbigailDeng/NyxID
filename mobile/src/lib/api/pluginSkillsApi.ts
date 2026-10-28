@@ -5,11 +5,9 @@ import {
   attachedSkillPreviewSchema,
   skillHistorySchema,
   skillPreviewSchema,
-  skillProposalsSchema,
   skillSearchSchema,
   skillVersionsSchema,
   type AgentSkill,
-  type SkillDraft,
 } from "../../features/plugins/pluginSkillsTypes";
 import { authoredSkillPreviewSchema } from "../../features/plugins/authoredSkillReviewState";
 
@@ -104,51 +102,5 @@ export const pluginSkillsApi = {
     return skillHistorySchema.parse(
       await requestJson(`${skillsPath(agentId)}/history`, { signal }),
     );
-  },
-  async features(signal?: AbortSignal) {
-    return (
-      z
-        .object({
-          capabilities: z
-            .object({ enabled_features: z.array(z.string()).default([]) })
-            .nullish(),
-        })
-        .parse(await requestJson("/users/me", { signal })).capabilities
-        ?.enabled_features ?? []
-    );
-  },
-  async improve(agentId: string, skillId: string) {
-    return z
-      .object({ proposal_id: z.string(), acknowledgement_id: z.string() })
-      .parse(
-        await requestJson(
-          `${skillsPath(agentId)}/${encodeURIComponent(skillId)}/improve`,
-          { method: "POST", body: {} },
-        ),
-      );
-  },
-  async proposals(agentId: string, signal?: AbortSignal) {
-    return skillProposalsSchema.parse(
-      await requestJson(`${agentPath(agentId)}/learning/proposals`, { signal }),
-    );
-  },
-  async validateDraft(agentId: string, proposalId: string, draft: SkillDraft) {
-    return z.object({ valid: z.boolean(), bytes: z.number() }).parse(
-      await requestJson(`${proposalPath(agentId, proposalId)}/validate`, {
-        method: "POST",
-        body: { draft },
-      }),
-    );
-  },
-  async saveDraft(
-    agentId: string,
-    proposalId: string,
-    revision: number,
-    draft: SkillDraft,
-  ) {
-    await requestJson(proposalPath(agentId, proposalId), {
-      method: "PUT",
-      body: { revision, draft },
-    });
   },
 };

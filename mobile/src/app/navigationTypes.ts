@@ -39,7 +39,7 @@ export type SkillPageParams = {
   skillId: string;
   name: string;
   description?: string | null;
-  proposalId?: string;
+  version?: string;
 };
 
 export type AuthoredSkillPageParams = {
@@ -74,9 +74,7 @@ export type WorkspaceContentParamList = Omit<
   SkillDetail: SkillPageParams;
   SkillVersions: SkillPageParams;
   SkillHistory: SkillPageParams;
-  SkillDraft: SkillPageParams;
   AuthoredSkillReview: AuthoredSkillPageParams;
-  AuthoredSkillDraft: AuthoredSkillPageParams;
   AgentMachines: { agentId: string };
   AgentMachineEditor: { agentId: string; machineId: string };
   MachineDetail: { machineId: string };
@@ -150,9 +148,7 @@ export const workspaceContentRouteNames: (keyof WorkspaceContentParamList)[] = [
   "SkillDetail",
   "SkillVersions",
   "SkillHistory",
-  "SkillDraft",
   "AuthoredSkillReview",
-  "AuthoredSkillDraft",
   "AgentMachines",
   "AgentMachineEditor",
   "MachineDetail",

@@ -136,8 +136,13 @@ test("re-pinning an enabled skill preserves additive activation settings", () =>
     preview,
   });
   assert.equal(result.skills[0]?.disabled, false);
-  assert.deepEqual((result.skills[0] as Record<string, unknown>)?.activation, { mode: "on_demand" });
-  assert.equal((result.skills[0] as Record<string, unknown>)?.publisher_id, "existing-publisher");
+  assert.deepEqual((result.skills[0] as Record<string, unknown>)?.activation, {
+    mode: "on_demand",
+  });
+  assert.equal(
+    (result.skills[0] as Record<string, unknown>)?.publisher_id,
+    "existing-publisher",
+  );
   assert.equal(result.skills[0]?.version, "2.3.4");
 });
 
@@ -155,21 +160,12 @@ test("selection round-trips unknown fields and dependency metadata on sibling pi
     type: "detach",
     skillId: "second",
   });
-  assert.equal((result.skills[0] as Record<string, unknown>)?.activation_mode, "always");
+  assert.equal(
+    (result.skills[0] as Record<string, unknown>)?.activation_mode,
+    "always",
+  );
   assert.equal(result.skills[0]?.dependencies[0]?.publisher_id, "publisher-a");
   assert.equal(result.skills[0]?.version, "1.0.0");
-});
-
-test("toggle changes only the chosen pin's disabled state", () => {
-  const baseline = current();
-  const result = buildSkillSelection(baseline, {
-    type: "toggle",
-    skillId: "first",
-    disabled: true,
-  });
-  assert.deepEqual(result.skills[0], { ...baseline.skills[0], disabled: true });
-  assert.deepEqual(result.skills[1], baseline.skills[1]);
-  assert.equal(baseline.skills[0]?.disabled, false);
 });
 
 test("16 pins blocks a new attachment but permits replacement", () => {
@@ -199,19 +195,10 @@ test("16 pins blocks a new attachment but permits replacement", () => {
   );
 });
 
-test("stale detach and toggle fail instead of claiming a successful change", () => {
+test("stale removal fail instead of claiming a successful change", () => {
   assert.throws(
     () =>
       buildSkillSelection(current(), { type: "detach", skillId: "missing" }),
-    /no longer attached/,
-  );
-  assert.throws(
-    () =>
-      buildSkillSelection(current(), {
-        type: "toggle",
-        skillId: "missing",
-        disabled: true,
-      }),
     /no longer attached/,
   );
 });

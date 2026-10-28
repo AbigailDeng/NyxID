@@ -1,14 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ApiError } from "../../lib/api/ApiError";
 import {
   authoredSkillActionRequest,
   authoredSkillPreviewSchema,
   authoredReviewMatches,
   interruptedPublicationText,
   publicationFailureText,
-  skillDraftDiagnostics,
-  skillDraftDiagnosticText,
   supportedAuthoredSkillActions,
   type AuthoredSkillAction,
 } from "./authoredSkillReviewState";
@@ -247,82 +244,5 @@ test("publication errors distinguish verified-but-unattached from an uncertain w
   assert.equal(
     publicationFailureText("untrusted_provider_error", "failed"),
     "Publication could not finish. Check the current state.",
-  );
-});
-
-test("structured diagnostics keep fields, lines and bounds without echoing private content", () => {
-  const diagnostics = skillDraftDiagnostics({
-    details: [
-      {
-        field: "skill_md",
-        rule: "too_large",
-        line: 12,
-        limit: 1000,
-        actual: 1200,
-        unit: "bytes",
-      },
-      {
-        field: "files[1].content",
-        rule: "private_material",
-        line: 4,
-        unsafe_content: "secret-value",
-      },
-      { unexpected: "ignored" },
-    ],
-  });
-  assert.equal(diagnostics.length, 2);
-  assert.match(
-    skillDraftDiagnosticText(diagnostics[0]!),
-    /Skill draft.*line 12.*1,000 bytes.*1,200/,
-  );
-  assert.match(
-    skillDraftDiagnosticText(diagnostics[1]!),
-    /File 2 content.*private material.*line 4/,
-  );
-  assert.doesNotMatch(JSON.stringify(diagnostics), /secret-value/);
-});
-
-test("single and Web-compatible diagnostics remain readable", () => {
-  assert.deepEqual(
-    skillDraftDiagnostics({ details: { field: "name", rule: "required" } }),
-    [{ field: "name", rule: "required" }],
-  );
-  assert.deepEqual(
-    skillDraftDiagnostics({
-      errorResponse: {
-        details: [{ field: "files[0].path", rule: "unsafe_path" }],
-      },
-    }),
-    [{ field: "files[0].path", rule: "unsafe_path" }],
-  );
-  assert.deepEqual(skillDraftDiagnostics(new Error("No diagnostics")), []);
-});
-
-test("ApiError preserves structured diagnostics through the native draft adapter without echoing private content", () => {
-  const error = new ApiError({
-    errorKey: "validation_error",
-    errorCode: 1000,
-    statusCode: 400,
-    message: "The skill draft contains private material.",
-    details: [
-      {
-        field: "skill_md",
-        rule: "private_material",
-        line: 8,
-        private_input: "private-token-value-do-not-display",
-      },
-    ],
-  });
-  assert.equal(error.statusCode, 400);
-  const diagnostics = skillDraftDiagnostics(error);
-  assert.deepEqual(diagnostics, [
-    { field: "skill_md", rule: "private_material", line: 8 },
-  ]);
-  const output = diagnostics.map(skillDraftDiagnosticText).join("\n");
-  assert.match(output, /Skill draft.*private material.*line 8/);
-  assert.doesNotMatch(output, /private-token-value-do-not-display/);
-  assert.doesNotMatch(
-    JSON.stringify(diagnostics),
-    /private_input|private-token-value-do-not-display/,
   );
 });

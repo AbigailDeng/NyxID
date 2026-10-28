@@ -13,7 +13,7 @@ in `navigationHierarchy.ts` and `workspaceChatNavigation.ts`.
 | Root / GroupChat | Crew conversation; actual name/ownership context/settings in one header, member details in the chip strip. |
 | Tabs / Automations | Drawer module; AutomationDetail, Editor, Runs, Preferences. Agent-scoped entry preserves its filter. |
 | Tabs / Agents | Agents & Crews drawer module; AgentCreate, AgentDetail, AgentSkills, GroupEditor. Choosing a chat dismisses the drawer. |
-| Tabs / Plugins | Connectors and Skills; existing local overview/advanced/history/skill/version/draft/review subflows stay inside the drawer; ServiceSetup reuses connection setup. |
+| Tabs / Plugins | Connectors and Skills; existing local overview/advanced/history/skill/version/review subflows stay inside the drawer; ServiceSetup reuses connection setup. |
 | Tabs / Services | Existing connections/catalog and local setup/detail/credential/removal states inside the drawer. |
 | Tabs / Machines | Personal/org Admin inventory and read-only local ceiling/detail; `/assistant/machines?machine={id}` selects local detail; `?tab=logins` selects Saved logins. Cold entry retains Assistant underneath; local Back returns to inventory. Managed/hosted/setup routes hand off to Web. |
 | Tabs / Activity | Activity: Incoming pending requests, then History grouped by local day; Active grants is a secondary page. Challenge notifications enter this module or its existing detail state through the shared guard/deferred-navigation path. |
@@ -109,3 +109,9 @@ continue the existing crew conversation with its current recipient semantics.
 ### Sidebar decisions (2026-10-28)
 
 The base sidebar places Quick actions (Scan QR code, Terminal login code) above Workspace. Workspace contains Automations, Machines, Plugins, Activity with its live pending count, and Create new agent. Disabled coming-soon destinations are removed. Quick actions open the existing guarded account sheets over the expanded sidebar, preserving its offset and scroll position; Settings has account identity and Usage & credits without duplicate quick actions. Root swaps have no native fade or inner animation: the new opaque page lays out and paints before the slab closes once in300ms. The route-table topology above is being migrated to ContentStack as described in STREAM_A.
+
+Skill detail, versions, history and authored owner review push inside the content
+slab. Native draft/editor routes are removed by user decision (2026-10-28). Skill
+files are read-only; exact version choice, newest supported exact pin and removal
+from this agent retain the shared critical-write guard. Owner publication
+approve/decline cards remain supported without an inline editor.

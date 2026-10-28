@@ -1,59 +1,37 @@
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { useEffect, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  AppState,
-  Pressable,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import { useIsFocused, useNavigation } from "@react-navigation/native";
-import NetInfo from "@react-native-community/netinfo";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpen, Check, ChevronDown } from "lucide-react-native";
 import { WorkspaceSelectionSheet } from "../../components/workspace/WorkspaceSelectionField";
 import {
   ActionButton,
   Card,
-  Field,
   Label,
   Notice,
   WorkspacePage,
 } from "../../components/workspace/WorkspaceUI";
 import { agentsApi } from "../../lib/api/agentsApi";
-import { assistantApi } from "../../lib/api/assistantApi";
 import { pluginSkillsApi as api } from "../../lib/api/pluginSkillsApi";
 import { getAuthEpoch } from "../../lib/auth/authEpoch";
 import { fonts } from "../../theme/designTokens";
 import { useTheme } from "../../theme/ThemeContext";
 import type { AssistantAgent } from "../agents/agentContracts";
-import { submitSkillDraft } from "./skillDraftSubmission";
 import type {
   ContentScreenProps,
   SkillPageParams,
   WorkspaceNavigationProp,
 } from "../../app/navigationTypes";
-import {
-  useOpenWorkspaceChat,
-  useWorkspaceBack,
-} from "../../app/WorkspaceHeader";
+import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import { SkillLibrary, type SkillLibraryTab } from "./SkillLibrary";
 import {
   assertSkillRevision,
   buildSkillSelection,
   SKILL_HISTORY_LABELS,
   type SkillChange,
-  type SkillDraft,
-  type SkillProposal,
   type SkillVersion,
 } from "./pluginSkillsTypes";
-import {
-  skillDraftDiagnostics,
-  skillDraftDiagnosticText,
-  type SkillDraftDiagnostic,
-} from "./authoredSkillReviewState";
 
 const ROOT = ["workspace", "plugins", "skills"] as const;
 const titleOf = (agent: AssistantAgent) => agent.display_name || agent.name;
@@ -61,21 +39,8 @@ const failure = (cause: unknown) =>
   cause instanceof Error
     ? cause.message
     : "The request could not be completed. Try again.";
-type OpenChat = (context: {
-  agentId: string;
-  conversationId?: string;
-  acknowledgementId?: string;
-  openLatest?: boolean;
-}) => void;
-
 /** The catalog and every pin belong to the explicitly selected agent. */
-export function PluginSkills({
-  agentId,
-  onOpenChat,
-}: {
-  agentId?: string;
-  onOpenChat?: OpenChat;
-}) {
+export function PluginSkills({ agentId }: { agentId?: string }) {
   const { colors } = useTheme();
   const focused = useIsFocused();
   const epoch = getAuthEpoch();
@@ -87,12 +52,7 @@ export function PluginSkills({
     enabled: focused,
     retry: false,
   });
-  const features = useQuery({
-    queryKey: [...ROOT, "features"],
-    queryFn: ({ signal }) => api.features(signal),
-    enabled: focused,
-    retry: false,
-  });
+
   useEffect(() => {
     setChosen(agentId ?? "");
   }, [agentId, epoch]);
@@ -194,35 +154,21 @@ export function PluginSkills({
           }
         />
       )}
-      {features.isError && (
-        <Notice message="Optional skill controls could not be loaded. Attachments and exact versions remain available." />
-      )}
-      {agent && (
-        <AgentSkillsManager
-          key={agent.id}
-          agent={agent}
-          features={features.data ?? []}
-          onOpenChat={onOpenChat}
-        />
-      )}
+      {agent && <AgentSkillsManager key={agent.id} agent={agent} />}
     </View>
   );
 }
 
-type SkillView = "detail" | "versions" | "history" | "draft";
+type SkillView = "detail" | "versions" | "history";
 const skillRoutes = {
   detail: "SkillDetail",
   versions: "SkillVersions",
   history: "SkillHistory",
-  draft: "SkillDraft",
 } as const;
 
 export function PluginSkillPage({
   route,
-}: ContentScreenProps<
-  "SkillDetail" | "SkillVersions" | "SkillHistory" | "SkillDraft"
->) {
-  const openChat = useOpenWorkspaceChat();
+}: ContentScreenProps<"SkillDetail" | "SkillVersions" | "SkillHistory">) {
   const focused = useIsFocused();
   const agent = useQuery({
     queryKey: ["workspace", "agents", "detail", route.params.agentId],
@@ -230,12 +176,7 @@ export function PluginSkillPage({
     enabled: focused,
     retry: false,
   });
-  const features = useQuery({
-    queryKey: [...ROOT, "features"],
-    queryFn: ({ signal }) => api.features(signal),
-    enabled: focused,
-    retry: false,
-  });
+
   const view = (Object.keys(skillRoutes) as SkillView[]).find(
     (key) => skillRoutes[key] === route.name,
   )!;
@@ -256,8 +197,6 @@ export function PluginSkillPage({
           <AgentSkillsManager
             key={route.key}
             agent={agent.data.agent}
-            features={features.data ?? []}
-            onOpenChat={openChat}
             skillPage={route.params}
             view={view}
           />
@@ -268,12 +207,10 @@ export function PluginSkillPage({
 
 function SkillPageGuard({
   busy,
-  dirty,
   confirmDetach,
   onBack,
 }: {
   busy: boolean;
-  dirty: boolean;
   confirmDetach: boolean;
   onBack: () => void;
 }) {
@@ -282,26 +219,16 @@ function SkillPageGuard({
     onBack,
     defaultRole: "back",
     disabled: busy,
-    discardOnClose: dirty
-      ? {
-          title: "Discard skill draft changes?",
-          message: "Your unsaved skill draft changes will be lost.",
-        }
-      : undefined,
   });
   return null;
 }
 
 function AgentSkillsManager({
   agent,
-  features,
-  onOpenChat,
   skillPage,
   view = "detail",
 }: {
   agent: AssistantAgent;
-  features: string[];
-  onOpenChat?: OpenChat;
   skillPage?: SkillPageParams;
   view?: SkillView;
 }) {
@@ -321,8 +248,6 @@ function AgentSkillsManager({
         description: skillPage.description,
       }
     : undefined;
-  const proposalId = skillPage?.proposalId;
-  const [dirty, setDirty] = useState(false);
   const [versionPage, setVersionPage] = useState(1);
   const [selectedVersion, setSelectedVersion] = useState<SkillVersion>();
   const [testing, setTesting] = useState(false);
@@ -331,7 +256,6 @@ function AgentSkillsManager({
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const lock = useRef(false);
-  const editorLock = useRef(false);
   const authEpoch = useRef(getAuthEpoch());
   const currentKey = [...ROOT, agent.id] as const;
   const current = useQuery({
@@ -357,9 +281,18 @@ function AgentSkillsManager({
   const versions = useQuery({
     queryKey: [...ROOT, "versions", detail?.id, versionPage],
     queryFn: ({ signal }) => api.versions(detail!.id, versionPage, signal),
-    enabled: focused && Boolean(detail) && view !== "draft",
+    enabled: focused && Boolean(detail),
     retry: false,
   });
+  const initialVersionApplied = useRef(false);
+  useEffect(() => {
+    if (initialVersionApplied.current || !skillPage?.version || !versions.data)
+      return;
+    initialVersionApplied.current = true;
+    setSelectedVersion(
+      versions.data.items.find((item) => item.version === skillPage.version),
+    );
+  }, [skillPage?.version, versions.data]);
   const preview = useQuery({
     queryKey: [...ROOT, "preview", detail?.id, selectedVersion?.version],
     queryFn: ({ signal }) =>
@@ -381,12 +314,6 @@ function AgentSkillsManager({
     enabled: focused && Boolean(detail) && view === "history",
     retry: false,
   });
-  const proposals = useQuery({
-    queryKey: [...ROOT, "proposals", agent.id],
-    queryFn: ({ signal }) => api.proposals(agent.id, signal),
-    enabled: focused && Boolean(detail) && view === "draft",
-    retry: false,
-  });
   function openSkill(id: string, name: string, description?: string | null) {
     navigation.push("SkillDetail", {
       agentId: agent.id,
@@ -395,16 +322,12 @@ function AgentSkillsManager({
       description,
     });
   }
-  function openView(next: SkillView, proposal?: string) {
+  function openView(next: SkillView, version?: string) {
     if (skillPage)
       navigation.push(skillRoutes[next], {
         ...skillPage,
-        proposalId: proposal,
+        version,
       });
-  }
-  function editorBusy(value: boolean) {
-    editorLock.current = value;
-    setBusy(value);
   }
   async function refresh() {
     await Promise.all([
@@ -414,7 +337,7 @@ function AgentSkillsManager({
     ]);
   }
   async function run(action: () => Promise<void>) {
-    if (lock.current || editorLock.current) return;
+    if (lock.current) return;
     lock.current = true;
     setBusy(true);
     setError(undefined);
@@ -459,10 +382,8 @@ function AgentSkillsManager({
       setTesting(false);
       setNotice(
         change.type === "detach"
-          ? "Skill detached."
-          : change.type === "toggle"
-            ? "Skill status updated."
-            : "Exact skill version attached.",
+          ? "Skill removed from agent."
+          : "Exact skill version attached.",
       );
       if (change.type === "detach") navigation.goBack();
       else if (change.type === "attach")
@@ -472,11 +393,7 @@ function AgentSkillsManager({
   const pins = current.data?.skills ?? [];
   const pin = pins.find((item) => item.skill_id === detail?.id);
   const metadata = detail ? current.data?.metadata[detail.id] : undefined;
-  const canDisable = features.includes("assistant:skill-pin-disable");
-  const canImprove = features.includes("assistant:agent-learning");
-  const proposal = proposals.data?.proposals.find(
-    (item) => item.id === proposalId,
-  );
+  const latestVersion = versions.data?.items.find((item) => !item.deprecated);
 
   return (
     <View style={styles.stack}>
@@ -529,7 +446,6 @@ function AgentSkillsManager({
         <View style={styles.stack}>
           <SkillPageGuard
             busy={busy}
-            dirty={dirty}
             confirmDetach={confirmDetach}
             onBack={() =>
               confirmDetach ? setConfirmDetach(false) : navigation.goBack()
@@ -584,13 +500,18 @@ function AgentSkillsManager({
                   </Label>
                 )}
               </Card>
+              <Label muted>To change this skill, ask NyxBot.</Label>
               {pin?.disabled && (
-                <Notice
-                  message={
-                    canDisable
-                      ? "Enable this skill before updating its version. Changing a version will never turn it on automatically."
-                      : "This skill is disabled. Version updates require it to be enabled first; enabling is unavailable for your current rollout."
-                  }
+                <Notice message="This skill is disabled. Ask NyxBot to enable it before changing its version." />
+              )}
+              {latestVersion && (
+                <ActionButton
+                  label={`Use latest (${latestVersion.version})`}
+                  variant="secondary"
+                  disabled={busy || !current.data || Boolean(pin?.disabled)}
+                  onPress={() => {
+                    openView("versions", latestVersion.version);
+                  }}
                 />
               )}
               <ActionButton
@@ -658,56 +579,6 @@ function AgentSkillsManager({
                         </>
                       )}
                   </Card>
-                  {canDisable && (
-                    <Card>
-                      <View style={styles.row}>
-                        <View style={styles.flex}>
-                          <Label>{pin.disabled ? "Disabled" : "Enabled"}</Label>
-                          <Label muted style={styles.caption}>
-                            Use this skill in future agent turns
-                          </Label>
-                        </View>
-                        <Switch
-                          accessibilityLabel={`Use ${pin.name}`}
-                          value={!pin.disabled}
-                          disabled={busy || !current.data}
-                          onValueChange={(enabled) =>
-                            void change({
-                              type: "toggle",
-                              skillId: pin.skill_id,
-                              disabled: !enabled,
-                            })
-                          }
-                        />
-                      </View>
-                    </Card>
-                  )}
-                  {canImprove && (
-                    <Card>
-                      <Label>Edit / improve skill</Label>
-                      <Label muted style={styles.caption}>
-                        Edit a copy. The current attached version stays in use
-                        until you publish from its confirmation card.
-                      </Label>
-                      <ActionButton
-                        label="Review draft"
-                        variant="secondary"
-                        loading={busy}
-                        onPress={() =>
-                          void run(async () => {
-                            const result = await api.improve(
-                              agent.id,
-                              pin.skill_id,
-                            );
-                            openView("draft", result.proposal_id);
-                            await client.invalidateQueries({
-                              queryKey: [...ROOT, "proposals", agent.id],
-                            });
-                          })
-                        }
-                      />
-                    </Card>
-                  )}
                   <ActionButton
                     label="Skill history"
                     variant="secondary"
@@ -717,10 +588,10 @@ function AgentSkillsManager({
                   {confirmDetach ? (
                     <Card>
                       <Notice
-                        message={`Detach ${pin.name} from ${titleOf(agent)}? Other attached skills stay in place.`}
+                        message={`Remove ${pin.name} from ${titleOf(agent)}? Other attached skills stay in place. The skill stays in Ornn.`}
                       />
                       <ActionButton
-                        label="Confirm detach skill"
+                        label="Confirm remove from agent"
                         variant="danger"
                         loading={busy}
                         onPress={() =>
@@ -739,7 +610,7 @@ function AgentSkillsManager({
                     </Card>
                   ) : (
                     <ActionButton
-                      label="Detach skill"
+                      label="Remove from agent"
                       variant="danger"
                       disabled={busy || !current.data}
                       onPress={() => setConfirmDetach(true)}
@@ -867,9 +738,9 @@ function AgentSkillsManager({
                   (!pin && pins.length >= 16) ||
                   Boolean(
                     pin &&
-                      preview.data &&
-                      pin.version === preview.data.reference.version &&
-                      pin.sha256 === preview.data.reference.sha256,
+                    preview.data &&
+                    pin.version === preview.data.reference.version &&
+                    pin.sha256 === preview.data.reference.sha256,
                   )
                 }
                 onPress={() => {
@@ -883,10 +754,10 @@ function AgentSkillsManager({
                 }}
               />
               {pin?.disabled && (
-                <Notice message="Enable this skill from its details before updating its exact version." />
+                <Notice message="Ask NyxBot to enable this skill before updating its exact version." />
               )}
               {!pin && pins.length >= 16 && (
-                <Notice message="This agent already has 16 skills. Detach one before attaching another." />
+                <Notice message="This agent already has 16 skills. Remove one from this agent before attaching another." />
               )}
             </>
           )}
@@ -932,331 +803,7 @@ function AgentSkillsManager({
               ))}
             </>
           )}
-          {view === "draft" && (
-            <>
-              {proposals.isFetching && (
-                <ActivityIndicator
-                  accessibilityLabel="Loading skill draft"
-                  color={colors.primary}
-                />
-              )}
-              {proposals.isError && (
-                <>
-                  <Notice tone="error" message={failure(proposals.error)} />
-                  <ActionButton
-                    label="Retry skill draft"
-                    variant="secondary"
-                    onPress={() => void proposals.refetch()}
-                  />
-                </>
-              )}
-              {proposal?.draft ? (
-                <SkillDraftEditor
-                  key={`${proposal.id}:${proposal.revision}`}
-                  agentId={agent.id}
-                  proposal={proposal}
-                  disabled={
-                    !focused ||
-                    current.isError ||
-                    proposals.isError ||
-                    proposals.isFetching ||
-                    agent.can_maintain === false ||
-                    agent.status === "destroyed"
-                  }
-                  onBusy={editorBusy}
-                  onDirty={setDirty}
-                  onSaved={() =>
-                    client.invalidateQueries({
-                      queryKey: [...ROOT, "proposals", agent.id],
-                    })
-                  }
-                />
-              ) : (
-                !proposals.isFetching &&
-                !proposals.isError && (
-                  <Notice message="This draft is no longer available." />
-                )
-              )}
-              {proposal?.card_conversation_id && onOpenChat && (
-                <ActionButton
-                  label="Open the confirmation card"
-                  variant="secondary"
-                  loading={busy}
-                  onPress={() =>
-                    void run(async () => {
-                      const conversationId = proposal.card_conversation_id!;
-                      const cardHistory =
-                        await assistantApi.history(conversationId);
-                      const cardAgentId = cardHistory.conversation.agent?.id;
-                      if (!cardAgentId)
-                        throw new Error(
-                          "The confirmation's agent could not be resolved. Reload the draft and try again.",
-                        );
-                      if (authEpoch.current !== getAuthEpoch())
-                        throw new Error(
-                          "Your account session changed. Reopen Plugins to continue.",
-                        );
-                      onOpenChat({
-                        agentId: cardAgentId,
-                        conversationId,
-                        acknowledgementId:
-                          proposal.acknowledgement_id ?? undefined,
-                      });
-                    })
-                  }
-                />
-              )}
-            </>
-          )}
         </View>
-      )}
-    </View>
-  );
-}
-
-export function SkillDraftEditor({
-  agentId,
-  proposal,
-  disabled = false,
-  onBusy,
-  onDirty,
-  onSaved,
-}: {
-  agentId: string;
-  proposal: SkillProposal;
-  disabled?: boolean;
-  onBusy: (busy: boolean) => void;
-  onDirty?: (dirty: boolean) => void;
-  onSaved: () => Promise<unknown>;
-}) {
-  const [draft, setDraft] = useState<SkillDraft>(() => ({
-    ...proposal.draft!,
-    files: proposal.draft!.files.map((file) => ({ ...file })),
-  }));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const [diagnostics, setDiagnostics] = useState<SkillDraftDiagnostic[]>([]);
-  const [validBytes, setValidBytes] = useState<number>();
-  const [saved, setSaved] = useState(false);
-  const lock = useRef(false);
-  const authEpoch = useRef(getAuthEpoch());
-  const editable =
-    proposal.status === "pending" || proposal.status === "publication_failed";
-  const focused = useIsFocused();
-  const [foreground, setForeground] = useState(
-    AppState.currentState === "active",
-  );
-  const [online, setOnline] = useState(true);
-  const lifecycle = useRef({ mounted: true, revision: 0, active: false });
-  const active = editable && !disabled && focused && foreground && online;
-  if (lifecycle.current.active !== active) {
-    lifecycle.current.active = active;
-    lifecycle.current.revision++;
-  }
-  useEffect(() => {
-    lifecycle.current.mounted = true;
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state !== "active") lifecycle.current.revision++;
-      setForeground(state === "active");
-    });
-    const unsubscribe = NetInfo.addEventListener((state) => {
-      const connected =
-        state.isConnected !== false && state.isInternetReachable !== false;
-      if (!connected) lifecycle.current.revision++;
-      setOnline(connected);
-    });
-    return () => {
-      lifecycle.current.mounted = false;
-      lifecycle.current.revision++;
-      subscription.remove();
-      unsubscribe();
-    };
-  }, []);
-  useEffect(() => {
-    onDirty?.(JSON.stringify(draft) !== JSON.stringify(proposal.draft));
-  }, [draft, proposal.draft, onDirty]);
-  function update(next: SkillDraft) {
-    setDraft(next);
-    setValidBytes(undefined);
-    setSaved(false);
-    setDiagnostics([]);
-  }
-  async function run(save: boolean) {
-    if (lock.current) return;
-    const startedRevision = lifecycle.current.revision;
-    lock.current = true;
-    setBusy(true);
-    onBusy(true);
-    setError(undefined);
-    setSaved(false);
-    setDiagnostics([]);
-    setValidBytes(undefined);
-    try {
-      if (authEpoch.current !== getAuthEpoch())
-        throw new Error(
-          "Your account session changed. Reopen Plugins to continue.",
-        );
-      if (!draft.name.trim() || !draft.skill_md.trim())
-        throw new Error("Enter a skill name and SKILL.md contents.");
-      if (draft.files.some((file) => !file.path.trim()))
-        throw new Error("Enter a path for each extra file or remove the file.");
-      const result = await submitSkillDraft({
-        canContinue: () =>
-          lifecycle.current.mounted &&
-          lifecycle.current.active &&
-          lifecycle.current.revision === startedRevision &&
-          AppState.currentState === "active" &&
-          authEpoch.current === getAuthEpoch(),
-        validate: () => api.validateDraft(agentId, proposal.id, draft),
-        save: save
-          ? () => api.saveDraft(agentId, proposal.id, proposal.revision, draft)
-          : undefined,
-      });
-      setValidBytes(result.bytes);
-      if (save) {
-        setSaved(true);
-        onDirty?.(false);
-        await onSaved();
-      }
-    } catch (cause) {
-      setError(failure(cause));
-      setDiagnostics(skillDraftDiagnostics(cause));
-    } finally {
-      lock.current = false;
-      setBusy(false);
-      onBusy(false);
-    }
-  }
-  return (
-    <View style={styles.stack}>
-      <Notice message="Saving changes only the draft. Publish it from its confirmation card in the conversation to update the attached skill." />
-      {!editable && (
-        <Notice
-          message={`This draft is ${proposal.status} and cannot be edited.`}
-        />
-      )}
-      {error && <Notice tone="error" message={error} />}
-      {diagnostics.map((item, index) => (
-        <Notice
-          key={`${item.field}:${item.rule}:${index}`}
-          tone="error"
-          message={skillDraftDiagnosticText(item)}
-        />
-      ))}
-      <Label muted>
-        Kind:{" "}
-        {draft.kind === "improve"
-          ? "Improve attached skill"
-          : draft.kind === "new"
-            ? "New skill"
-            : "No skill proposed"}
-      </Label>
-      {draft.base_skill && (
-        <Label muted>
-          Base: {draft.base_skill.name} · {draft.base_skill.version}
-        </Label>
-      )}
-      {(
-        [
-          ["name", "Skill name"],
-          ["description", "Skill description"],
-          ["skill_md", "Skill draft"],
-          ["rationale", "Rationale"],
-          ["safety_notes", "Safety notes"],
-        ] as const
-      ).map(([name, label]) => (
-        <Field
-          key={name}
-          label={label}
-          value={draft[name]}
-          multiline={name !== "name"}
-          editable={
-            active && !busy && !(name === "name" && draft.kind === "improve")
-          }
-          onChangeText={(value) => update({ ...draft, [name]: value })}
-        />
-      ))}
-      {draft.files.map((file, index) => (
-        <Card key={index}>
-          <Field
-            label={`File ${index + 1} path`}
-            value={file.path}
-            editable={active && !busy}
-            onChangeText={(value) =>
-              update({
-                ...draft,
-                files: draft.files.map((item, at) =>
-                  at === index ? { ...item, path: value } : item,
-                ),
-              })
-            }
-          />
-          <Field
-            label={`File ${index + 1} content`}
-            value={file.content}
-            multiline
-            editable={active && !busy}
-            onChangeText={(value) =>
-              update({
-                ...draft,
-                files: draft.files.map((item, at) =>
-                  at === index ? { ...item, content: value } : item,
-                ),
-              })
-            }
-          />
-          {editable && (
-            <ActionButton
-              label={`Remove file ${index + 1}`}
-              variant="secondary"
-              disabled={busy || !active}
-              onPress={() =>
-                update({
-                  ...draft,
-                  files: draft.files.filter((_, at) => at !== index),
-                })
-              }
-            />
-          )}
-        </Card>
-      ))}
-      {editable && (
-        <>
-          <ActionButton
-            label="Add file"
-            variant="secondary"
-            disabled={busy || !active}
-            onPress={() =>
-              update({
-                ...draft,
-                files: [...draft.files, { path: "", content: "" }],
-              })
-            }
-          />
-          <ActionButton
-            label="Validate draft"
-            disabled={!active}
-            variant="secondary"
-            loading={busy}
-            onPress={() => void run(false)}
-          />
-          <ActionButton
-            label="Save draft"
-            disabled={!active}
-            loading={busy}
-            onPress={() => void run(true)}
-          />
-        </>
-      )}
-      {validBytes !== undefined && (
-        <Notice
-          tone="success"
-          message={
-            saved
-              ? "Draft saved. The attached version stays in use until publication."
-              : `The draft passes validation (${validBytes.toLocaleString()} bytes). Save it to keep changes.`
-          }
-        />
       )}
     </View>
   );

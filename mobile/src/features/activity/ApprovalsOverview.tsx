@@ -134,6 +134,8 @@ export function ApprovalsOverview({
       sections={sections}
       keyExtractor={(item) => item.id}
       stickySectionHeadersEnabled={false}
+      contentInsetAdjustmentBehavior="never"
+      automaticallyAdjustContentInsets={false}
       contentContainerStyle={styles.content}
       refreshControl={
         <RefreshControl
@@ -315,7 +317,11 @@ export function ApprovalsOverview({
 
 const createStyles = (c: ThemeColors) =>
   StyleSheet.create({
-    content: { paddingHorizontal: spacing.xxxl, paddingBottom: 48 },
+    content: {
+      paddingHorizontal: spacing.xxxl,
+      paddingTop: 16,
+      paddingBottom: 48,
+    },
     intro: { gap: spacing.sm, paddingTop: spacing.sm },
     introRow: {
       flexDirection: "row",

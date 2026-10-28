@@ -499,3 +499,11 @@ test("Activity history uses main's Today/Yesterday/date labels and paginates onl
   assert.equal(env.footer("history"), null);
   assert.ok(env.footer(env.sections.at(-1)!.key));
 });
+
+test("Activity owns its content inset below the opaque slab header", () => {
+  const env = setup();
+  assert.equal(env.root.props.contentInsetAdjustmentBehavior, "never");
+  assert.equal(env.root.props.automaticallyAdjustContentInsets, false);
+  assert.equal(env.root.props.contentContainerStyle.paddingTop, 16);
+  assert.equal(env.root.props.stickySectionHeadersEnabled, false);
+});

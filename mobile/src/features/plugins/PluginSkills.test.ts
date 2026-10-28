@@ -84,8 +84,8 @@ const preview = {
 function setup({
   wrapperOnly = false,
   agentId,
-  draftOnly = false,
-}: { wrapperOnly?: boolean; agentId?: string; draftOnly?: boolean } = {}) {
+  initialPage,
+}: { wrapperOnly?: boolean; agentId?: string; initialPage?: any } = {}) {
   const calls: { method: string; args: any[] }[] = [];
   const queries = new Map<string, QueryOptions>();
   const state = new Map<string, any>();
@@ -93,24 +93,8 @@ function setup({
   let epoch = 1;
   let requestedAgent = agentId;
   let manager: Element | undefined;
-  const dirty: boolean[] = [];
-  const onDirty = (value: boolean) => dirty.push(value);
-  const proposal = {
-    id: "proposal",
-    revision: 1,
-    status: "pending",
-    draft: {
-      name: "Draft",
-      description: "",
-      skill_md: "# Draft",
-      kind: "new",
-      rationale: "",
-      safety_notes: "",
-      files: [],
-    },
-  };
-  let routePage: any;
-  let routeView = "detail";
+  let routePage: any = initialPage;
+  let routeView = initialPage ? "versions" : "detail";
   const routes: { name: string; params: any }[] = [];
   const navigation = {
     push: (name: string, params: any) => {
@@ -121,7 +105,6 @@ function setup({
           SkillDetail: "detail",
           SkillVersions: "versions",
           SkillHistory: "history",
-          SkillDraft: "draft",
         } as Record<string, string>
       )[name]!;
       harness.render();
@@ -143,7 +126,6 @@ function setup({
     refetch: async () => {},
   });
   state.set("agents", response({ agents: [first, second] }));
-  state.set("features", response([]));
   state.set(first.id, response(currentSkills));
   state.set(
     second.id,
@@ -175,7 +157,6 @@ function setup({
   state.set("preview", response(preview));
   state.set("test", response());
   state.set("history", response({ items: [] }));
-  state.set("proposals", response({ proposals: [] }));
   const client = { invalidateQueries: record("invalidate") };
   const harness = hookHarness<Element>({
     "../../components/AgentAvatar": {
@@ -261,7 +242,6 @@ function setup({
     "../../lib/api/assistantApi": { assistantApi: {} },
     "../../lib/api/pluginSkillsApi": {
       pluginSkillsApi: {
-        features: record("features", []),
         current: record("current", currentSkills),
         search: record("search", state.get("catalog").data),
         versions: record("versions", { items: [version] }),
@@ -274,30 +254,19 @@ function setup({
     "../../theme/ThemeContext": {
       useTheme: () => ({ colors: { primaryTone: {} } }),
     },
-    "./skillDraftSubmission": { submitSkillDraft: async () => {} },
     "../../app/WorkspaceHeader": {
       useWorkspaceBack: () => {},
       useOpenWorkspaceChat: () => () => {},
     },
     "./pluginSkillsTypes": skillTypes,
-    "./authoredSkillReviewState": {},
     "./SkillLibrary": { SkillLibrary: "SkillLibrary" },
   });
-  const { PluginSkills, SkillDraftEditor } = harness.load(
+  const { PluginSkills } = harness.load(
     fileURLToPath(new URL("./PluginSkills.tsx", import.meta.url)),
   ) as {
     PluginSkills: (props: unknown) => Element;
-    SkillDraftEditor: (props: unknown) => Element;
   };
   harness.mount(() => {
-    if (draftOnly)
-      return SkillDraftEditor({
-        agentId: first.id,
-        proposal,
-        onBusy: () => {},
-        onDirty,
-        onSaved: async () => {},
-      });
     const wrapper = PluginSkills({
       agentId: requestedAgent,
     });
@@ -326,7 +295,8 @@ function setup({
     queries,
     state,
     routes,
-    dirty,
+    navigation: navigation.push,
+    elements: () => elements(harness.flush()),
     manager: () => manager!,
     sheet: () => find((item) => item.type === "WorkspaceSelectionSheet"),
     hasSheet: () =>
@@ -684,16 +654,79 @@ test("catalog review opens original identity without mutating and exact attach r
   }
 });
 
-test("skill draft editor reports real edits and clearing back to the saved baseline", () => {
-  const env = setup({ draftOnly: true });
+test("skill detail is read-only with version choice, newest supported pin and agent removal", async () => {
+  const env = setup();
   try {
-    assert.equal(env.dirty.at(-1), false);
-    env.control("Skill description").props.onChangeText("Unsaved description");
+    env.library().props.onOpenSkill("pin-original", "dns-helper");
     env.harness.flush();
-    assert.equal(env.dirty.at(-1), true);
-    env.control("Skill description").props.onChangeText("");
-    env.harness.flush();
-    assert.equal(env.dirty.at(-1), false);
+    assert.throws(() => env.control("Edit / improve skill"));
+    assert.throws(() => env.control("Review draft"));
+    assert.equal(
+      env
+        .elements()
+        .some((row) => row.type === "Switch" || row.type === "Field"),
+      false,
+    );
+    assert.ok(
+      env
+        .elements()
+        .some(
+          (row) => row.props.children === "To change this skill, ask NyxBot.",
+        ),
+    );
+    env.state.get("versions").data.items = [
+      { ...version, version: "deprecated", deprecated: true },
+      version,
+    ];
+    env.harness.render();
+    env.control(`Use latest (${version.version})`).props.onPress();
+    assert.equal(env.routes.at(-1)?.name, "SkillVersions");
+    assert.equal(
+      env.control(`Select version ${version.version}`).props.accessibilityState
+        .checked,
+      true,
+    );
+    assert.equal(env.queries.get("preview")?.queryKey[5], version.version);
+    assert.equal(
+      env.calls.filter((call) => call.method === "write").length,
+      0,
+      "review before committing the exact pin",
+    );
+    env.navigation("SkillDetail", {
+      agentId: first.id,
+      skillId: "pin-original",
+      name: "dns-helper",
+    });
+    env.control("Remove from agent").props.onPress();
+    env.control("Confirm remove from agent").props.onPress();
+    await env.harness.settle();
+    const written = env.calls.find((call) => call.method === "write")!;
+    assert.equal(written.args[0], first.id);
+    assert.equal(written.args[1].expected_revision, 7);
+    assert.deepEqual(Array.from(written.args[1].skills), []);
+  } finally {
+    env.unmount();
+  }
+});
+
+test("Use latest carries its literal version across a real versions-page remount", () => {
+  const env = setup({
+    initialPage: {
+      agentId: first.id,
+      skillId: "catalog-opaque",
+      name: "weekly_report",
+      version: version.version,
+    },
+  });
+  try {
+    assert.equal(
+      env.control(`Select version ${version.version}`).props.accessibilityState
+        .checked,
+      true,
+    );
+    assert.equal(env.queries.get("preview")?.queryKey[5], version.version);
+    assert.equal(env.control("Attach skill").props.disabled, false);
+    assert.equal(env.calls.length, 0);
   } finally {
     env.unmount();
   }

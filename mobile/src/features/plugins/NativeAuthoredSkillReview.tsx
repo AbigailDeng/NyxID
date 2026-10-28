@@ -19,7 +19,6 @@ import { pluginSkillsApi as api } from "../../lib/api/pluginSkillsApi";
 import { getAuthEpoch } from "../../lib/auth/authEpoch";
 import { fonts } from "../../theme/designTokens";
 import { useTheme } from "../../theme/ThemeContext";
-import { SkillDraftEditor } from "./PluginSkills";
 import type {
   AuthoredSkillPageParams,
   ContentScreenProps,
@@ -81,8 +80,7 @@ export function NativeAuthoredSkillReview({
 
 export function AuthoredSkillPage({
   route,
-  navigation,
-}: ContentScreenProps<"AuthoredSkillReview" | "AuthoredSkillDraft">) {
+}: ContentScreenProps<"AuthoredSkillReview">) {
   const params: AuthoredSkillPageParams = route.params;
   const assistant = useAssistant(
     params.conversationId,
@@ -107,8 +105,6 @@ export function AuthoredSkillPage({
       {acknowledgement?.authored_skill ? (
         <AuthoredSkillReviewContent
           acknowledgement={acknowledgement}
-          editing={route.name === "AuthoredSkillDraft"}
-          onEdit={() => navigation.push("AuthoredSkillDraft", params)}
           disabled={Boolean(assistant.deciding) || assistant.loadingOlder}
           online={assistant.online}
           onDecision={(choice) => assistant.decide(acknowledgement.id, choice)}
@@ -128,8 +124,6 @@ export function AuthoredSkillReviewContent({
   acknowledgement,
   disabled = false,
   online = true,
-  editing = false,
-  onEdit,
   onDecision,
   onRefresh,
 }: {
@@ -139,8 +133,6 @@ export function AuthoredSkillReviewContent({
   };
   disabled?: boolean;
   online?: boolean;
-  editing?: boolean;
-  onEdit: () => void;
   onDecision: (choice: "allow" | "deny") => Promise<unknown>;
   onRefresh?: () => Promise<unknown> | void;
 }) {
@@ -149,8 +141,6 @@ export function AuthoredSkillReviewContent({
   const client = useQueryClient();
   const reference = acknowledgement.authored_skill;
   const navigation = useNavigation<WorkspaceNavigationProp>();
-  const [dirty, setDirty] = useState(false);
-  const [editorBusy, setEditorBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
@@ -158,7 +148,6 @@ export function AuthoredSkillReviewContent({
     AppState.currentState === "active",
   );
   const lock = useRef(false);
-  const editorLock = useRef(false);
   const authEpoch = useRef(getAuthEpoch());
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) =>
@@ -189,37 +178,14 @@ export function AuthoredSkillReviewContent({
         ? Math.min(3000 * 2 ** Math.min(query.state.dataUpdateCount, 3), 24000)
         : false,
   });
-  const proposals = useQuery({
-    queryKey: [
-      "workspace",
-      "plugins",
-      "skills",
-      "proposals",
-      reference?.agent_id,
-    ],
-    queryFn: ({ signal }) => api.proposals(reference!.agent_id, signal),
-    enabled: Boolean(reference) && focused && foreground && editing && online,
-    retry: false,
-  });
   const data = preview.data;
   const matched = Boolean(
     reference && data && authoredReviewMatches(reference, data),
   );
-  const proposal = proposals.data?.proposals.find(
-    (item) => item.id === reference?.proposal_id,
-  );
   const blocked =
-    disabled ||
-    busy ||
-    editorBusy ||
-    !online ||
-    !focused ||
-    !foreground ||
-    preview.isError;
+    disabled || busy || !online || !focused || !foreground || preview.isError;
   const actions = data ? supportedAuthoredSkillActions(data) : [];
   const active = data?.state === "active";
-  const editable =
-    data?.status === "pending" || data?.status === "publication_failed";
   async function refresh() {
     await Promise.all([
       preview.refetch(),
@@ -230,15 +196,7 @@ export function AuthoredSkillReviewContent({
     ]);
   }
   async function act(action: AuthoredSkillAction) {
-    if (
-      lock.current ||
-      editorLock.current ||
-      blocked ||
-      editing ||
-      !reference ||
-      !data ||
-      preview.isFetching
-    )
+    if (lock.current || blocked || !reference || !data || preview.isFetching)
       return;
     lock.current = true;
     setBusy(true);
@@ -295,18 +253,8 @@ export function AuthoredSkillReviewContent({
     active: false,
     onBack: navigation.goBack,
     defaultRole: "back",
-    disabled: busy || editorBusy,
-    discardOnClose: dirty
-      ? {
-          title: "Discard skill draft changes?",
-          message: "Your unsaved skill draft changes will be lost.",
-        }
-      : undefined,
+    disabled: busy,
   });
-  function onEditorBusy(value: boolean) {
-    editorLock.current = value;
-    setEditorBusy(value);
-  }
   if (!reference) return null;
   return (
     <View style={styles.fill}>
@@ -375,73 +323,17 @@ export function AuthoredSkillReviewContent({
                 {data.base_scripts_not_copied && (
                   <Notice message="Scripts and executable files from the source skill are not copied into this draft." />
                 )}
-                {!editing &&
-                  data.files.map((file, index) => (
-                    <Card key={`${file.path}:${index}`}>
-                      <Label>{file.path}</Label>
-                      <ScrollView style={styles.fileScroll} nestedScrollEnabled>
-                        <Label selectable mono style={styles.fileContent}>
-                          {file.content}
-                        </Label>
-                      </ScrollView>
-                    </Card>
-                  ))}
-                {editable && matched && !editing && (
-                  <ActionButton
-                    label={"Edit before publishing"}
-                    variant="secondary"
-                    disabled={blocked || preview.isFetching}
-                    onPress={onEdit}
-                  />
-                )}
-                {editing && (
-                  <>
-                    {proposals.isFetching && (
-                      <ActivityIndicator
-                        accessibilityLabel="Loading editable skill draft"
-                        color={colors.primary}
-                      />
-                    )}
-                    {proposals.isError && (
-                      <Notice
-                        tone="error"
-                        message="The editable draft could not be loaded. Reload and try again."
-                      />
-                    )}
-                    {proposal?.draft ? (
-                      <SkillDraftEditor
-                        key={`${proposal.id}:${proposal.revision}`}
-                        agentId={reference.agent_id}
-                        proposal={proposal}
-                        disabled={
-                          !focused ||
-                          !foreground ||
-                          !online ||
-                          preview.isError ||
-                          proposals.isError ||
-                          preview.isFetching ||
-                          proposals.isFetching ||
-                          !matched ||
-                          !editable
-                        }
-                        onBusy={onEditorBusy}
-                        onDirty={setDirty}
-                        onSaved={async () => {
-                          setDirty(false);
-                          setNotice(
-                            "Draft saved. A new review card for this version was posted in the conversation. Confirm it there.",
-                          );
-                          await refresh();
-                        }}
-                      />
-                    ) : (
-                      !proposals.isFetching &&
-                      !proposals.isError && (
-                        <Notice message="This editable draft is no longer available." />
-                      )
-                    )}
-                  </>
-                )}
+                {data.files.map((file, index) => (
+                  <Card key={`${file.path}:${index}`}>
+                    <Label>{file.path}</Label>
+                    <ScrollView style={styles.fileScroll} nestedScrollEnabled>
+                      <Label selectable mono style={styles.fileContent}>
+                        {file.content}
+                      </Label>
+                    </ScrollView>
+                  </Card>
+                ))}
+                <Label muted>To change this skill, ask NyxBot.</Label>
               </>
             )}
             {data.status === "publishing" && (
@@ -459,35 +351,33 @@ export function AuthoredSkillReviewContent({
                 message={publicationFailureText(data.failure_code, data.status)}
               />
             )}
-            {!editing &&
-              AUTHORED_SKILL_ACTIONS.filter(({ action }) =>
-                actions.includes(action),
-              ).map(({ action, label }) => (
-                <ActionButton
-                  key={action}
-                  label={label}
-                  variant={
-                    action === "deny" ||
-                    action === "dismiss_card" ||
-                    action === "discard"
-                      ? "secondary"
-                      : "primary"
-                  }
-                  disabled={blocked || !matched || preview.isFetching}
-                  onPress={() => void act(action)}
-                />
-              ))}
+            {AUTHORED_SKILL_ACTIONS.filter(({ action }) =>
+              actions.includes(action),
+            ).map(({ action, label }) => (
+              <ActionButton
+                key={action}
+                label={label}
+                variant={
+                  action === "deny" ||
+                  action === "dismiss_card" ||
+                  action === "discard"
+                    ? "secondary"
+                    : "primary"
+                }
+                disabled={blocked || !matched || preview.isFetching}
+                onPress={() => void act(action)}
+              />
+            ))}
           </>
         )}
         <ActionButton
           label="Reload confirmation"
           variant="secondary"
-          disabled={busy || editorBusy || !online}
+          disabled={busy || !online}
           onPress={() => {
             void refresh().catch(() =>
               setError("The confirmation could not be refreshed. Try again."),
             );
-            if (editing) void proposals.refetch();
           }}
         />
       </ScrollView>

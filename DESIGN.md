@@ -580,6 +580,11 @@ account pages and QR/terminal quick actions use the retained pull-up surface. Se
   the safe-area inset rather than adding a second padded strip. The one-row
   private header stays compact; group name, ownership context and settings
   share one header, with member details retained.
+- Native skills are read-only except explicit version pinning and “Remove from
+  agent”. “Use latest (version)” resolves the newest supported package and pins
+  its exact version/hash; no floating latest contract exists. Editing belongs to
+  NyxBot (“To change this skill, ask NyxBot.”). Owner publication decision cards
+  retain their reviewed files and guarded approve/decline actions, without an editor.
 - Settings → Display stores chat layout on this device with AsyncStorage. Column
   maximum defaults to 758pt, clamps to actual space, and is adjustable only on
   windows at least 600pt wide (360–1200pt range). Composer maximum defaults to the

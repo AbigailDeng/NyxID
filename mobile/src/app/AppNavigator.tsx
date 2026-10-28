@@ -472,19 +472,9 @@ function WorkspaceNavigator() {
         options={{ title: "Skill history" }}
       />
       <ContentStack.Screen
-        name="SkillDraft"
-        component={PluginSkillPage}
-        options={{ title: "Edit skill draft" }}
-      />
-      <ContentStack.Screen
         name="AuthoredSkillReview"
         component={AuthoredSkillPage}
         options={{ title: "Review skill draft" }}
-      />
-      <ContentStack.Screen
-        name="AuthoredSkillDraft"
-        component={AuthoredSkillPage}
-        options={{ title: "Edit skill draft" }}
       />
       <ContentStack.Screen
         name="AutomationDetail"
