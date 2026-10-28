@@ -594,16 +594,25 @@ logging to a website and then hand back the control to nyxbot".
   the configured frontend or `BASE_URL` origin (Android's transport default).
   Null, empty, duplicate, malformed and unrelated Origins are refused. Origins
   come from server configuration, never Host or forwarded headers. Cookie auth
-  still requires exactly the frontend origin. Bearer identity wins over cookies;
+  still requires exactly the frontend origin and verified Person provenance.
+  Bearer identity wins over cookies;
   invalid or malformed explicit credentials cannot fall back to a valid cookie.
   Node write ACL, capability, conversation and context checks still apply.
-  The relay revalidates the session, active person and current MFA policy every
-  ten seconds, with a three-second timeout that fails closed. This check runs
-  independently of initial setup and relay I/O, so even the first node command
-  cannot extend authority when it stalls.
-  Session revocation/expiry stops forwarding within thirteen seconds, including
-  the validation timeout. The policy close send has its own three-second bound.
-  A session failure closes with WebSocket policy code 1008. Closing a viewer
+  After signing-secret decryption, a fresh authority check must finish within
+  three seconds before the HTTP upgrade is accepted. The relay requires another
+  successful check before subscribing or dispatching its first DesktopOpen.
+  Each check covers the live session, active person/current MFA policy, node
+  write ACL and DesktopOpen capability, selected context ACL and desktop identity.
+  An independent watcher repeats the whole check every ten seconds with a
+  three-second timeout, including while setup, node commands or socket writes
+  stall. Frames and control dispatch require a successful check no older than
+  ten seconds; a stale result triggers a fresh bounded check before the effect.
+  For an active relay on a progressing executor, a persistent session/resource
+  revocation stops forwarding within thirteen seconds. This does not retract
+  already-buffered transport bytes or bound the whole pending HTTP request;
+  pending setup must pass the fresh pre-upgrade and relay gates before effects.
+  The policy close send has its own three-second bound. An authority failure
+  closes with WebSocket policy code 1008. Closing a viewer
   releases only its connection; it does not Stop or take/hand back control.
 - **Sessions.**
   - Desktop sessions start on demand (the panel opens, or the agent uses

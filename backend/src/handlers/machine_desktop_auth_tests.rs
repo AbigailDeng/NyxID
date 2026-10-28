@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 type Socket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
-async fn session(state: &AppState, owner: &str) -> (String, String) {
+pub(super) async fn session(state: &AppState, owner: &str) -> (String, String) {
     let id = Uuid::new_v4().to_string();
     let cookie = Uuid::new_v4().to_string();
     state
@@ -102,6 +102,7 @@ async fn machine_desktop_real_router_admission_matrix() {
     let (sid, cookie) = session(&f.state, &f.owner).await;
     let cookie = format!("nyx_session={cookie}");
     let valid = bearer(&f.state, &f.owner, &sid, json!({}));
+    let mixed_scheme = valid.replacen("Bearer", "bEaReR", 1);
     let (_, private) = crate::routes::build_router_with_state(f.state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("ws://{}", listener.local_addr().unwrap());
@@ -115,6 +116,34 @@ async fn machine_desktop_real_router_admission_matrix() {
         .unwrap()
         .origin()
         .ascii_serialization();
+    let (node_peer, requested) = peer(&f.state, &node, Some(1)).await;
+    let (status, socket) = handshake(
+        &base,
+        &node.id,
+        "",
+        &[
+            ("authorization", "Bearer \u{0080}"),
+            ("cookie", &cookie),
+            ("origin", &frontend),
+        ],
+    )
+    .await;
+    assert_eq!(
+        status, 401,
+        "non-ASCII authorization cannot fall back to the valid owner cookie"
+    );
+    assert!(
+        socket.is_none(),
+        "malformed authorization must never upgrade"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), requested.notified())
+            .await
+            .is_err(),
+        "malformed authorization must send no desktop command to the node"
+    );
+    node_peer.abort();
+    f.state.node_ws_manager.unregister_connection(&node.id);
     for (name, headers, expected) in [
         (
             "native absent",
@@ -135,6 +164,46 @@ async fn machine_desktop_real_router_admission_matrix() {
             "cookie frontend",
             vec![("cookie", &cookie), ("origin", &frontend)],
             101,
+        ),
+        (
+            "mixed-case header names",
+            vec![("AuThOrIzAtIoN", &valid), ("OrIgIn", &frontend)],
+            101,
+        ),
+        (
+            "mixed-case scheme cannot fall back to cookie",
+            vec![
+                ("authorization", &mixed_scheme),
+                ("cookie", &cookie),
+                ("origin", &frontend),
+            ],
+            403,
+        ),
+        (
+            "non-ASCII origin",
+            vec![
+                ("authorization", &valid),
+                ("origin", "https://\u{0080}.example"),
+            ],
+            403,
+        ),
+        (
+            "duplicate cookie origin",
+            vec![
+                ("cookie", &cookie),
+                ("origin", &frontend),
+                ("OrIgIn", &frontend),
+            ],
+            403,
+        ),
+        ("MCP session alone", vec![("Mcp-Session-Id", &sid)], 401),
+        (
+            "token in subprotocol alone",
+            vec![(
+                "Sec-WebSocket-Protocol",
+                valid.strip_prefix("Bearer ").unwrap(),
+            )],
+            401,
         ),
         ("cookie absent", vec![("cookie", &cookie)], 403),
         (
@@ -192,6 +261,34 @@ async fn machine_desktop_real_router_admission_matrix() {
         let (status, socket) = handshake(&base, &node.id, "", &headers).await;
         drop(socket);
         assert_eq!(status, expected, "{name}");
+    }
+    let query_token = format!("?access_token={}", valid.strip_prefix("Bearer ").unwrap());
+    assert_eq!(handshake(&base, &node.id, &query_token, &[]).await.0, 401);
+    let conversation_key = crate::services::assistant_agent_credential_service::load_or_provision(
+        &f.state.db,
+        &f.state.encryption_keys,
+        &f.owner,
+        &f.row.id,
+    )
+    .await
+    .unwrap();
+    let conversation_bearer = format!("Bearer {}", conversation_key.raw_key.as_str());
+    for credential in [
+        ("authorization", conversation_bearer.as_str()),
+        ("x-api-key", conversation_key.raw_key.as_str()),
+    ] {
+        assert_eq!(
+            handshake(
+                &base,
+                &node.id,
+                "",
+                &[credential, ("cookie", &cookie), ("origin", &frontend)]
+            )
+            .await
+            .0,
+            403,
+            "a provisioned assistant conversation key is never human desktop authority"
+        );
     }
     for origin in [
         "",
@@ -530,32 +627,92 @@ async fn peer(
 
 #[tokio::test]
 async fn machine_desktop_real_router_revocation_closes_idle_viewer() {
-    revoked_viewer(None).await;
+    revoked_viewer(None, Revocation::Session, false).await;
 }
 
 #[tokio::test]
 async fn machine_desktop_real_router_revocation_interrupts_stalled_node_command() {
-    revoked_viewer(Some(2)).await;
+    revoked_viewer(Some(2), Revocation::Session, false).await;
 }
 
 #[tokio::test]
 async fn machine_desktop_real_router_revocation_interrupts_initial_node_open() {
-    revoked_viewer(Some(1)).await;
+    revoked_viewer(Some(1), Revocation::Session, false).await;
 }
 
-async fn revoked_viewer(stall_at: Option<usize>) {
+#[tokio::test]
+async fn machine_desktop_real_router_cookie_stream_revocation() {
+    revoked_viewer(None, Revocation::Session, true).await;
+}
+
+#[tokio::test]
+async fn machine_desktop_real_router_org_removal_interrupts_stalled_command() {
+    revoked_viewer(Some(2), Revocation::OrgRemoval, false).await;
+}
+
+#[tokio::test]
+async fn machine_desktop_real_router_org_demotion_interrupts_stalled_command() {
+    revoked_viewer(Some(2), Revocation::OrgDemotion, false).await;
+}
+
+#[tokio::test]
+async fn machine_desktop_real_router_node_deletion_interrupts_stalled_command() {
+    revoked_viewer(Some(2), Revocation::NodeDeletion, false).await;
+}
+
+#[derive(Clone, Copy)]
+enum Revocation {
+    Session,
+    OrgRemoval,
+    OrgDemotion,
+    NodeDeletion,
+}
+
+async fn revoked_viewer(stall_at: Option<usize>, revocation: Revocation, cookie_auth: bool) {
     let f = crate::services::assistant_authority_tests::orchestrator_fixture("desktop_live_revoke")
         .await;
-    let node = crate::services::machine_integration_tests::node(&f, &f.owner).await;
+    let org = Uuid::new_v4().to_string();
+    let node = if matches!(revocation, Revocation::OrgRemoval | Revocation::OrgDemotion) {
+        f.state
+            .db
+            .collection("users")
+            .insert_one(test_user(&org, crate::models::user::UserType::Org))
+            .await
+            .unwrap();
+        f.state
+            .db
+            .collection(crate::models::org_membership::COLLECTION_NAME)
+            .insert_one(test_membership(
+                &org,
+                &f.owner,
+                crate::models::org_membership::OrgRole::Admin,
+                None,
+            ))
+            .await
+            .unwrap();
+        crate::services::machine_integration_tests::ungranted_node(&f, &org).await
+    } else {
+        crate::services::machine_integration_tests::node(&f, &f.owner).await
+    };
     let (peer, stalled) = peer(&f.state, &node, stall_at).await;
-    let (sid, _) = session(&f.state, &f.owner).await;
+    let (sid, cookie) = session(&f.state, &f.owner).await;
+    let cookie = format!("nyx_session={cookie}");
     let token = bearer(&f.state, &f.owner, &sid, json!({}));
     let (_, private) = crate::routes::build_router_with_state(f.state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("ws://{}", listener.local_addr().unwrap());
     let server =
         tokio::spawn(axum::serve(listener, private.with_state(f.state.clone())).into_future());
-    let (status, socket) = handshake(&base, &node.id, "", &[("authorization", &token)]).await;
+    let frontend = url::Url::parse(&f.state.config.frontend_url)
+        .unwrap()
+        .origin()
+        .ascii_serialization();
+    let headers = if cookie_auth {
+        vec![("cookie", cookie.as_str()), ("origin", frontend.as_str())]
+    } else {
+        vec![("authorization", token.as_str())]
+    };
+    let (status, socket) = handshake(&base, &node.id, "", &headers).await;
     assert_eq!(status, 101);
     let mut socket = socket.unwrap();
     if stall_at != Some(1) {
@@ -571,15 +728,72 @@ async fn revoked_viewer(stall_at: Option<usize>) {
             .await
             .unwrap();
     }
-    f.state
-        .db
-        .collection::<Document>("sessions")
-        .update_one(doc! {"_id":&sid}, doc! {"$set":{"revoked":true}})
-        .await
-        .unwrap();
+    match revocation {
+        Revocation::Session => {
+            f.state
+                .db
+                .collection::<Document>("sessions")
+                .update_one(doc! {"_id":&sid}, doc! {"$set":{"revoked":true}})
+                .await
+                .unwrap();
+        }
+        Revocation::OrgRemoval => {
+            f.state
+                .db
+                .collection::<Document>(crate::models::org_membership::COLLECTION_NAME)
+                .delete_many(doc! {"org_user_id":&org, "member_user_id":&f.owner})
+                .await
+                .unwrap();
+        }
+        Revocation::OrgDemotion => {
+            f.state
+                .db
+                .collection::<Document>(crate::models::org_membership::COLLECTION_NAME)
+                .update_one(
+                    doc! {"org_user_id":&org, "member_user_id":&f.owner},
+                    doc! {"$set":{"role":"member"}},
+                )
+                .await
+                .unwrap();
+        }
+        Revocation::NodeDeletion => {
+            f.state
+                .db
+                .collection::<Document>("nodes")
+                .delete_one(doc! {"_id":&node.id})
+                .await
+                .unwrap();
+        }
+    }
+    if !matches!(revocation, Revocation::Session) {
+        assert!(
+            live_session(&f.state, &f.owner, Uuid::parse_str(&sid).unwrap())
+                .await
+                .unwrap(),
+            "resource revocation must be detected while the person's login session remains live"
+        );
+    }
+    if stall_at.is_some() {
+        let row = desktop::get(&f.state.db, &node.id).await.unwrap().unwrap();
+        let frame = Frame {
+            kind: Kind::Desktop,
+            end: false,
+            id: Uuid::parse_str(&row.session_id).unwrap(),
+            sequence: 1,
+            bytes: b"buffered desktop pixels",
+        };
+        f.state
+            .node_ws_manager
+            .deliver_desktop_frame(&node.id, &frame, &frame.encode().unwrap());
+    }
     let closed = tokio::time::timeout(Duration::from_secs(14), async {
         while let Some(message) = socket.next().await {
-            if let tokio_tungstenite::tungstenite::Message::Close(Some(close)) = message.unwrap() {
+            let message = message.unwrap();
+            assert!(
+                !message.is_binary(),
+                "revoked authority must never receive desktop pixels"
+            );
+            if let tokio_tungstenite::tungstenite::Message::Close(Some(close)) = message {
                 return u16::from(close.code);
             }
         }
@@ -588,6 +802,143 @@ async fn revoked_viewer(stall_at: Option<usize>) {
     .await
     .unwrap();
     assert_eq!(closed, 1008);
+    server.abort();
+    peer.abort();
+    f.state.db.drop().await.unwrap();
+}
+
+#[derive(Debug)]
+struct PausedKeyProvider {
+    inner: crate::crypto::local_key_provider::LocalKeyProvider,
+    armed: std::sync::atomic::AtomicBool,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl crate::crypto::key_provider::KeyProvider for PausedKeyProvider {
+    async fn wrap_dek(&self, dek: &[u8]) -> AppResult<crate::crypto::key_provider::WrappedKey> {
+        self.inner.wrap_dek(dek).await
+    }
+    async fn unwrap_dek(
+        &self,
+        wrapped: &crate::crypto::key_provider::WrappedKey,
+    ) -> AppResult<zeroize::Zeroizing<Vec<u8>>> {
+        if self.armed.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
+        self.inner.unwrap_dek(wrapped).await
+    }
+    fn current_key_id(&self) -> u8 {
+        self.inner.current_key_id()
+    }
+    fn has_key_id(&self, id: u8) -> bool {
+        self.inner.has_key_id(id)
+    }
+    fn has_previous_key(&self) -> bool {
+        self.inner.has_previous_key()
+    }
+}
+
+#[tokio::test]
+async fn machine_desktop_real_router_revocation_during_decryption_refuses_upgrade() {
+    let mut f = crate::services::assistant_authority_tests::orchestrator_fixture(
+        "desktop_decryption_revoke",
+    )
+    .await;
+    let provider = std::sync::Arc::new(PausedKeyProvider {
+        inner: crate::crypto::local_key_provider::LocalKeyProvider::from_config(&f.state.config),
+        armed: std::sync::atomic::AtomicBool::new(false),
+        entered: tokio::sync::Notify::new(),
+        release: tokio::sync::Notify::new(),
+    });
+    f.state.encryption_keys = std::sync::Arc::new(
+        crate::crypto::aes::EncryptionKeys::with_provider(provider.clone()),
+    );
+    let node = crate::services::machine_integration_tests::node(&f, &f.owner).await;
+    let (peer, requested) = peer(&f.state, &node, Some(1)).await;
+    let (sid, _) = session(&f.state, &f.owner).await;
+    let token = bearer(&f.state, &f.owner, &sid, json!({}));
+    let (_, private) = crate::routes::build_router_with_state(f.state.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("ws://{}", listener.local_addr().unwrap());
+    let server =
+        tokio::spawn(axum::serve(listener, private.with_state(f.state.clone())).into_future());
+    provider
+        .armed
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    let pending =
+        tokio::spawn(
+            async move { handshake(&base, &node.id, "", &[("authorization", &token)]).await },
+        );
+    tokio::time::timeout(Duration::from_secs(5), provider.entered.notified())
+        .await
+        .unwrap();
+    f.state
+        .db
+        .collection::<Document>("sessions")
+        .update_one(doc! {"_id":&sid}, doc! {"$set":{"revoked":true}})
+        .await
+        .unwrap();
+    provider.release.notify_one();
+    let (status, socket) = tokio::time::timeout(Duration::from_secs(5), pending)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(status, 401);
+    assert!(
+        socket.is_none(),
+        "revoked pending upgrade must admit no pixel stream"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), requested.notified())
+            .await
+            .is_err(),
+        "revoked pending upgrade must send no DesktopOpen"
+    );
+    server.abort();
+    peer.abort();
+    f.state.db.drop().await.unwrap();
+}
+
+#[tokio::test]
+async fn machine_desktop_real_router_non_person_cookie_has_no_node_effect() {
+    let f = crate::services::assistant_authority_tests::orchestrator_fixture("desktop_org_cookie")
+        .await;
+    let node = crate::services::machine_integration_tests::node(&f, &f.owner).await;
+    let (peer, requested) = peer(&f.state, &node, Some(1)).await;
+    let (_, cookie) = session(&f.state, &f.owner).await;
+    f.state
+        .db
+        .collection::<Document>("users")
+        .update_one(doc! {"_id":&f.owner}, doc! {"$set":{"user_type":"org"}})
+        .await
+        .unwrap();
+    let cookie = format!("nyx_session={cookie}");
+    let frontend = url::Url::parse(&f.state.config.frontend_url)
+        .unwrap()
+        .origin()
+        .ascii_serialization();
+    let (_, private) = crate::routes::build_router_with_state(f.state.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("ws://{}", listener.local_addr().unwrap());
+    let server =
+        tokio::spawn(axum::serve(listener, private.with_state(f.state.clone())).into_future());
+    let (status, socket) = handshake(
+        &base,
+        &node.id,
+        "",
+        &[("cookie", &cookie), ("origin", &frontend)],
+    )
+    .await;
+    assert_eq!(status, 403);
+    assert!(socket.is_none());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), requested.notified())
+            .await
+            .is_err()
+    );
     server.abort();
     peer.abort();
     f.state.db.drop().await.unwrap();
