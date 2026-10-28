@@ -30,7 +30,7 @@ import { useTheme } from "../../theme/ThemeContext";
 import type { ThemeColors } from "../../theme/mobileTheme";
 import { createFlowStyles } from "../../theme/flowStyles";
 import { fonts, radius, spacing, typeScale } from "../../theme/designTokens";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Props = WorkspaceScreenProps<"AccountSettings">;
 
@@ -173,7 +173,22 @@ function getDisplayNameValue(name?: string | null, provider?: string | null): st
   return "No display name provided";
 }
 
-export function AccountSettingsScreen({ navigation }: Props) {
+export function AccountSettingsScreen({ navigation, route }: Props) {
+  const scroll = useRef<ScrollView>(null);
+  const positions = useRef<Record<string, number>>({});
+  const section = route?.params?.section;
+  const scrollToSection = () => {
+    const y = section ? positions.current[section] : undefined;
+    if (y !== undefined) scroll.current?.scrollTo({ y, animated: false });
+  };
+  useEffect(() => {
+    const frame = requestAnimationFrame(scrollToSection);
+    return () => cancelAnimationFrame(frame);
+  }, [section]);
+  const sectionLayout = (name: string, y: number) => {
+    positions.current[name] = y;
+    if (section === name) scrollToSection();
+  };
   const { colors, mode, preference, setPreference } = useTheme();
   const { width, fontScale } = useWindowDimensions();
   const styles = useMemo(
@@ -517,6 +532,7 @@ export function AccountSettingsScreen({ navigation }: Props) {
   return (
     <ScreenContainer>
       <ScrollView
+        ref={scroll}
         style={flowStyles.content}
         contentContainerStyle={[flowStyles.scrollContent, { paddingHorizontal: spacing.xxl, paddingBottom: spacing.huge }]}
         showsVerticalScrollIndicator={false}
@@ -574,7 +590,7 @@ export function AccountSettingsScreen({ navigation }: Props) {
         </View>
 
         {/* Notifications card */}
-        <View style={[styles.card, isOffline && { opacity: 0.35 }]}>
+        <View onLayout={(event) => sectionLayout("notifications", event.nativeEvent.layout.y)} style={[styles.card, isOffline && { opacity: 0.35 }]}>
           <Text style={styles.cardTitle}>Notifications</Text>
           {isOffline ? (
             <Text style={styles.offlineNote}>Requires network connection</Text>
@@ -678,7 +694,7 @@ export function AccountSettingsScreen({ navigation }: Props) {
           )}
         </View>
 
-        <ChatDisplaySettings />
+        <View onLayout={(event) => sectionLayout("display", event.nativeEvent.layout.y)}><ChatDisplaySettings /></View>
 
         {/* Appearance card */}
         <View style={styles.card}>
@@ -743,7 +759,7 @@ export function AccountSettingsScreen({ navigation }: Props) {
           </View>
         </View>
 
-        <View style={styles.card}>
+        <View onLayout={(event) => sectionLayout("privacy", event.nativeEvent.layout.y)} style={styles.card}>
           <Text style={styles.accountRowLabel}>Usage Analytics</Text>
           <Text style={styles.accountRowValue}>Optional events require account permission and this device's choice. Security and billing records have separate retention rules.</Text>
           <View style={styles.systemRow}>

@@ -34,7 +34,9 @@ export type WorkspaceParamList = {
   Plugins: { tab?: "connectors" | "skills"; agentId?: string } | undefined;
   Agents: { tab?: "agents" | "groups" } | undefined;
   Activity: { challengeId?: string } | undefined;
-  AccountSettings: undefined;
+  AccountSettings:
+    | { section?: "display" | "privacy" | "notifications" }
+    | undefined;
 };
 
 export type WorkspaceChatParamList = Pick<WorkspaceParamList, "Assistant">;

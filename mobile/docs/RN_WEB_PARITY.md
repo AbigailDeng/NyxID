@@ -39,6 +39,15 @@ Backend contracts remain in [NyxAgent handlers](../../backend/src/handlers/assis
 
 ## Follow-on frontend work
 
+Trusted in-chat `/connect/` links open a native transient connection dialog using
+the existing preview, complete, cancel and status APIs. API-key, OAuth and device
+authorization retain explicit approval and server-verified completion. Closing
+the dialog never declines a request. Account panel links open the existing native
+Settings/security/Usage & credits destinations. NyxBot settings links offer native
+Automation preferences and Agents, plus the exact web URL for global limits and
+channel management. Channel-bot setup (`/channel-bots/connect/{platform}`) remains
+an explicit “Continue on the web” handoff, preserving its path and query parameters.
+
 The following existing Web capabilities are **not yet migrated** by this first increment:
 
 - Chat steering submission, feedback, and switching an existing thread's model. Historical steering may be displayed, but those editing/input paths are not implemented. Conversation and crew attachment upload/download/preview are included; native reply voting is omitted by user decision (2026-10-28).

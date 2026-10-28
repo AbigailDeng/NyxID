@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useRef } from "react";
+import { memo, useCallback, useContext, useMemo, useRef } from "react";
 import {
   AccessibilityInfo,
   findNodeHandle,
@@ -16,6 +16,9 @@ import * as WebBrowser from "expo-web-browser";
 import { useTheme } from "../../theme/ThemeContext";
 import { fonts, radius } from "../../theme/designTokens";
 import { assistantSelectableMarkdown } from "./assistantSelectableMarkdown";
+import { AssistantLinkContext } from "./AssistantLinkContext";
+import { assistantLinkTarget, assistantLinkLabel } from "./assistantLinkTarget";
+import { NYXID_FRONTEND_URL } from "../../lib/env";
 import {
   assistantMarkdownOptions,
   configureAssistantMarkdown,
@@ -42,9 +45,10 @@ export const AssistantMarkdownBody = memo(function AssistantMarkdownBody({
   onLinkPress?: (url: string) => boolean;
 }) {
   const { colors } = useTheme();
+  const linkHost = useContext(AssistantLinkContext);
   const anchors = useRef(new Map<string, Text>());
   const openHref = useCallback(
-    (url: string) => {
+    (url: string, trigger?: number) => {
       const safe = safeAssistantLinkUrl(url);
       if (!safe) return false;
       if (safe.startsWith("#")) {
@@ -61,9 +65,10 @@ export const AssistantMarkdownBody = memo(function AssistantMarkdownBody({
         void Linking.openURL(safe).catch(() => undefined);
         return false;
       }
+      if (linkHost?.(safe, trigger)) return false;
       return onLinkPress(safe);
     },
-    [onLinkPress],
+    [onLinkPress, linkHost],
   );
   const markdownStyle = useMemo(
     () => ({
@@ -148,16 +153,45 @@ export const AssistantMarkdownBody = memo(function AssistantMarkdownBody({
   const rules: RenderRules = useMemo(
     () => ({
       ...assistantSelectableMarkdown,
-      link: (node, children) => (
-        <Text
-          key={node.key}
-          accessibilityRole="link"
-          style={markdownStyle.link}
-          onPress={() => openHref(node.attributes.href)}
-        >
-          {children}
-        </Text>
-      ),
+      link: (node, children) => {
+        const target = assistantLinkTarget(
+          node.attributes.href,
+          NYXID_FRONTEND_URL,
+        );
+        const label = node.children
+          .map((child) => child.content ?? "")
+          .join("");
+        return (
+          <Text
+            key={node.key}
+            accessibilityRole={target?.kind === "connect" ? "button" : "link"}
+            style={
+              target?.kind === "connect"
+                ? [
+                    markdownStyle.link,
+                    {
+                      backgroundColor: colors.primaryTone.bg,
+                      paddingHorizontal: 8,
+                      paddingVertical: 6,
+                      borderRadius: 6,
+                    },
+                  ]
+                : markdownStyle.link
+            }
+            onPress={(event) => {
+              const handle = Number(event?.nativeEvent?.target);
+              openHref(
+                node.attributes.href,
+                Number.isFinite(handle) ? handle : undefined,
+              );
+            }}
+          >
+            {target?.kind === "connect" || target?.kind === "channel"
+              ? assistantLinkLabel(target, label)
+              : children}
+          </Text>
+        );
+      },
       image: (node) => {
         const safe = safeAssistantLinkUrl(node.attributes.src ?? "");
         return (

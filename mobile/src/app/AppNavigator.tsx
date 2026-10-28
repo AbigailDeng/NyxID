@@ -33,6 +33,7 @@ import { WorkspaceDrawerHeader } from "../components/workspace/WorkspaceDrawerHe
 import { ActivityScreen } from "../features/activity/ActivityScreen";
 import { ActivityDetailScreen } from "../features/activity/ActivityDetailScreen";
 import { AssistantScreen } from "../features/assistant/AssistantScreen";
+import { AssistantLinkHost } from "../features/assistant/AssistantLinkHost";
 import { ServicesScreen } from "../features/services/ServicesScreen";
 import { AgentsScreen } from "../features/agents/AgentsScreen";
 import { AgentsGroupsScreen } from "../features/agents/AgentsGroupsScreen";
@@ -133,26 +134,28 @@ function GroupChatRoute({
 }: NativeStackScreenProps<RootStackParamList, "GroupChat">) {
   return (
     <WorkspaceInteractionSurface style={{ flex: 1 }}>
-      <GroupChatScreen
-        key={route.params.groupId}
-        groupId={route.params.groupId}
-        onBack={() => navigation.goBack()}
-        onSettings={() =>
-          navigation.dispatch(
-            openWorkspaceSheetAction("GroupEditor", {
-              groupId: route.params.groupId,
-            }),
-          )
-        }
-        onOpenConversation={(params) =>
-          navigation.push("AssistantContext", params)
-        }
-        onOpenAgent={(agentId) =>
-          navigation.dispatch(
-            openWorkspaceSheetAction("AgentDetail", { agentId }),
-          )
-        }
-      />
+      <AssistantLinkHost scope={route.params.groupId}>
+        <GroupChatScreen
+          key={route.params.groupId}
+          groupId={route.params.groupId}
+          onBack={() => navigation.goBack()}
+          onSettings={() =>
+            navigation.dispatch(
+              openWorkspaceSheetAction("GroupEditor", {
+                groupId: route.params.groupId,
+              }),
+            )
+          }
+          onOpenConversation={(params) =>
+            navigation.push("AssistantContext", params)
+          }
+          onOpenAgent={(agentId) =>
+            navigation.dispatch(
+              openWorkspaceSheetAction("AgentDetail", { agentId }),
+            )
+          }
+        />
+      </AssistantLinkHost>
     </WorkspaceInteractionSurface>
   );
 }
@@ -224,8 +227,22 @@ function AssistantContextRoute({
 }: NativeStackScreenProps<RootStackParamList, "AssistantContext">) {
   return (
     <WorkspaceInteractionSurface style={{ flex: 1 }}>
-      <AssistantScreen contextual route={route} />
+      <AssistantLinkHost
+        scope={`${route.key}:${route.params?.conversationId ?? route.params?.draftId ?? "draft"}`}
+      >
+        <AssistantScreen contextual route={route} />
+      </AssistantLinkHost>
     </WorkspaceInteractionSurface>
+  );
+}
+
+function AssistantRoute({ route }: WorkspaceScreenProps<"Assistant">) {
+  return (
+    <AssistantLinkHost
+      scope={`${route.key}:${route.params?.conversationId ?? route.params?.draftId ?? "home"}`}
+    >
+      <AssistantScreen route={route} />
+    </AssistantLinkHost>
   );
 }
 
@@ -287,7 +304,7 @@ function WorkspaceNavigator() {
       >
         <ChatTabs.Screen
           name="Assistant"
-          component={AssistantScreen}
+          component={AssistantRoute}
           initialParams={{ home: true }}
           options={{ title: "NyxID" }}
         />

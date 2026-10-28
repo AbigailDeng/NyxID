@@ -3,6 +3,7 @@ import {
   AssistantWaitingNote,
 } from "./AssistantPendingState";
 import { AssistantSystemMessage } from "./AssistantSystemMessage";
+import { AssistantLinkContext } from "./AssistantLinkContext";
 import { transcriptColumnStyle } from "../display/chatLayout";
 import { newAssistantChatParams } from "../../app/assistantChatParams";
 import { assistantDraftKey, assistantDraftStore } from "./assistantDraftStore";
@@ -20,6 +21,7 @@ import {
 } from "../../components/workspace/ScrollEdgeFades";
 import {
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -145,6 +147,7 @@ export function AssistantScreen({
   contextual = false,
 }: AssistantScreenProps) {
   const navigation = useNavigation<WorkspaceNavigationProp>();
+  const linkHost = useContext(AssistantLinkContext);
   const { colors } = useTheme();
   const chatColumn = useChatColumn();
   const transcriptEdges = useScrollEdges();
@@ -435,6 +438,7 @@ export function AssistantScreen({
     (url: string): boolean => {
       const href = safeAssistantLinkUrl(url);
       if (!href) return false;
+      if (linkHost?.(href)) return false;
       const automation = parseAutomationLink(href, NYXID_FRONTEND_URL);
       if (automation?.kind === "invalid") {
         Alert.alert("Could not open automation", automation.message);
@@ -457,7 +461,7 @@ export function AssistantScreen({
       }
       return false;
     },
-    [navigation],
+    [navigation, linkHost],
   );
 
   useEffect(() => {
