@@ -22,6 +22,7 @@ function WorkspaceDrawerHeaderContent({
       <Text
         accessibilityRole="header"
         numberOfLines={1}
+        maxFontSizeMultiplier={1.25}
         style={[styles.title, { color: colors.textPrimary }]}
       >
         {options.title ?? route.name}

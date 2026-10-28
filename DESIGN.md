@@ -559,8 +559,8 @@ full-screen. See
   user decision (2026-10-28); full timestamps remain accessible on long press.
   Assistant prose stays unboxed. All chat composers share a filled 26pt pill:
   full-width text sits above a toolbar with Attach, optional mentions, dictation
-  and a trailing Send/Stop circle inside a 44pt target. Attach offers Photos and
-  Files through their native pickers. Dictation requires review before text is
+  and a trailing Send/Stop circle inside a 44pt target. Attach offers Camera,
+  Photos and Files through their native pickers. Dictation requires review before text is
   inserted into the draft and never sends a message automatically. Chat pages
   use 12pt horizontal padding and 4pt bottom padding in addition to the system
   safe area. The navigation account footer absorbs its bottom clearance into

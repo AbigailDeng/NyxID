@@ -73,8 +73,10 @@ Private user bubbles and compact crew/private headers follow the native
 reference while preserving real speaker attribution. Private, contextual and
 crew chats share one ChatGPT-style composer: a filled pill with full-width text
 above a toolbar containing "+" for attachments, optional mentions, dictation and a
-trailing send/stop circle. "+" offers Photos (the system photo library) and Files
-(the document browser). Unsupported photo formats such as HEIC are converted to
+trailing send/stop circle. "+" offers Camera, Photos (the system photo library) and Files
+(the document browser). Camera permission is requested at use; denied access links
+to Settings, and unavailable cameras report a recoverable message. Captures reuse
+the same conversion, attachment limits and upload session. Unsupported photo formats such as HEIC are converted to
 JPEG from selected cache copies, retaining the same upload validation and account
 ownership fences. Crew recipient chips and pending files stay inside the pill
 above the text. Chat pages use 12pt horizontal and 4pt bottom padding plus the

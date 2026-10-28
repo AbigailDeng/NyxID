@@ -12,6 +12,12 @@ function harness(platform = "android") {
   const listeners = new Set<(state: string) => void>();
   const picker = deferred<unknown>();
   const photoPicker = deferred<unknown>();
+  const cameraPicker = deferred<unknown>();
+  const cameraPermission = deferred<{ granted: boolean }>();
+  let permissionRequests = 0;
+  let settingsOpened = 0;
+  let iosOptions: any;
+  let alertTitle: unknown;
   const calls: { source: string; options: any }[] = [];
   let choices: { text: string; onPress?: () => void }[] = [];
   let iosChoice: ((index: number) => void) | undefined;
@@ -47,13 +53,23 @@ function harness(platform = "android") {
     "react-native": {
       Platform: { OS: platform },
       Alert: {
-        alert: (_: unknown, __: unknown, buttons: typeof choices) => {
+        alert: (title: unknown, _: unknown, buttons: typeof choices) => {
+          alertTitle = title;
           choices = buttons;
         },
       },
       ActionSheetIOS: {
-        showActionSheetWithOptions: (_: unknown, cb: typeof iosChoice) => {
+        showActionSheetWithOptions: (
+          options: unknown,
+          cb: typeof iosChoice,
+        ) => {
+          iosOptions = options;
           iosChoice = cb;
+        },
+      },
+      Linking: {
+        openSettings: async () => {
+          settingsOpened++;
         },
       },
       AppState: {
@@ -74,6 +90,14 @@ function harness(platform = "android") {
       },
     },
     "expo-image-picker": {
+      requestCameraPermissionsAsync: () => {
+        permissionRequests++;
+        return cameraPermission.promise;
+      },
+      launchCameraAsync: (options: unknown) => {
+        calls.push({ source: "camera", options });
+        return cameraPicker.promise;
+      },
       UIImagePickerPreferredAssetRepresentationMode: {
         Compatible: "compatible",
       },
@@ -134,13 +158,30 @@ function harness(platform = "android") {
     calls,
     picker,
     photoPicker,
-    choose: (source: "files" | "photos") => {
-      if (platform === "ios") iosChoice?.(source === "photos" ? 0 : 1);
+    cameraPicker,
+    cameraPermission,
+    permissionRequests: () => permissionRequests,
+    settingsOpened: () => settingsOpened,
+    choices: () => choices,
+    iosOptions: () => iosOptions,
+    alertTitle: () => alertTitle,
+    cancelChooser: () => {
+      if (platform === "ios") iosChoice?.(3);
+      else choices.find((b) => b.text === "Cancel")?.onPress?.();
+    },
+    choose: (source: "files" | "photos" | "camera") => {
+      if (platform === "ios")
+        iosChoice?.(source === "camera" ? 0 : source === "photos" ? 1 : 2);
       else
         choices
           .find(
             (button) =>
-              button.text === (source === "photos" ? "Photos" : "Files"),
+              button.text ===
+              (source === "camera"
+                ? "Camera"
+                : source === "photos"
+                  ? "Photos"
+                  : "Files"),
           )
           ?.onPress?.();
     },
@@ -195,13 +236,22 @@ test("Android result before resume retains the file but starts no work until act
   x.h.unmount();
 });
 
-test("plus chooser routes Photos and Files to their respective native pickers on both platforms", async () => {
+test("plus chooser routes Camera, Photos and Files to their respective native pickers on both platforms", async () => {
   for (const platform of ["ios", "android"]) {
-    for (const source of ["files", "photos"] as const) {
+    for (const source of ["camera", "photos", "files"] as const) {
       const x = harness(platform);
       x.h.value().choose();
       assert.equal(x.calls.length, 0);
+      assert.deepEqual(
+        Array.from(
+          platform === "ios"
+            ? x.iosOptions().options
+            : x.choices().map((b) => b.text),
+        ),
+        ["Camera", "Photos", "Files", "Cancel"],
+      );
       x.choose(source);
+      x.cameraPermission.resolve({ granted: true });
       await x.h.settle();
       assert.equal(x.calls[0]?.source, source);
       assert.equal(x.calls.length, 1);
@@ -211,7 +261,9 @@ test("plus chooser routes Photos and Files to their respective native pickers on
         ]);
         assert.equal(x.calls[0]!.options.selectionLimit, 10);
         x.photoPicker.resolve({ canceled: true });
-      } else x.picker.resolve({ canceled: true });
+      } else if (source === "camera")
+        x.cameraPicker.resolve({ canceled: true });
+      else x.picker.resolve({ canceled: true });
       await x.h.settle();
       assert.deepEqual(x.requests, []);
       x.h.unmount();
@@ -424,4 +476,154 @@ test("home navigation retains thread attachments and restores their exact upload
   assert.equal(original.disposed, true);
   assert.equal(x.h.value().files.length, 0);
   x.h.unmount();
+});
+
+test("camera permission is requested only on use; denied access links to Settings", async () => {
+  for (const platform of ["ios", "android"]) {
+    const x = harness(platform);
+    x.h.value().choose();
+    assert.equal(x.permissionRequests(), 0);
+    x.cancelChooser();
+    assert.deepEqual(x.calls, []);
+    const picked = x.h.value().pick("camera");
+    await x.h.settle();
+    assert.equal(x.permissionRequests(), 1);
+    x.cameraPermission.resolve({ granted: false });
+    await picked;
+    await x.h.settle();
+    assert.equal(x.alertTitle(), "Allow camera access");
+    assert.match(x.h.value().error!, /Camera access is off/);
+    assert.equal(x.h.value().picking, false);
+    x.choices().find((b) => b.text === "Open Settings")!.onPress!();
+    await x.h.settle();
+    assert.equal(x.settingsOpened(), 1);
+    assert.deepEqual(x.calls, []);
+    assert.deepEqual(x.requests, []);
+    x.h.unmount();
+  }
+});
+
+test("camera cancel and unavailable hardware leave a responsive composer without uploads", async () => {
+  for (const unavailable of [false, true]) {
+    const x = harness("ios");
+    const picked = x.h.value().pick("camera");
+    x.cameraPermission.resolve({ granted: true });
+    await x.h.settle();
+    if (unavailable)
+      x.cameraPicker.reject(new Error("Camera not available on simulator"));
+    else x.cameraPicker.resolve({ canceled: true });
+    await picked;
+    await x.h.settle();
+    assert.deepEqual(x.requests, []);
+    assert.equal(x.h.value().files.length, 0);
+    assert.equal(x.h.value().picking, false);
+    if (unavailable)
+      assert.match(x.h.value().error!, /camera.*unavailable.*Photos or Files/);
+    else assert.equal(x.h.value().error, undefined);
+    x.h.unmount();
+  }
+});
+
+test("camera captures share photo conversion, validation and the single upload session", async () => {
+  for (const name of ["capture.heic", "capture.jpg", "capture.exe"]) {
+    const x = harness();
+    const picked = x.h.value().pick("camera");
+    x.cameraPermission.resolve({ granted: true });
+    await x.h.settle();
+    assert.deepEqual(Array.from(x.calls[0]!.options.mediaTypes), ["images"]);
+    x.cameraPicker.resolve({
+      canceled: false,
+      assets: [
+        {
+          uri: `file:///cache/${name}`,
+          fileName: name,
+          mimeType: name.endsWith("heic")
+            ? "image/heic"
+            : name.endsWith("jpg")
+              ? "image/jpeg"
+              : "application/octet-stream",
+          fileSize: 3,
+        },
+      ],
+    });
+    await picked;
+    await x.h.settle();
+    if (name.endsWith("exe")) {
+      assert.deepEqual(x.requests, []);
+      assert.ok(x.h.value().files[0]?.error);
+    } else {
+      assert.deepEqual(x.requests, ["draft", "upload"]);
+      assert.equal(x.h.value().files[0]?.file.mimeType, "image/jpeg");
+      assert.equal(x.h.value().files[0]?.progress, 100);
+    }
+    x.h.unmount();
+  }
+});
+
+test("stale camera permission and capture results cannot cross account or chat boundaries", async () => {
+  for (const stage of ["permission", "capture"]) {
+    for (const change of ["account", "chat", "focus"]) {
+      const x = harness();
+      const picked = x.h.value().pick("camera");
+      if (stage === "capture") {
+        x.cameraPermission.resolve({ granted: true });
+        await x.h.settle();
+      }
+      if (change === "account") x.changeOwner();
+      else if (change === "chat") x.props.generation++;
+      else x.blur();
+      x.h.render();
+      x.cameraPermission.resolve({ granted: true });
+      x.cameraPicker.resolve({
+        canceled: false,
+        assets: [
+          {
+            uri: "file:///cache/capture.jpg",
+            mimeType: "image/jpeg",
+            fileSize: 3,
+          },
+        ],
+      });
+      await picked;
+      await x.h.settle();
+      assert.deepEqual(x.requests, []);
+      assert.equal(x.calls.length, stage === "capture" ? 1 : 0);
+      if (stage === "capture")
+        assert.deepEqual(x.disposed, ["file:///cache/capture.jpg"]);
+      x.h.unmount();
+    }
+  }
+});
+
+test("camera results keep the shared count and size limits", async () => {
+  for (const oversized of [false, true]) {
+    const x = harness();
+    const picked = x.h.value().pick("camera");
+    x.cameraPermission.resolve({ granted: true });
+    await x.h.settle();
+    x.cameraPicker.resolve({
+      canceled: false,
+      assets: Array.from({ length: oversized ? 1 : 11 }, (_, i) => ({
+        uri: `file:///cache/capture-${i}.jpg`,
+        mimeType: "image/jpeg",
+        fileSize: oversized ? 100 * 1024 * 1024 : 3,
+      })),
+    });
+    await picked;
+    await x.h.settle();
+    if (oversized) {
+      assert.deepEqual(x.requests, []);
+      assert.ok(x.h.value().files[0]?.error);
+    } else {
+      assert.equal(x.h.value().files.length, 10);
+      const cameraCalls = x.calls.length;
+      await x.h.value().pick("camera");
+      assert.equal(
+        x.calls.length,
+        cameraCalls,
+        "full composer cannot open the camera",
+      );
+    }
+    x.h.unmount();
+  }
 });

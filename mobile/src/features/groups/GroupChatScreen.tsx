@@ -755,7 +755,7 @@ function GroupChat({
               renderActions={(mentionAction) => (
                 <ChatComposerRow>
                   <ComposerAttachButton
-                    label="Attach files or photos to crew"
+                    label="Attach photos or files, or take a photo to crew"
                     busy={uploads.picking}
                     disabled={
                       blocked ||

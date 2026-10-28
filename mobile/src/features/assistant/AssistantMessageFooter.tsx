@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { useTheme } from "../../theme/ThemeContext";
 import { fonts } from "../../theme/designTokens";
@@ -6,18 +7,34 @@ import { messageTime } from "./messageTime";
 
 export function AssistantMessageTime({
   value,
+  beforeCopy = false,
 }: {
   value?: string | number | null;
+  beforeCopy?: boolean;
 }) {
   const { colors } = useTheme();
+  const [size, setSize] = useState({ width: 0, height: 0 });
   const time = messageTime(value);
   if (!time) return null;
+  const horizontal = Math.max(0, 44 - size.width);
+  const adjacent = Math.min(4, horizontal / 2);
+  const vertical = Math.max(0, (44 - size.height) / 2);
   return (
     <Pressable
       accessibilityRole="text"
       accessibilityLabel={time.label}
       accessibilityHint="Touch and hold for the full date and time"
       onLongPress={() => Alert.alert("Message sent", time.label)}
+      hitSlop={{
+        top: vertical,
+        bottom: vertical,
+        left: beforeCopy ? horizontal - adjacent : adjacent,
+        right: beforeCopy ? adjacent : horizontal - adjacent,
+      }}
+      onLayout={({ nativeEvent: { layout } }) => {
+        if (layout.width !== size.width || layout.height !== size.height)
+          setSize({ width: layout.width, height: layout.height });
+      }}
       style={styles.timeTarget}
     >
       <Text style={[styles.time, { color: colors.textMuted }]}>
@@ -38,7 +55,7 @@ export function AssistantMessageFooter({
   user?: boolean;
 }) {
   const copy = <AssistantCopyButton text={text} afterDate={user} />;
-  const time = <AssistantMessageTime value={timestamp} />;
+  const time = <AssistantMessageTime value={timestamp} beforeCopy={user} />;
   return (
     <View style={[styles.row, user && styles.userRow]}>
       {user ? time : copy}

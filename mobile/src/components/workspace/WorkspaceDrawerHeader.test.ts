@@ -40,6 +40,7 @@ test("nested drawer headers keep Back/title/Close in a left-aligned 18pt row", (
   assert.equal(title.props.style[0].fontSize, 18);
   assert.equal(title.props.style[0].flex, 1);
   assert.equal(title.props.numberOfLines, 1);
+  assert.equal(title.props.maxFontSizeMultiplier, 1.25);
   h.unmount();
   const source = readFileSync(
     fileURLToPath(new URL("../../app/AppNavigator.tsx", import.meta.url)),

@@ -75,7 +75,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
         NSCameraUsageDescription:
-          "Allow NyxID to scan login approval QR codes.",
+          "Allow NyxID to scan login approval QR codes and take photos to attach in chats.",
         NSMicrophoneUsageDescription:
           "Allow NyxID to use your microphone for dictation and voice conversations.",
         NSSpeechRecognitionUsageDescription:
@@ -105,7 +105,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         "expo-image-picker",
         {
           photosPermission: false,
-          cameraPermission: "Allow NyxID to scan login approval QR codes.",
+          cameraPermission: "Allow NyxID to scan login approval QR codes and take photos to attach in chats.",
           microphonePermission:
             "Allow NyxID to use your microphone for dictation and voice conversations.",
         },
@@ -145,7 +145,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       [
         "expo-camera",
         {
-          cameraPermission: "Allow NyxID to scan login approval QR codes.",
+          cameraPermission: "Allow NyxID to scan login approval QR codes and take photos to attach in chats.",
           microphonePermission:
             "Allow NyxID to use your microphone for dictation and voice conversations.",
           recordAudioAndroid: true,

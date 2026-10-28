@@ -121,7 +121,19 @@ test("private and crew reply footers contain only compact Copy and date, 8pt apa
     await x.h.settle();
     assert.deepEqual(x.copied, [reply]);
     assert.ok(x.all().some((n) => n.props.accessibilityLabel === "Copied"));
-    controls[1]!.props.onLongPress();
+    controls[1]!.props.onLayout({
+      nativeEvent: { layout: { width: 33, height: 15 } },
+    });
+    await x.h.settle();
+    const date = x.all().filter((n) => n.type === "Pressable")[1]!;
+    assert.equal(33 + date.props.hitSlop.left + date.props.hitSlop.right, 44);
+    assert.equal(15 + date.props.hitSlop.top + date.props.hitSlop.bottom, 44);
+    assert.equal(
+      date.props.hitSlop.left,
+      4,
+      "date expansion meets copy at half the gap",
+    );
+    date.props.onLongPress();
     assert.match(x.alerts[0][1], /2026/);
     x.h.unmount();
   }

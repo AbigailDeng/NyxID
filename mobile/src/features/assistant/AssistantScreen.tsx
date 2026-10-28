@@ -1235,7 +1235,7 @@ export function AssistantScreen({
           renderActions={(mentionAction) => (
             <ChatComposerRow>
               <ComposerAttachButton
-                label="Attach files or photos"
+                label="Attach photos or files, or take a photo"
                 busy={uploads.picking}
                 disabled={
                   !canCompose ||

@@ -470,10 +470,10 @@ test("eligible native composers expose distinct attachments, dictation and voice
     const x = setup(id, voiceSelection.NATIVE_VOICE_ENTRY_ENABLED);
     assert.equal(x.button("Open voice call")?.props.kind, "voice");
     assert.equal(x.voice(), undefined);
-    assert.ok(x.button("Attach files or photos"));
+    assert.ok(x.button("Attach photos or files, or take a photo"));
     assert.ok(x.button("Dictate message"));
     assert.equal(x.featureQueries.at(-1)?.enabled, true);
-    x.button("Attach files or photos")!.props.onPress();
+    x.button("Attach photos or files, or take a photo")!.props.onPress();
     assert.deepEqual(x.events.at(-1), ["choose-attachment"]);
     assert.equal(x.drafts.length, 0);
     x.harness.unmount();

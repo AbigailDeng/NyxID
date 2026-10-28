@@ -1,6 +1,12 @@
 import { assistantDraftStore } from "./assistantDraftStore";
 import { useEffect, useRef, useState } from "react";
-import { ActionSheetIOS, Alert, AppState, Platform } from "react-native";
+import {
+  ActionSheetIOS,
+  Alert,
+  AppState,
+  Linking,
+  Platform,
+} from "react-native";
 import { useIsFocused } from "@react-navigation/native";
 import * as DocumentPicker from "expo-document-picker";
 import { requireOptionalNativeModule } from "expo";
@@ -284,7 +290,7 @@ export function useAssistantUploads({
       session.add(pending.files);
     }
   });
-  async function pick(source: "files" | "photos" = "files") {
+  async function pick(source: "files" | "photos" | "camera" = "files") {
     if (
       current.current !== session ||
       epoch !== getAuthEpoch() ||
@@ -306,10 +312,10 @@ export function useAssistantUploads({
     let transferred = false;
     try {
       let files: PickedAssistantFile[];
-      if (source === "photos") {
+      if (source === "photos" || source === "camera") {
         if (!requireOptionalNativeModule("ExponentImagePicker"))
           throw new Error(
-            "Photos needs the updated NyxID app. You can still attach images using Files.",
+            `${source === "camera" ? "Camera" : "Photos"} needs the updated NyxID app. You can still attach images using Files.`,
           );
         const ImagePicker = await import("expo-image-picker");
         if (
@@ -321,9 +327,7 @@ export function useAssistantUploads({
           AppState.currentState !== "active"
         )
           return;
-        // The system photo picker grants access only to the selected images;
-        // it does not need broad photo-library or storage permission.
-        const result = await ImagePicker.launchImageLibraryAsync({
+        const photoOptions = {
           mediaTypes: ["images"],
           allowsMultipleSelection: true,
           selectionLimit: Math.max(
@@ -334,7 +338,56 @@ export function useAssistantUploads({
             ImagePicker.UIImagePickerPreferredAssetRepresentationMode
               .Compatible,
           quality: 1,
-        });
+        } satisfies Parameters<typeof ImagePicker.launchImageLibraryAsync>[0];
+        if (source === "camera") {
+          const permission = await ImagePicker.requestCameraPermissionsAsync();
+          if (
+            current.current !== session ||
+            epoch !== getAuthEpoch() ||
+            !live.current.enabled ||
+            !live.current.focused ||
+            !live.current.online
+          )
+            return;
+          if (!permission.granted) {
+            setError(
+              "Camera access is off. Allow NyxID to use the camera in Settings, or choose Photos or Files.",
+            );
+            Alert.alert(
+              "Allow camera access",
+              "NyxID needs camera access to take photos to attach in chats. You can allow access in Settings.",
+              [
+                { text: "Not now", style: "cancel" },
+                {
+                  text: "Open Settings",
+                  onPress: () => {
+                    if (current.current !== session || epoch !== getAuthEpoch())
+                      return;
+                    void Linking.openSettings().catch(() => {
+                      if (
+                        current.current === session &&
+                        epoch === getAuthEpoch()
+                      )
+                        setError(
+                          "Couldn't open Settings. Open your device's Settings and allow camera access for NyxID.",
+                        );
+                    });
+                  },
+                },
+              ],
+            );
+            return;
+          }
+        }
+        // The photo library picker needs access only to the chosen images.
+        // Captures enter the same conversion, validation and upload session.
+        const result =
+          source === "camera"
+            ? await ImagePicker.launchCameraAsync({
+                mediaTypes: ["images"],
+                quality: 1,
+              })
+            : await ImagePicker.launchImageLibraryAsync(photoOptions);
         if (result.canceled) return;
         files = result.assets.map((asset, index) => ({
           uri: asset.uri,
@@ -422,9 +475,11 @@ export function useAssistantUploads({
     } catch (cause) {
       if (current.current === session && epoch === getAuthEpoch())
         setError(
-          cause instanceof Error
-            ? cause.message
-            : "The file picker could not open.",
+          source === "camera"
+            ? "The camera couldn't open. It may be unavailable on this device. Try again, or choose Photos or Files."
+            : cause instanceof Error
+              ? cause.message
+              : "The file picker could not open.",
         );
     } finally {
       if (!transferred) pickedCopies.forEach(disposeFile);
@@ -447,16 +502,18 @@ export function useAssistantUploads({
       ActionSheetIOS.showActionSheetWithOptions(
         {
           title: "Add attachments",
-          options: ["Photos", "Files", "Cancel"],
-          cancelButtonIndex: 2,
+          options: ["Camera", "Photos", "Files", "Cancel"],
+          cancelButtonIndex: 3,
         },
         (index) => {
-          if (index === 0) void pick("photos");
-          if (index === 1) void pick("files");
+          if (index === 0) void pick("camera");
+          if (index === 1) void pick("photos");
+          if (index === 2) void pick("files");
         },
       );
     } else {
       Alert.alert("Add attachments", undefined, [
+        { text: "Camera", onPress: () => void pick("camera") },
         { text: "Photos", onPress: () => void pick("photos") },
         { text: "Files", onPress: () => void pick("files") },
         { text: "Cancel", style: "cancel" },
