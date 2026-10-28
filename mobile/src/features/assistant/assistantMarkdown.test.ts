@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import test from "node:test";
 import {
   assistantMarkdownOptions,
+  configureAssistantMarkdown,
   safeAssistantLinkUrl,
 } from "./assistantMarkdown";
 
@@ -12,13 +13,13 @@ const rendererRequire = createRequire(
   require.resolve("react-native-markdown-display"),
 );
 const MarkdownIt = rendererRequire("markdown-it");
-const parser = MarkdownIt(assistantMarkdownOptions);
-parser.validateLink = (url: string) => safeAssistantLinkUrl(url) !== null;
+const parser = configureAssistantMarkdown(MarkdownIt(assistantMarkdownOptions));
 
 type Token = {
   type: string;
   attrGet: (name: string) => string | null;
   children?: Token[] | null;
+  content: string;
 };
 
 function tokens(markdown: string): Token[] {
@@ -84,7 +85,6 @@ test("unsupported and credential-bearing destinations never become links", () =>
   for (const url of [
     "http://example.com/",
     "ftp://example.com/",
-    "mailto:person@example.com",
     "javascript:alert(1)",
     "data:text/html,example",
     "file:///tmp/example",
@@ -96,6 +96,104 @@ test("unsupported and credential-bearing destinations never become links", () =>
     assert.deepEqual(links(`[destination](${url})`), [], url);
     assert.deepEqual(links(url), [], url);
   }
+});
+
+test("GFM mail and local footnote links retain their destinations", () => {
+  assert.deepEqual(links("[Email](mailto:review@example.test) [Note](#fn1)"), [
+    "mailto:review@example.test",
+    "#fn1",
+  ]);
+});
+
+test("GFM task states are native read-only tokens, nested lists and code stay intact", () => {
+  const parsed = tokens(
+    "- [x] Done\n- [ ] Waiting\n  - [X] Nested\n\n`- [x] code`\n\n[ ] outside a list",
+  );
+  assert.deepEqual(
+    parsed
+      .filter((t) => t.type === "list_item_open")
+      .map((t) => t.attrGet("data-task-checked")),
+    ["true", "false", "true"],
+  );
+  assert.ok(
+    parsed.some((t) => t.type === "code_inline" && t.content === "- [x] code"),
+  );
+  assert.ok(
+    parsed.some((t) => t.type === "text" && t.content === "[ ] outside a list"),
+  );
+  assert.equal(
+    parsed.some((t) => t.type.startsWith("html_")),
+    false,
+  );
+});
+
+test("escaped task markers remain ordinary list text", () => {
+  const parsed = tokens("- \\[x] escaped\n- `[x]` code");
+  assert.deepEqual(
+    parsed
+      .filter((t) => t.type === "list_item_open")
+      .map((t) => t.attrGet("data-task-checked")),
+    [null, null],
+  );
+});
+
+test("footnote references, repeated back links and multiline definitions survive the native parser", () => {
+  const parsed = tokens(
+    "Read[^source] and again[^source].\n\n[^source]: First **detail**.\n\n    Second paragraph.",
+  );
+  assert.deepEqual(
+    parsed
+      .filter((t) => t.type === "footnote_ref")
+      .map((t) => [t.attrGet("href"), t.attrGet("id")]),
+    [
+      ["#fn1", "fnref1"],
+      ["#fn1", "fnref1:1"],
+    ],
+  );
+  assert.ok(parsed.some((t) => t.type === "footnote_block_open"));
+  assert.ok(
+    parsed.some((t) => t.type === "footnote_open" && t.attrGet("id") === "fn1"),
+  );
+  assert.ok(
+    parsed.some((t) => t.type === "text" && t.content === "Second paragraph."),
+  );
+  assert.deepEqual(
+    parsed
+      .filter((t) => t.type === "footnote_anchor")
+      .map((t) => t.attrGet("href")),
+    ["#fnref1", "#fnref1:1"],
+  );
+});
+
+test("GFM tables keep alignment and strikethrough without consuming raw HTML", () => {
+  const parsed = tokens(
+    "| Left | Right |\n| :-- | --: |\n| ~~Old~~ | **New** |\n\n<script>unsafe()</script>",
+  );
+  assert.ok(parsed.some((t) => t.type === "table_open"));
+  assert.deepEqual(
+    parsed.filter((t) => t.type === "th_open").map((t) => t.attrGet("style")),
+    ["text-align:left", "text-align:right"],
+  );
+  assert.ok(parsed.some((t) => t.type === "s_open"));
+  assert.equal(
+    parsed.some((t) => t.type.startsWith("html_")),
+    false,
+  );
+});
+
+test("model images nested inside links flatten to their label; unsafe images remain literal labels", () => {
+  const parsed = tokens(
+    "[![Preview](https://tracker.test/pixel)](https://docs.test)\n\n![Private](file:///secret)\n\n![Public](https://tracker.test/remote)",
+  );
+  assert.deepEqual(
+    parsed.filter((t) => t.type === "image").map((t) => t.attrGet("src")),
+    ["file:///secret", "https://tracker.test/remote"],
+  );
+  assert.ok(parsed.some((t) => t.type === "text" && t.content === "Preview"));
+  assert.deepEqual(
+    links("[![Preview](https://tracker.test/pixel)](https://docs.test)"),
+    ["https://docs.test"],
+  );
 });
 
 test("HTML tags stay literal rather than parsed as HTML", () => {
