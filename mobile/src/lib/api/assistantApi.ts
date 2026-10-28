@@ -5,6 +5,8 @@ import {
 } from "./http";
 import {
   recoverySchema,
+  assistantCapabilitiesSchema,
+  assistantSteeringSchema,
   assistantContextSchema,
   acknowledgementSchema,
   conversationIdSchema,
@@ -31,6 +33,27 @@ const path = (id: string) =>
   `${ROOT}/conversations/${conversationIdSchema.parse(id)}`;
 
 export const assistantApi = {
+  async capabilities(id: string, signal?: AbortSignal) {
+    return assistantCapabilitiesSchema.parse(
+      await requestJson(`${path(id)}/capabilities`, { signal }),
+    );
+  },
+  async steer(
+    id: string,
+    text: string,
+    turnId: string,
+    clientRequestId: string,
+  ) {
+    const result = assistantSteeringSchema.parse(
+      await requestJson(`${path(id)}/steer`, {
+        method: "POST",
+        body: { text, turn_id: turnId, clientRequestId },
+      }),
+    );
+    if (result.client_request_id !== clientRequestId)
+      throw new Error("The guidance response could not be confirmed.");
+    return result;
+  },
   async settings(signal?: AbortSignal) {
     return composerSettingsSchema.parse(
       await requestJson(`${ROOT}/settings`, { signal }),

@@ -144,6 +144,17 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
       events.push(["stop"]);
     },
   };
+  const guidance = {
+    canSteer: false,
+    submitting: false,
+    notice: undefined as any,
+    maxChars: 32000,
+    submit: async (text: string, count: number) => {
+      events.push(["guidance", text, count]);
+      return true;
+    },
+    sendAsMessage: async (_send: any) => {},
+  };
   const connection = {
     connection: undefined as any,
     unavailable: false,
@@ -303,6 +314,7 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
         props: { ...props, children: [props.scrollHeader, props.scrollFooter] },
       }),
     },
+    "./useAssistantGuidance": { useAssistantGuidance: () => guidance },
     "./useComposerConnection": { useComposerConnection: () => connection },
     "./ComposerConnectionPicker": {
       ComposerConnectionPicker: "ConnectionPicker",
@@ -443,6 +455,7 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     assistant,
     uploads,
     connection,
+    guidance,
     props,
     events,
     drafts,
@@ -1706,5 +1719,42 @@ test("private connection selection uses the shared chooser, prefixes sends, bloc
     ),
   );
   assert.ok(x.events.some(([name]) => name === "connection-sent"));
+  x.harness.unmount();
+});
+
+test("capable running replies expose bounded text guidance beside Stop without using uploads or connection prefixes", async () => {
+  const x = setup(A);
+  x.assistant.history!.conversation.active_turn = {
+    turn_id: "turn",
+    steering_allowed: true,
+  };
+  x.guidance.canSteer = true;
+  x.connection.prefix = () => {
+    throw new Error("Guidance cannot use a connection prefix");
+  };
+  x.uploads.session.sending = true;
+  x.harness.render();
+  assert.equal(x.input().props.placeholder, "Guide this running reply…");
+  assert.equal(x.input().props.editable, true);
+  x.input().props.onChangeText("Only change the tests");
+  x.harness.flush();
+  assert.ok(x.button("Stop assistant"));
+  const steer = x
+    .all()
+    .find((n) => n.props.accessibilityLabel === "Send guidance")!;
+  assert.equal(steer.props.disabled, false);
+  steer.props.onPress();
+  await x.harness.settle();
+  assert.ok(
+    x.events.some(
+      ([name, text, count]) =>
+        name === "guidance" && text === "Only change the tests" && count === 0,
+    ),
+  );
+  assert.equal(
+    x.events.some(([name]) => name === "send" || name === "connection-sent"),
+    false,
+  );
+  assert.equal(x.input().props.value, "");
   x.harness.unmount();
 });

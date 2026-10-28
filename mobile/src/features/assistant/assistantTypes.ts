@@ -58,6 +58,7 @@ export const conversationSchema = z.object({
       turn_id: z.string(),
       started_at: z.string(),
       stop_requested: z.boolean().optional(),
+      steering_allowed: z.boolean().optional(),
       continuations: z.number().optional(),
       reply: z
         .object({
@@ -285,6 +286,19 @@ export const modelListSchema = z.array(
     description: z.string().nullish(),
   }),
 );
+export const assistantCapabilitiesSchema = z.object({
+  steer: z
+    .object({
+      max_chars: z.number().int().positive(),
+      max_per_turn: z.number().int().positive(),
+    })
+    .nullable(),
+});
+export const assistantSteeringSchema = z.object({
+  client_request_id: z.string(),
+  outcome: z.enum(["applied", "may_not_have_applied", "refused"]),
+  code: z.string().nullable(),
+});
 const block = z.object({
   type: z.literal("text"),
   block_id: z.string(),

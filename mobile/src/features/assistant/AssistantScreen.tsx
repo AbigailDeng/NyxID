@@ -6,6 +6,7 @@ import { AssistantSystemMessage } from "./AssistantSystemMessage";
 import { AssistantLinkContext } from "./AssistantLinkContext";
 import { AssistantComposerSettings } from "./AssistantComposerSettings";
 import { useComposerConnection } from "./useComposerConnection";
+import { useAssistantGuidance } from "./useAssistantGuidance";
 import { ComposerConnectionPicker } from "./ComposerConnectionPicker";
 import { transcriptColumnStyle } from "../display/chatLayout";
 import { newAssistantChatParams } from "../../app/assistantChatParams";
@@ -308,6 +309,22 @@ export function AssistantScreen({
     enabled: canCompose,
     online: assistant.online,
   });
+  const guidance = useAssistantGuidance({
+    scope: draftKey,
+    conversationId: assistant.conversationId,
+    turn: conversation?.active_turn,
+    activeTurn: running,
+    disabled:
+      !assistant.online ||
+      !!destroyed ||
+      assistant.loading ||
+      assistant.recoveryRequired ||
+      !!route?.params?.openLatest ||
+      !!sheet ||
+      openingVoice ||
+      !!voiceThread,
+    onRefresh: assistant.recover,
+  });
   const connection = useComposerConnection(
     draftKey,
     !canCompose ||
@@ -346,6 +363,14 @@ export function AssistantScreen({
     (!!draft.trim() || uploads.files.length > 0) &&
     [...draft].length <= 32768;
 
+  const canGuideSend =
+    guidance.canSteer &&
+    !guidance.submitting &&
+    !dictation.active &&
+    !uploads.files.length &&
+    !uploads.picking &&
+    !!draft.trim() &&
+    [...draft].length <= guidance.maxChars;
   const voiceFeatures = useQuery({
     queryKey: ["workspace", "voice-features", getAuthEpoch()],
     queryFn: ({ signal }) => assistantVoiceFeatures(signal),
@@ -629,7 +654,7 @@ export function AssistantScreen({
   });
 
   async function sendDraft() {
-    if (!canSend || !composerPress.current("send")) return;
+    if (!(canSend || canGuideSend) || !composerPress.current("send")) return;
     setStopProtected(true);
     transcriptScroll.follow();
     await perform(() =>
@@ -638,6 +663,7 @@ export function AssistantScreen({
         updateDraft,
         getRevision: () => draftRevision.current,
         send: async (text) => {
+          if (running) return guidance.submit(text, uploads.files.length);
           const accepted = await uploads.session.submit((payload) =>
             assistant.send(connection.prefix(text), undefined, payload),
           );
@@ -1266,6 +1292,34 @@ export function AssistantScreen({
       ) : null}
       <View style={styles.composerInset}>
         <ChatComposerFrame style={[styles.composer, chatColumn]}>
+          {guidance.canSteer ? (
+            <Label muted style={styles.composerHint}>
+              Still replying. What you send now steers this reply; Stop ends it.
+            </Label>
+          ) : null}
+          {guidance.notice ? (
+            <View style={{ gap: 4, paddingHorizontal: 8 }}>
+              <Label
+                muted
+                accessibilityLiveRegion="polite"
+                style={{ fontSize: 12 }}
+              >
+                {steeringNotice(guidance.notice.code, guidance.notice.outcome)}
+              </Label>
+              {guidance.notice.code === "no_active_turn" &&
+              guidance.notice.text ? (
+                <ActionButton
+                  label="Send as new message"
+                  compact
+                  variant="secondary"
+                  disabled={running || guidance.submitting || !canCompose}
+                  onPress={() =>
+                    void guidance.sendAsMessage((text) => assistant.send(text))
+                  }
+                />
+              ) : null}
+            </View>
+          ) : null}
           <ComposerConnectionPicker state={connection} />
           <ComposerDictationReview dictation={dictation} />
           <AssistantPendingUploads
@@ -1290,10 +1344,15 @@ export function AssistantScreen({
             editable={
               !destroyed &&
               !assistant.recoveryRequired &&
-              !route?.params?.openLatest
+              !route?.params?.openLatest &&
+              (!running || guidance.canSteer)
             }
             accessibilityLabel="Message to assistant"
-            placeholder={`Message ${agentName}`}
+            placeholder={
+              guidance.canSteer
+                ? "Guide this running reply…"
+                : `Message ${agentName}`
+            }
             renderActions={(mentionAction) => (
               <ChatComposerRow>
                 <ComposerAttachButton
@@ -1351,6 +1410,16 @@ export function AssistantScreen({
                     !!voiceThread
                   }
                 />
+                {guidance.canSteer && draft.trim() ? (
+                  <ActionButton
+                    label="Steer"
+                    accessibilityLabel="Send guidance"
+                    compact
+                    disabled={!canGuideSend}
+                    loading={guidance.submitting}
+                    onPress={() => void sendDraft()}
+                  />
+                ) : null}
                 {running && assistant.conversationId ? (
                   <ComposerSubmitButton
                     kind="stop"
@@ -1391,9 +1460,12 @@ export function AssistantScreen({
                 : "Wait for uploads or remove failed files."}
             </Label>
           ) : null}
-          {[...draft].length > 32768 ? (
+          {[...draft].length >
+          (guidance.canSteer ? guidance.maxChars : 32768) ? (
             <Label style={{ color: colors.danger }}>
-              Keep the message under 32,768 characters.
+              {guidance.canSteer
+                ? `Guidance must be text only and at most ${guidance.maxChars.toLocaleString()} characters.`
+                : "Keep the message under 32,768 characters."}
             </Label>
           ) : null}
         </ChatComposerFrame>
