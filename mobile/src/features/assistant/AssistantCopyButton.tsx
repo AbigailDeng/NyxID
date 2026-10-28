@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, Pressable, StyleSheet, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { Check, Copy } from "lucide-react-native";
-import { Label } from "../../components/workspace/WorkspaceUI";
 import { useTheme } from "../../theme/ThemeContext";
 import { TOUCH_TARGET } from "../../theme/designTokens";
 
@@ -72,14 +71,11 @@ export function AssistantCopyButton({
         importantForAccessibility="no-hide-descendants"
       >
         {copied ? (
-          <Check size={16} color={colors.primaryOnTint} />
+          <Check size={16} color={colors.textMuted} />
         ) : (
           <Copy size={16} color={colors.textMuted} />
         )}
       </View>
-      <Label muted style={styles.label}>
-        {copied ? "Copied" : "Copy"}
-      </Label>
     </Pressable>
   );
 }
@@ -94,5 +90,4 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 8,
   },
-  label: { fontSize: 12 },
 });

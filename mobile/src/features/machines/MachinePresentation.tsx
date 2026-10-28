@@ -1,6 +1,5 @@
 import type { PropsWithChildren, ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import type { NativeStackHeaderProps } from "@react-navigation/native-stack";
 import { ChevronRight } from "lucide-react-native";
 import { SectionBadge } from "../../components/SectionBadge";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -11,28 +10,7 @@ import type { MachineNode } from "./machineContracts";
 
 export const machineTabs = [{ label: "Machines" }, { label: "Saved logins" }];
 
-/** iOS native stack titles center even when headerTitleAlign is left. */
-export function MachineDrawerHeader({
-  options,
-  back,
-  route,
-}: NativeStackHeaderProps) {
-  const { colors } = useTheme();
-  const props = { canGoBack: !!back, tintColor: colors.textPrimary };
-  return (
-    <View style={[machineStyles.header, { backgroundColor: colors.bg }]}>
-      {options.headerLeft?.(props)}
-      <Text
-        accessibilityRole="header"
-        numberOfLines={1}
-        style={[machineStyles.headerTitle, { color: colors.textPrimary }]}
-      >
-        {options.title ?? route.name}
-      </Text>
-      {options.headerRight?.(props)}
-    </View>
-  );
-}
+export { WorkspaceDrawerHeader as MachineDrawerHeader } from "../../components/workspace/WorkspaceDrawerHeader";
 
 export function MachineActionRow({
   label,
@@ -160,19 +138,6 @@ export function MachineCapability({
 }
 
 export const machineStyles = StyleSheet.create({
-  header: {
-    minHeight: 44,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingRight: 12,
-  },
-  headerTitle: {
-    fontFamily: fonts.displaySemi,
-    fontSize: 18,
-    lineHeight: 24,
-    flex: 1,
-  },
   actionRow: {
     flexDirection: "row",
     alignItems: "center",

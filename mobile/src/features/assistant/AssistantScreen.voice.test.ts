@@ -320,8 +320,8 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     "./AssistantAcknowledgements": {
       AssistantAcknowledgements: "AssistantAcknowledgements",
     },
-    "./AssistantReplyFeedback": {
-      AssistantReplyFeedback: "AssistantReplyFeedback",
+    "./AssistantMessageFooter": {
+      AssistantMessageFooter: "AssistantMessageFooter",
     },
     "./AssistantWorkingContext": {
       AssistantWorkingContext: "AssistantWorkingContext",
@@ -1311,5 +1311,35 @@ test("header needs-you status takes precedence over active-turn running status",
       .accessibilityLabel,
     /Needs you/,
   );
+  x.harness.unmount();
+});
+
+test("settled transcript wires the shared action footer and suppresses feedback for failed/stopped replies", () => {
+  const x = setup(A, false);
+  const item = {
+    id: "reply",
+    seq: 2,
+    turn_id: "turn",
+    role: "assistant",
+    text: "Reply",
+    status: "completed",
+    error_code: null as string | null,
+    created_at: "2026-10-27T01:00:00Z",
+    activities: [],
+    attachments: [],
+  };
+  const render = () => {
+    const list = x.all().find((n) => n.type === "FlatList")!;
+    return elements(expand(list.props.renderItem({ item, index: 0 }))).find(
+      (n) => n.type === "AssistantMessageFooter",
+    )!;
+  };
+  assert.equal(render().props.timestamp, item.created_at);
+  assert.equal(typeof render().props.onFeedback, "function");
+  item.status = "failed";
+  assert.equal(render().props.onFeedback, undefined);
+  item.status = "completed";
+  item.error_code = "cancelled";
+  assert.equal(render().props.onFeedback, undefined);
   x.harness.unmount();
 });

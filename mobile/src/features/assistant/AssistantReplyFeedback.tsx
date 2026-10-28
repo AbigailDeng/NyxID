@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Modal, Pressable, ScrollView, View } from "react-native";
 import { ThumbsDown, ThumbsUp } from "lucide-react-native";
 import {
@@ -20,7 +20,11 @@ export function AssistantReplyFeedback({
   feedback,
   disabled,
   onSave,
+  beforeVotes,
+  afterVotes,
 }: {
+  beforeVotes?: ReactNode;
+  afterVotes?: ReactNode;
   feedback?: { vote: FeedbackVote } | null;
   disabled?: boolean;
   onSave: (vote?: FeedbackVote, comment?: string) => Promise<boolean>;
@@ -77,37 +81,54 @@ export function AssistantReplyFeedback({
   return (
     <View>
       <View
-        accessibilityLabel="Reply feedback"
-        style={{ flexDirection: "row" }}
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 4,
+          flexWrap: "wrap",
+        }}
       >
-        {(["up", "down"] as const).map((next) => {
-          const Icon = next === "up" ? ThumbsUp : ThumbsDown;
-          return (
-            <Pressable
-              key={next}
-              accessibilityRole="button"
-              accessibilityLabel={next === "up" ? "Helpful" : "Not helpful"}
-              accessibilityState={{
-                selected: vote === next,
-                disabled: !!disabled || pending,
-              }}
-              disabled={disabled || pending}
-              style={{
-                width: 44,
-                height: 44,
-                alignItems: "center",
-                justifyContent: "center",
-                opacity: disabled || pending ? 0.4 : 1,
-              }}
-              onPress={() => void toggle(next)}
-            >
-              <Icon
-                size={15}
-                color={vote === next ? colors.primaryOnTint : colors.textMuted}
-              />
-            </Pressable>
-          );
-        })}
+        {beforeVotes}
+        <View
+          accessibilityLabel="Reply feedback"
+          style={{ flexDirection: "row", gap: 4 }}
+        >
+          {(["up", "down"] as const).map((next) => {
+            const Icon = next === "up" ? ThumbsUp : ThumbsDown;
+            return (
+              <Pressable
+                key={next}
+                accessibilityRole="button"
+                accessibilityLabel={next === "up" ? "Helpful" : "Not helpful"}
+                accessibilityState={{
+                  selected: vote === next,
+                  disabled: !!disabled || pending,
+                }}
+                disabled={disabled || pending}
+                style={{
+                  width: 44,
+                  height: 44,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  opacity: disabled || pending ? 0.4 : 1,
+                }}
+                onPress={() => void toggle(next)}
+              >
+                <Icon
+                  size={16}
+                  color={
+                    vote === next
+                      ? next === "up"
+                        ? colors.successTone.text
+                        : colors.dangerTone.text
+                      : colors.textMuted
+                  }
+                />
+              </Pressable>
+            );
+          })}
+        </View>
+        {afterVotes}
       </View>
       {error ? (
         <Label accessibilityRole="alert" style={{ color: colors.danger }}>

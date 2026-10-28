@@ -68,8 +68,10 @@ import {
 import { sanitizeAssistantMessageContent } from "../assistant/assistantChatContent";
 import { GroupPendingCard } from "./GroupPendingCard";
 import { GroupMachineReceipts } from "./GroupMachineReceipts";
-import { AssistantReplyFeedback } from "../assistant/AssistantReplyFeedback";
-import { AssistantCopyButton } from "../assistant/AssistantCopyButton";
+import {
+  AssistantMessageFooter,
+  AssistantMessageTime,
+} from "../assistant/AssistantMessageFooter";
 import { assistantSelectableMarkdown } from "../assistant/assistantSelectableMarkdown";
 import { useAssistantUploads } from "../assistant/useAssistantUploads";
 import {
@@ -982,8 +984,8 @@ function GroupMessage({
               : message.agent
                 ? title(message.agent.id, message.agent.name)
                 : "Agent"}{" "}
-            · {clock(message.created_at)}
           </Label>
+          {!user && <AssistantMessageTime value={message.created_at} />}
         </View>
       </Pressable>
       {user && !!message.recipient_agent_ids?.length && (
@@ -1038,30 +1040,22 @@ function GroupMessage({
         />
       )}
       <GroupMachineReceipts groupId={group?.id} message={message} />
-      {message.role === "agent" && !!message.text.trim() && (
-        <View style={styles.feedbackActions}>
-          <AssistantCopyButton
-            text={sanitizeAssistantMessageContent(message.text)}
-          />
-          <AssistantReplyFeedback
-            feedback={message.feedback}
-            disabled={!feedbackEnabled}
-            onSave={onFeedback}
-          />
-        </View>
-      )}
-      {user && <AssistantCopyButton text={message.text} />}
+      <AssistantMessageFooter
+        text={
+          user ? message.text : sanitizeAssistantMessageContent(message.text)
+        }
+        timestamp={user ? message.created_at : undefined}
+        user={user}
+        feedback={message.feedback}
+        disabled={!feedbackEnabled}
+        onFeedback={
+          message.role === "agent" && !!message.text.trim()
+            ? onFeedback
+            : undefined
+        }
+      />
     </View>
   );
-}
-function clock(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? ""
-    : date.toLocaleTimeString(undefined, {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
 }
 function GroupSeparator() {
   return <View style={{ height: 16 }} />;
@@ -1093,7 +1087,6 @@ function Icon({
 const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: 6 },
   horizontalStrip: { flexGrow: 0 },
-  feedbackActions: { flexDirection: "row", alignItems: "center" },
   feedbackInput: {
     minHeight: 96,
     maxHeight: 180,

@@ -121,8 +121,10 @@ test("crew header shows member identity and narrows recipients through its picke
     },
     "./GroupPendingCard": {},
     "./GroupMachineReceipts": {},
-    "../assistant/AssistantReplyFeedback": {},
-    "../assistant/AssistantCopyButton": {},
+    "../assistant/AssistantMessageFooter": {
+      AssistantMessageFooter: "Footer",
+      AssistantMessageTime: "Time",
+    },
     "../assistant/assistantSelectableMarkdown": {},
     "../assistant/useAssistantUploads": {
       useAssistantUploads: () => ({ files: [], session: { sending: false } }),

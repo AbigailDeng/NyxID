@@ -1,3 +1,4 @@
+import { canReplyFeedback } from "./assistantFeedback";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
@@ -672,9 +673,7 @@ export function useAssistant(
       !id ||
       !activeRef.current ||
       !message ||
-      message.role !== "assistant" ||
-      message.status !== "completed" ||
-      !message.text.trim() ||
+      !canReplyFeedback(message, id) ||
       feedbackLocks.current.has(key)
     )
       return false;

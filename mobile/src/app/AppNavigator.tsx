@@ -29,7 +29,7 @@ import { MachineActivityScreen } from "../features/machines/MachineActivityScree
 import { AgentMachinesScreen } from "../features/machines/AgentMachinesScreen";
 import { MachineDesktopRoute } from "../features/machines/MachineDesktopRoute";
 import { MachinesScreen } from "../features/machines/MachinesScreen";
-import { MachineDrawerHeader } from "../features/machines/MachinePresentation";
+import { WorkspaceDrawerHeader } from "../components/workspace/WorkspaceDrawerHeader";
 import { ActivityScreen } from "../features/activity/ActivityScreen";
 import { ActivityDetailScreen } from "../features/activity/ActivityDetailScreen";
 import { AssistantScreen } from "../features/assistant/AssistantScreen";
@@ -472,6 +472,7 @@ function WorkspaceSheetRoute({
             headerTitleStyle: { fontFamily: fonts.displaySemi, fontSize: 18 },
             animation: reducedMotion ? "none" : "default",
             headerTitleAlign: "left",
+            header: WorkspaceDrawerHeader,
             headerShadowVisible: false,
             headerBackButtonDisplayMode: "minimal",
             contentStyle: { backgroundColor: colors.bg },
@@ -513,7 +514,7 @@ function WorkspaceSheetRoute({
             component={MachinePolicyScreen}
             options={{
               title: "Owner policy and updates",
-              header: MachineDrawerHeader,
+              header: WorkspaceDrawerHeader,
             }}
           />
           <SheetStack.Screen
@@ -521,7 +522,7 @@ function WorkspaceSheetRoute({
             component={MachineActivityScreen}
             options={{
               title: "Machine activity",
-              header: MachineDrawerHeader,
+              header: WorkspaceDrawerHeader,
             }}
           />
           <SheetStack.Screen
@@ -529,7 +530,7 @@ function WorkspaceSheetRoute({
             component={AgentMachinesScreen}
             options={{
               title: "Agent machine access",
-              header: MachineDrawerHeader,
+              header: WorkspaceDrawerHeader,
             }}
           />
           <SheetStack.Screen
@@ -567,7 +568,10 @@ function WorkspaceSheetRoute({
           <SheetStack.Screen
             name="UsageCredits"
             component={UsageCreditsScreen}
-            options={{ title: "Usage & credits" }}
+            options={{
+              title: "Usage & credits",
+              header: WorkspaceDrawerHeader,
+            }}
           />
           <SheetStack.Screen
             name="AccountSecurity"

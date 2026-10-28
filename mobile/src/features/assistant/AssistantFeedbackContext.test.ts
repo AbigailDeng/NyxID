@@ -48,7 +48,15 @@ function setup(
       Field: "Field",
       Label: "Label",
     },
-    "../../theme/ThemeContext": { useTheme: () => ({ colors: { primaryTone: { bg: "purple" } } }) },
+    "../../theme/ThemeContext": {
+      useTheme: () => ({
+        colors: {
+          primaryTone: { bg: "purple" },
+          successTone: { text: "green" },
+          dangerTone: { text: "red" },
+        },
+      }),
+    },
     ...mocks,
   });
   const C = h.load(fileURLToPath(new URL(file, import.meta.url)))[name] as (

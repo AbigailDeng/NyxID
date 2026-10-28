@@ -74,8 +74,8 @@ import {
 } from "./AssistantBanner";
 import { sanitizeAssistantMessageContent } from "./assistantChatContent";
 import { AssistantWorkingContext } from "./AssistantWorkingContext";
-import { AssistantReplyFeedback } from "./AssistantReplyFeedback";
-import { AssistantCopyButton } from "./AssistantCopyButton";
+import { AssistantMessageFooter } from "./AssistantMessageFooter";
+import { canReplyFeedback } from "./assistantFeedback";
 import { assistantSelectableMarkdown } from "./assistantSelectableMarkdown";
 import { AssistantAttachmentView } from "./AssistantAttachmentView";
 import { AssistantPendingUploads } from "./AssistantPendingUploads";
@@ -840,27 +840,21 @@ export function AssistantScreen({
             onPress={() => void perform(() => assistant.checkRecovery(item.id))}
           />
         ) : null}
-        <Label muted mono style={styles.timestamp}>
-          {formatDate(item.created_at)}
-        </Label>
-        <AssistantCopyButton
+        <AssistantMessageFooter
+          key={`${assistant.conversationId}:${item.id}`}
           text={isUser ? item.text : sanitizeAssistantMessageContent(item.text)}
+          timestamp={item.created_at}
+          user={isUser}
+          feedback={item.feedback}
+          disabled={
+            !assistant.online || assistant.loadingOlder || assistant.loading
+          }
+          onFeedback={
+            canReplyFeedback(item, assistant.conversationId)
+              ? (vote, comment) => assistant.feedback(item.id, vote, comment)
+              : undefined
+          }
         />
-        {item.role === "assistant" &&
-        item.status === "completed" &&
-        !!item.text.trim() &&
-        !item.error_code ? (
-          <AssistantReplyFeedback
-            key={`${assistant.conversationId}:${item.id}`}
-            feedback={item.feedback}
-            disabled={
-              !assistant.online || assistant.loadingOlder || assistant.loading
-            }
-            onSave={(vote, comment) =>
-              assistant.feedback(item.id, vote, comment)
-            }
-          />
-        ) : null}
       </View>
     );
   }
@@ -1196,7 +1190,6 @@ export function AssistantScreen({
                           operation={operation}
                         />
                       ))}
-                    <AssistantCopyButton text={liveText} partial />
                   </View>
                 ) : null}
                 {assistant.history?.waiting.map((waiting, index) => (
@@ -1871,7 +1864,6 @@ const styles = StyleSheet.create({
   messageText: { fontFamily: fonts.bodyRegular, fontSize: 14, lineHeight: 23 },
   metadata: { fontSize: 11 },
   runningActivity: { flexShrink: 1, fontSize: 11 },
-  timestamp: { fontSize: 10 },
   footer: { gap: 16, paddingTop: 20 },
   welcome: { alignItems: "center", paddingVertical: 100 },
   welcomeTitle: {
