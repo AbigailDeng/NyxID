@@ -28,8 +28,10 @@ import {
 } from "react";
 import {
   ActivityIndicator,
+  AccessibilityInfo,
   Alert,
   FlatList,
+  findNodeHandle,
   Keyboard,
   Modal,
   Pressable,
@@ -78,6 +80,8 @@ import {
 import { submitAssistantDraft } from "./assistantComposerDraft";
 import { AssistantActivityDisclosure } from "./AssistantActivityDisclosure";
 import { AssistantAcknowledgements } from "./AssistantAcknowledgements";
+import type { RevealReviewTarget } from "./AssistantReviewTarget";
+import { revealAssistantReviewTarget } from "./reviewTargetGeometry";
 import {
   AssistantBanner,
   AssistantConnectionBanner,
@@ -190,6 +194,11 @@ export function AssistantScreen({
   const composerPress = useRef(createAssistantComposerPressGuard());
   const [stopProtected, setStopProtected] = useState(false);
   const transcript = useRef<FlatList<AssistantMessage>>(null);
+  const transcriptViewport = useRef<View>(null);
+  const transcriptOffset = useRef(0);
+  useEffect(() => {
+    transcriptOffset.current = 0;
+  }, [assistant.conversationId]);
   const transcriptScroll = useTranscriptScrollFollow(
     transcript,
     assistant.conversationId,
@@ -839,6 +848,24 @@ export function AssistantScreen({
     );
   }
 
+  const revealConfirmation: RevealReviewTarget = (target, heading, current) => {
+    const viewport = transcriptViewport.current;
+    if (!viewport) return;
+    revealAssistantReviewTarget({
+      viewport,
+      target,
+      current,
+      offset: () => transcriptOffset.current,
+      pause: transcriptScroll.pause,
+      scroll: (offset) =>
+        transcript.current?.scrollToOffset({ offset, animated: false }),
+      focus: () => {
+        const handle = findNodeHandle(heading);
+        if (handle) AccessibilityInfo.setAccessibilityFocus(handle);
+      },
+    });
+  };
+
   return (
     <WorkspacePage
       title={chatTitle}
@@ -880,7 +907,12 @@ export function AssistantScreen({
           <Notice message={`Opening ${agentName}'s latest chat…`} />
         </View>
       ) : null}
-      <View key="transcript-column" style={styles.fill}>
+      <View
+        key="transcript-column"
+        ref={transcriptViewport}
+        collapsable={false}
+        style={styles.fill}
+      >
         {homeVisible ? (
           <NyxBotHome
             key={getAuthEpoch()}
@@ -960,6 +992,7 @@ export function AssistantScreen({
               transcriptEdges.content(height);
             }}
             onScroll={(event) => {
+              transcriptOffset.current = event.nativeEvent.contentOffset.y;
               transcriptScroll.listProps.onScroll(event);
               transcriptEdges.scroll(event.nativeEvent.contentOffset.y);
             }}
@@ -1165,6 +1198,9 @@ export function AssistantScreen({
                       ),
                   )}
                   selectedId={route?.params?.acknowledgementId}
+                  scope={`${getAuthEpoch()}:${conversation?.id ?? "draft"}`}
+                  active={assistant.active && !sheet}
+                  onReveal={revealConfirmation}
                   onOpenLink={openSafeLink}
                   renderPending={renderAcknowledgement}
                   renderAuthoredReview={renderAuthoredReview}

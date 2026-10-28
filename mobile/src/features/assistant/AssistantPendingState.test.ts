@@ -117,7 +117,10 @@ test("external wait preserves expiry/auto-resume and pending update wording from
     agentName: "Researcher",
     pendingEvents: 2,
   });
-  assert.match(x.text(), /2\s+updates\s+waiting for\s+Researcher\s*'s next turn/);
+  assert.match(
+    x.text(),
+    /2\s+updates\s+waiting for\s+Researcher\s*'s next turn/,
+  );
   assert.match(x.text(), /Connect GitHub.*expires.*Finish connecting/);
   assert.match(
     x.text(),
@@ -282,7 +285,10 @@ test("real hook fences duplicate, expired, offline, account and thread approval 
   h.mount(() => hook(A));
   await h.settle();
   h.value().history.approvals[0].expires_at = "2000-01-01";
-  await assert.rejects(h.value().decideApproval(approval.id, true), /no longer available/);
+  await assert.rejects(
+    h.value().decideApproval(approval.id, true),
+    /no longer available/,
+  );
   assert.equal(calls, 0);
   h.value().history.approvals[0].expires_at = approval.expires_at;
   network({ isConnected: false });
@@ -316,4 +322,144 @@ test("real hook fences duplicate, expired, offline, account and thread approval 
   );
   assert.equal(calls, 1);
   h.unmount();
+});
+
+test("live metadata refresh projects authoritative approval, connected and failed states once per burst", async () => {
+  const id = `nyxa-${"c".repeat(32)}`;
+  for (const kind of ["approval", "connected", "failed"] as const) {
+    let changed = false;
+    let reads = 0;
+    let event: (value: any) => void = () => {};
+    let liveRefresh: (...args: any[]) => unknown;
+    const page = () =>
+      historySchema.parse({
+        conversation: {
+          id,
+          title: "Live review",
+          model: "nyxagent/chat",
+          created_at: "2026-10-28",
+          last_message_at: "2026-10-28",
+          message_count: changed && kind !== "approval" ? 1 : 0,
+          active_turn: null,
+        },
+        messages:
+          !changed || kind === "approval"
+            ? []
+            : [
+                {
+                  id: `message-${kind}`,
+                  seq: 1,
+                  turn_id: "turn",
+                  role: kind === "connected" ? "event" : "assistant",
+                  text:
+                    kind === "connected"
+                      ? "NyxID events (authored by NyxID):\n- The user finished connecting github (connect_link_id abc)."
+                      : "",
+                  status: kind === "failed" ? "failed" : "completed",
+                  error_code: kind === "failed" ? "model_interrupted" : null,
+                  created_at: "2026-10-28",
+                },
+              ],
+        approvals: changed && kind === "approval" ? [approval] : [],
+        before_seq: null,
+      });
+    const h = hookHarness<any>({
+      "./useAssistantLiveRefresh": {
+        useAssistantLiveRefresh: (...args: any[]) => liveRefresh(...args),
+      },
+      "../groups/useGroupsLive": {
+        useGroupsLive: (
+          _epoch: number,
+          _active: boolean,
+          _available: any,
+          listener: any,
+        ) => {
+          event = listener;
+          return true;
+        },
+      },
+      "react-native": {
+        AppState: {
+          currentState: "active",
+          addEventListener: () => ({ remove() {} }),
+        },
+      },
+      "@react-navigation/native": { useIsFocused: () => true },
+      "@react-native-community/netinfo": { addEventListener: () => () => {} },
+      "@tanstack/react-query": { useQuery: () => ({ data: { agents: [] } }) },
+      "../../lib/api/agentsApi": { agentsApi: {} },
+      "../../lib/api/assistantApi": {
+        assistantApi: {
+          history: async () => {
+            reads++;
+            return page();
+          },
+          list: async () => ({ conversations: [], next_cursor: null }),
+          models: async () => [],
+        },
+      },
+    });
+    liveRefresh = h.load(
+      fileURLToPath(new URL("./useAssistantLiveRefresh.ts", import.meta.url)),
+    ).useAssistantLiveRefresh as any;
+    const hook = h.load(
+      fileURLToPath(new URL("./useAssistant.ts", import.meta.url)),
+    ).useAssistant as any;
+    h.mount(() => hook(id));
+    await h.settle();
+    const baseline = reads;
+    changed = true;
+    event({ type: "conversation", id });
+    event({ type: "conversation", id });
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    await h.settle();
+    assert.equal(
+      reads,
+      baseline + 1,
+      `${kind}: repeated SSE metadata coalesces into one real history read`,
+    );
+    const history = h.value().history;
+    if (kind === "approval") {
+      const x = render("./AssistantPendingState.tsx", "AssistantApprovalCard", {
+        approval: history.approvals[0],
+        disabled: false,
+        onDecide: async () => {},
+      });
+      assert.match(x.text(), /Approval required/);
+      assert.ok(
+        x.nodes().some((n) => n.props.accessibilityLiveRegion === "polite"),
+      );
+      x.h.unmount();
+    } else if (kind === "connected") {
+      const x = render(
+        "./AssistantSystemMessage.tsx",
+        "AssistantSystemMessage",
+        {
+          message: history.messages[0],
+          onOpenAutomations: () => {},
+        },
+      );
+      assert.equal(x.h.value().props.accessibilityLiveRegion, "polite");
+      assert.equal(
+        x.nodes().find((n) => n.props.notice)?.props.notice.summary,
+        "Finished connecting github",
+      );
+      assert.equal(
+        history.messages.length,
+        1,
+        "no duplicate event rows or invented completion toasts",
+      );
+      x.h.unmount();
+    } else {
+      assert.equal(history.messages[0].status, "failed");
+      assert.equal(history.messages[0].error_code, "model_interrupted");
+      assert.equal(h.value().sending, false);
+      assert.equal(
+        history.messages.length,
+        1,
+        "one durable failed reply, without duplicate live messages",
+      );
+    }
+    h.unmount();
+  }
 });

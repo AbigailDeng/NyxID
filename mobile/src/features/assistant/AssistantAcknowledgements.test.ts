@@ -84,6 +84,7 @@ function setup(
     },
     "../../components/workspace/WorkspaceUI": { Label: "Label" },
     "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
+    "./AssistantReviewTarget": { AssistantReviewTarget: "ReviewTarget" },
   });
   const Component = harness.load(
     fileURLToPath(new URL("./AssistantAcknowledgements.tsx", import.meta.url)),
@@ -200,7 +201,9 @@ test("a completed-card deep link arriving before history opens its exact audit r
     authored_skill: { agent_id: "agent-1", proposal_id: "proposal-1" },
   };
   x.update([card(A, "used"), authored]);
-  assert.match(x.text(), /Selected confirmation record/);
+  assert.ok(
+    x.all().some((node) => node.type === "ReviewTarget" && node.props.selected),
+  );
   const review = x.all().find((node) => node.type === "AuthoredReview");
   assert.equal(review?.props.row.id, B);
   assert.equal(review?.props.initiallyOpen, true);

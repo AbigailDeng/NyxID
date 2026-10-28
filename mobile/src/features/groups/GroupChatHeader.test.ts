@@ -210,10 +210,30 @@ test("crew header shows member identity and narrows recipients through its picke
   chat.data.group.working_agent_ids = ["research"];
   h.render();
   assert.equal(identity().props.status, "Running");
+  const working = nodes(h.value()).find((n) => n.type === "FlatList")!.props
+    .ListFooterComponent;
+  assert.equal(
+    working.props.accessibilityLabel,
+    "Agents working. Researcher is working…",
+  );
+  assert.equal(working.props.accessibilityLiveRegion, "polite");
+  assert.ok(
+    nodes(working).some(
+      (n) => n.type === "AgentAvatar" && n.props.agent.id === "research",
+    ),
+  );
+  assert.ok(nodes(working).some((n) => n.type === "ActivityIndicator"));
   chat.data.pending_actions = [
     { summary: "Needs confirmation", conversation_id: "chat" },
   ];
   h.render();
   assert.equal(identity().props.status, "Needs you");
+  chat.data.group.working_agent_ids = [];
+  h.render();
+  assert.equal(
+    nodes(h.value()).find((n) => n.type === "FlatList")!.props
+      .ListFooterComponent,
+    null,
+  );
   h.unmount();
 });

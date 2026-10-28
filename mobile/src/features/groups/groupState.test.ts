@@ -21,7 +21,21 @@ import {
   eligibleGroupPeople,
   groupPendingReview,
   groupCanDecide,
+  groupWorkingLabel,
 } from "./groupState";
+
+test("crew working label matches web singular, pair and overflow wording", () => {
+  assert.equal(groupWorkingLabel([]), "");
+  assert.equal(groupWorkingLabel(["NyxBot"]), "NyxBot is working…");
+  assert.equal(
+    groupWorkingLabel(["NyxBot", "Researcher"]),
+    "NyxBot and Researcher are working…",
+  );
+  assert.equal(
+    groupWorkingLabel(["NyxBot", "Researcher", "Writer", "Tester"]),
+    "NyxBot, Researcher and 2 more are working…",
+  );
+});
 import { agentSchema } from "../agents/agentContracts";
 
 const NOW = "2026-10-15T08:00:00Z";

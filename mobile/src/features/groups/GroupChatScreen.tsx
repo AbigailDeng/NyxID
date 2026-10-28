@@ -82,6 +82,7 @@ import {
   groupCanDecide,
   groupPendingOwned,
   groupPendingReview,
+  groupWorkingLabel,
   resolveRecipients,
   withAdded,
   withDraft,
@@ -601,13 +602,18 @@ function GroupChat({
           )}
           ListFooterComponent={
             working.length ? (
-              <View style={styles.working}>
+              <View
+                style={styles.working}
+                accessibilityRole="text"
+                accessibilityLabel={`Agents working. ${groupWorkingLabel(working.map((member) => title(member.id, member.name)))}`}
+                accessibilityLiveRegion="polite"
+              >
+                <AgentAvatar agent={working[0]!} size="md" />
                 <ActivityIndicator size="small" color={colors.primary} />
                 <Label muted>
-                  {working
-                    .map((member) => title(member.id, member.name))
-                    .join(", ")}{" "}
-                  working…
+                  {groupWorkingLabel(
+                    working.map((member) => title(member.id, member.name)),
+                  )}
                 </Label>
               </View>
             ) : null

@@ -148,6 +148,14 @@ export function canLeaveGroup(group: Group): boolean {
 export const groupCanManage = canManageGroup;
 export const groupCanLeave = canLeaveGroup;
 
+/** Same compact live-status wording as the web crew transcript. */
+export function groupWorkingLabel(names: readonly string[]): string {
+  if (!names.length) return "";
+  if (names.length === 1) return `${names[0]!} is working…`;
+  if (names.length === 2) return `${names[0]!} and ${names[1]!} are working…`;
+  return `${names[0]!}, ${names[1]!} and ${String(names.length - 2)} more are working…`;
+}
+
 /** Personal groups may use shared org agents that the caller can use. */
 export function eligibleGroupAgents(
   agents: readonly AssistantAgent[],

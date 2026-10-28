@@ -6,6 +6,10 @@ import { useTheme } from "../../theme/ThemeContext";
 import { radius, TOUCH_TARGET } from "../../theme/designTokens";
 import { acknowledgementDecisionLabel } from "./assistantState";
 import type { AssistantAcknowledgement } from "./assistantTypes";
+import {
+  AssistantReviewTarget,
+  type RevealReviewTarget,
+} from "./AssistantReviewTarget";
 
 /** Pending requests stay actionable; settled cards become optional history. */
 export function AssistantAcknowledgements({
@@ -15,6 +19,9 @@ export function AssistantAcknowledgements({
   renderAuthoredReview,
   onToggle,
   onOpenLink,
+  active = true,
+  scope = "confirmation-history",
+  onReveal,
 }: {
   acknowledgements: AssistantAcknowledgement[];
   selectedId?: string;
@@ -22,6 +29,9 @@ export function AssistantAcknowledgements({
   renderAuthoredReview: (row: AssistantAcknowledgement) => ReactNode;
   onToggle: () => void;
   onOpenLink?: (url: string) => void;
+  active?: boolean;
+  scope?: string;
+  onReveal?: RevealReviewTarget;
 }) {
   const { colors } = useTheme();
   const selected = acknowledgements.find((row) => row.id === selectedId);
@@ -42,7 +52,17 @@ export function AssistantAcknowledgements({
     <>
       {acknowledgements
         .filter((row) => row.status === "pending")
-        .map(renderPending)}
+        .map((row) => (
+          <AssistantReviewTarget
+            key={row.id}
+            selected={row.id === selectedId}
+            active={active}
+            scope={`${scope}:${row.id}`}
+            onReveal={onReveal}
+          >
+            {renderPending(row)}
+          </AssistantReviewTarget>
+        ))}
       {records.length ? (
         <View
           style={[
@@ -79,7 +99,13 @@ export function AssistantAcknowledgements({
                 const RowChevron = expanded ? ChevronDown : ChevronRight;
                 const label = acknowledgementDecisionLabel(row);
                 return (
-                  <View key={row.id}>
+                  <AssistantReviewTarget
+                    key={row.id}
+                    selected={row.id === selectedId}
+                    active={active && open}
+                    scope={`${scope}:${row.id}`}
+                    onReveal={onReveal}
+                  >
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={`${label} · ${row.summary}`}
@@ -120,16 +146,6 @@ export function AssistantAcknowledgements({
                     </Pressable>
                     {expanded ? (
                       <View style={styles.details}>
-                        {row.id === selectedId ? (
-                          <Label
-                            style={[
-                              styles.recordText,
-                              { color: colors.primaryOnTint },
-                            ]}
-                          >
-                            Selected confirmation record
-                          </Label>
-                        ) : null}
                         {row.status === "used" ? (
                           <Label muted style={styles.recordText}>
                             This one-time confirmation has been used. Check the
@@ -193,7 +209,7 @@ export function AssistantAcknowledgements({
                         ) : null}
                       </View>
                     ) : null}
-                  </View>
+                  </AssistantReviewTarget>
                 );
               })}
             </View>

@@ -78,11 +78,6 @@ export function AssistantAcknowledgementCard({
   return (
     <View accessibilityLabel={acknowledgementCardTitle(row)}>
       <Card style={selected ? { borderColor: colors.primary } : undefined}>
-        {selected ? (
-          <Label style={{ color: colors.primaryOnTint }}>
-            Selected confirmation
-          </Label>
-        ) : null}
         {row.decider === "orchestrator" ? (
           <Label muted>Requested from NyxBot</Label>
         ) : null}
