@@ -8,7 +8,7 @@ import * as search from "./workspaceSearchModel";
 type E = { type: any; props: Record<string, any> };
 const nodes = (n: any): E[] =>
   n?.props ? [n, ...[n.props.children].flat(Infinity).flatMap(nodes)] : [];
-function setup(recents = false, initialAgent?: string) {
+function setup(recents = false, initialAgent?: string, history = false) {
   let epoch = 7,
     focused = true,
     refreshed = 0,
@@ -64,7 +64,10 @@ function setup(recents = false, initialAgent?: string) {
     refresh: async () => refreshed++,
     loadMore: () => more++,
   };
-  let route = { params: initialAgent ? { agentId: initialAgent } : undefined };
+  let route = {
+    name: history ? "AssistantHistory" : "WorkspaceRecents",
+    params: initialAgent ? { agentId: initialAgent } : undefined,
+  };
   const h = hookHarness<E>({
     "react/jsx-runtime": {
       jsx: (type: any, props: any) => ({ type, props }),
@@ -192,7 +195,7 @@ function setup(recents = false, initialAgent?: string) {
       h.render();
     },
     changeRoute: (agentId?: string) => {
-      route = { params: agentId ? { agentId } : undefined };
+      route = { ...route, params: agentId ? { agentId } : undefined };
       h.render();
     },
     counts: () => ({ refreshed, agentRefresh, more, keyboardDismissals }),
@@ -283,4 +286,20 @@ test("See all searches, filters by agent, loads older pages and opens exact dest
   x.changeRoute();
   assert.equal(x.list().props.data.length, 2);
   x.h.unmount();
+});
+
+test("Chat History shares the paged browser and New chat retains its originating agent", () => {
+  for (const agent of ["nyxbot", "helper"]) {
+    const x = setup(true, agent, true);
+    assert.equal(x.h.value().props.title, "Chat history");
+    assert.equal(x.scopes.at(-1), agent);
+    const compose = x
+      .all()
+      .find((n) => n.props.accessibilityLabel === "New chat")!;
+    compose.props.onPress();
+    assert.equal(x.actions[0].kind, "chat");
+    assert.equal(x.actions[0].target.agentId, agent);
+    assert.equal(x.actions[0].target.conversationId, undefined);
+    x.h.unmount();
+  }
 });

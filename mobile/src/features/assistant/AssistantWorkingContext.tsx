@@ -14,11 +14,13 @@ export function AssistantWorkingContext({
   active,
   onReset,
   onManageMemory,
+  onBusyChange,
 }: {
   conversationId: string;
   active: boolean;
   onReset: () => void;
   onManageMemory: (agentId: string) => void;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const epoch = getAuthEpoch();
   const mounted = useRef(true);
@@ -28,12 +30,16 @@ export function AssistantWorkingContext({
   const [confirming, setConfirming] = useState(false);
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    onBusyChange?.(pending);
+    return () => onBusyChange?.(false);
+  }, [pending, onBusyChange]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
       mounted.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
   const query = useQuery({
     queryKey: ["assistant", "context", epoch, conversationId],
     queryFn: ({ signal }) => assistantApi.context(conversationId, signal),
@@ -62,7 +68,8 @@ export function AssistantWorkingContext({
       if (mounted.current && allowed.current && getAuthEpoch() === epoch) {
         setConfirming(false);
         await query.refetch();
-        onReset();
+        if (mounted.current && allowed.current && getAuthEpoch() === epoch)
+          onReset();
       }
     } catch {
       if (mounted.current && getAuthEpoch() === epoch) setFailed(true);

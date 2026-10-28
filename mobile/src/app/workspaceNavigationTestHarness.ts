@@ -11,6 +11,9 @@ import { hydratedTestRouter } from "./routerTestHarness";
 export const contentNames = [
   "Assistant",
   "AssistantContext",
+  "AssistantDetails",
+  "AssistantHistory",
+  "AssistantWorkingContext",
   "GroupChat",
   "Automations",
   "Agents",

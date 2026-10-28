@@ -18,6 +18,7 @@ transient interactions, rather than workspace destinations.
 | Stack / routes                                                                       | Purpose                                                                                                                                    |
 | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | Content / Assistant                                                                  | Explicit NyxBot Home or a private chat. `home: true` selects Home; `home: false` and a fresh `draftId` select an empty normal chat.        |
+| Content / AssistantDetails, AssistantHistory, AssistantWorkingContext                | Readable chat details with guarded rename/delete, agent-scoped paged history, checkpoint and guarded context reset.                        |
 | Content / AssistantContext, GroupChat                                                | Contextual private and crew chats, preserving the primary chat and draft.                                                                  |
 | Content / Automations, AutomationDetail, AutomationRuns                              | Read-only configured tasks, details and cursor-paged run history, with exact conversation links.                                           |
 | Content / Machines, MachineDetail, MachinePolicy, MachineActivity                    | Inventory, detail, owner policy, updates, saved logins and machine activity.                                                               |
@@ -26,7 +27,7 @@ transient interactions, rather than workspace destinations.
 | Content / Agents, AgentCreate, AgentDetail, GroupEditor                              | Agents, crews and their guarded editors.                                                                                                   |
 | Content / AgentSkills, SkillDetail, SkillVersions, SkillHistory, AuthoredSkillReview | Read-only skill files/history, exact version pinning and owner publication decisions.                                                      |
 | Content / Activity, ActivityDetail, ActiveGrants                                     | Incoming actionable approvals, date-grouped history, detail and the existing grants view. Canonical approval links still address Activity. |
-| Content / WorkspaceSearch, WorkspaceRecents                                          | Grouped local search and cursor-paged See all, with chat-title search and per-agent filtering.                                              |
+| Content / WorkspaceSearch, WorkspaceRecents                                          | Grouped local search and cursor-paged See all, with chat-title search and per-agent filtering.                                             |
 | Sheet / AccountSettings, AccountSecurity, UsageCredits                               | Settings, account/security, display, notifications and usage/credits.                                                                      |
 | Sheet / DeviceLogin, AgentKeyLogin                                                   | QR, terminal and Agent Key sign-in flows with existing write guards.                                                                       |
 | Sheet / TermsOfService, PrivacyPolicy                                                | Signed-in legal documents.                                                                                                                 |
@@ -34,10 +35,12 @@ transient interactions, rather than workspace destinations.
 | Root / MachineDesktop                                                                | Full-screen desktop viewer.                                                                                                                |
 | Root / Auth, DeviceLogin, AgentKeyLogin, TermsOfService, PrivacyPolicy               | Signed-out authentication and shared canonical entries; signed-in wrappers resolve into the account sheet.                                 |
 
-Chat Details and History currently remain local sheets. Their promotion to
-content pages is pending in the final A9 Search/See all chunk; History may share
-the thread browser filtered to the current agent. Agent/permissions/options,
-recipients/connections and automation field pickers remain transient choices.
+Chat Details, History and Working context are nested content pages. History
+reuses the thread browser, initially filtered to the viewed agent; its New chat
+keeps that agent. Choosing Details/History from the agent picker first dismisses
+the native picker, then pushes the content page. Agent/permissions/options and
+recipients/connections pickers remain transient choices. Attachment preview and
+voice conversation retain their media presentation.
 
 ## Sidebar and destination transitions
 

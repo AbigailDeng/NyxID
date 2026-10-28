@@ -696,50 +696,6 @@ export function useAssistant(
     }
   }
 
-  async function rename(title: string) {
-    const id = selected.current;
-    if (!id || mutating) return false;
-    setMutating(true);
-    setError(undefined);
-    try {
-      await assistantApi.rename(id, title);
-      if (mounted.current && selected.current === id) {
-        historySequence.current += 1;
-        await refreshHistory(id);
-        await refreshIndex();
-      }
-      return true;
-    } catch (cause) {
-      if (mounted.current && selected.current === id)
-        setError(errorMessage(cause));
-      return false;
-    } finally {
-      if (mounted.current) setMutating(false);
-    }
-  }
-
-  async function remove() {
-    const id = selected.current;
-    if (!id || mutating) return;
-    setMutating(true);
-    setError(undefined);
-    try {
-      await assistantApi.delete(id);
-      if (mounted.current && selected.current === id) {
-        continuations.current.delete(id);
-        openConversation();
-        await refreshIndex();
-      }
-      return true;
-    } catch (cause) {
-      if (mounted.current && selected.current === id)
-        setError(errorMessage(cause));
-      return false;
-    } finally {
-      if (mounted.current) setMutating(false);
-    }
-  }
-
   async function loadOlder() {
     const id = selected.current;
     const before = latestHistory.current?.before_seq;
@@ -800,8 +756,6 @@ export function useAssistant(
     decide,
     decideApproval,
     stop,
-    rename,
-    remove,
     loadOlder,
     loadMoreConversations: () =>
       nextCursor

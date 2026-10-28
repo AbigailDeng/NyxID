@@ -10,7 +10,7 @@ This increment starts the mobile migration against the existing NyxID Web and ba
 | Assistant   | Persisted conversations and paginated history, text/attachment-only turns with native SSE transport, native multi-file uploads, pending-file removal, authenticated image preview/document saving, Markdown and activity, Stop, explicit failed-work retry, acknowledgement decisions, proxy approval links, rename/delete and permission-mode choice. On foreground return it reads authoritative history and active-turn state. | [AssistantScreen](../src/features/assistant/AssistantScreen.tsx), [useAssistant](../src/features/assistant/useAssistant.ts), [assistantApi](../src/lib/api/assistantApi.ts); `/assistant/nyxagent/{conversations,turns}` and conversation `/stop` / `/acknowledgements/{id}`. Web reference: [NyxAgent schemas](../../frontend/src/schemas/assistant-nyxagent.ts).                                                                 |
 | Services    | Live connection list and catalog, search, details, enabled state, eligible credential replacement, removal confirmation, API-key and declared token-exchange credential fields, platform-key binding, managed OAuth in the system browser with a connection-specific `key_id`. Success is verified by re-reading the connection.                                                                                                  | [ServicesScreen](../src/features/services/ServicesScreen.tsx), [servicesApi](../src/lib/api/servicesApi.ts); `/keys`, `/catalog`, `/providers/{id}/connect/oauth`. Web reference: [key hooks](../../frontend/src/hooks/use-keys.ts), [connection wizard](../../frontend/src/components/dashboard/add-key-dialog.tsx).                                                                                                              |
 | Plugins     | Native Connectors / Skills, grouped real connections and catalog, direct setup reuse, Overview / Advanced / History, current-agent pins, Ornn catalog/versions/package previews, revision-fenced attachment and removal, skill history and exact-card owner publication decisions. Native skill files are read-only; users ask NyxBot to edit. Advanced/scope/specialized setup/Studio use explicit Web handoffs.                 | [PluginsScreen](../src/features/plugins/PluginsScreen.tsx), [PluginSkills](../src/features/plugins/PluginSkills.tsx); existing `/keys`, `/catalog`, `/assistant/nyxagent/agents/{id}/skills` and `/learning/proposals` contracts.                                                                                                                                                                                                  |
-| Agents      | Live list/details; personal specialist creation; changed-field profile edits and confirmation-mode override; service and guest access, account-read grant, memory add/forget, thread navigation, destroy and permanent deletion of destroyed specialists. Existing organization agents use their actual maintenance permission and exact service IDs.                                                         | [AgentsScreen](../src/features/agents/AgentsScreen.tsx), [agentsApi](../src/lib/api/agentsApi.ts); `/assistant/nyxagent/agents`, agent `/grants`, `/memory`, `/destroy`. Web reference: [Agent forms](../../frontend/src/components/assistant/nyxbot-agent-forms.tsx), [Agent details](../../frontend/src/components/assistant/nyxbot-agent-details.tsx).                                        |
+| Agents      | Live list/details; personal specialist creation; changed-field profile edits and confirmation-mode override; service and guest access, account-read grant, memory add/forget, thread navigation, destroy and permanent deletion of destroyed specialists. Existing organization agents use their actual maintenance permission and exact service IDs.                                                                             | [AgentsScreen](../src/features/agents/AgentsScreen.tsx), [agentsApi](../src/lib/api/agentsApi.ts); `/assistant/nyxagent/agents`, agent `/grants`, `/memory`, `/destroy`. Web reference: [Agent forms](../../frontend/src/components/assistant/nyxbot-agent-forms.tsx), [Agent details](../../frontend/src/components/assistant/nyxbot-agent-details.tsx).                                                                          |
 | Crews       | Real crew list, personal/organization creation, member and participant selection, crew transcripts with working status and older pages, explicit recipient chips and mentions, shared native uploads/attachment access, pending decisions and exact draft review, rename/membership/lead settings and Leave/Delete with role gates.                                                                                               | [GroupsList](../src/features/groups/GroupsList.tsx), [GroupChatScreen](../src/features/groups/GroupChatScreen.tsx), [GroupEditorScreen](../src/features/groups/GroupEditorScreen.tsx), [groupsApi](../src/lib/api/groupsApi.ts); `/assistant/nyxagent/groups`, crew messages/attachments, existing organization and approval contracts. Web reference: [Crew view](../../frontend/src/components/assistant/nyxbot-group-view.tsx). |
 | Automations | Read-only configured list, schedule/webhook source, agent, enabled/paused status, task/target/confirmation text, last run and cursor-paged history with exact thread links. Creating, running and changing automations belongs to NyxBot by user decision (2026-10-28).                                                                                                                                                           | [AutomationsScreen](../src/features/automations/AutomationsScreen.tsx), [automationsTransport](../src/lib/api/automationsTransport.ts); GET `/triggers`, `/triggers/{id}`, `/triggers/{id}/runs` and saved display timezone. No native writes or authoring routes.                                                                                                                                                                 |
 | Account     | Display-name/avatar update, session list/revocation, TOTP enrollment/confirmation/disable, first-time recovery-code display and explicit copy/share. Existing appearance, notifications, logout, account deletion and legal pages remain.                                                                                                                                                                                         | [AccountSecurityScreen](../src/features/account/AccountSecurityScreen.tsx), [accountApi](../src/lib/api/accountApi.ts), [AccountSettingsScreen](../src/features/account/AccountSettingsScreen.tsx); `/users/me`, `/sessions`, `/auth/mfa/{setup,confirm,disable}`.                                                                                                                                                                 |
@@ -166,15 +166,14 @@ agent avatars, explicit Personal/organization owner, current checkmark, running
 or Needs you status, recent threads and channel sub-thread groups. Tapping an
 agent discloses its threads; New chat with the agent follows them. The sheet's
 This thread card shows available title/agent/activity/message-count data
-and opens the existing Details/History sheets. Manage agents remains available.
+and opens Details/History as main-content pages after picker dismissal. Manage agents remains available.
 Selecting the current thread retains its unsent draft; changing thread follows
-the existing History behavior and clears the old draft. A new chat starts a
+the shared thread-browser routing and retains each thread’s own draft. A new chat starts a
 fresh draft for the selected agent. The hierarchy owns one scroll host, retaining
 pinned headers and the bounded previews/all-items browser.
 
 Usage & credits is registered inside the management drawer, with entries in
-Settings and the side-menu account area. The menu finishes native dismissal
-before opening it. It uses Stream B's read-only screen and optional period/owner
+Settings only. It uses the same pull-up surface above the current sidebar/slab state. It uses Stream B's read-only screen and optional period/owner
 parameters. The web account-panel URL `/assistant?panel=billing` is accepted by
 the native link parser; `panelPeriod` selects 24h/7d/30d, and supported chat/crew
 parameters retain the addressed conversation underneath. Cold nested Back opens
@@ -207,9 +206,12 @@ existing approval detail flow for its decision and verification requirements.
 
 Private and crew replies show a compact Copy icon and day/month date. Reply
 feedback votes and their comment follow-up are omitted on native by user decision
-2026-10-28. Unused native mutation UI, hooks and client methods were removed;
-history feedback metadata still parses the server response. Details now opens Working context,
-which reads real checkpoint/pending-action state on demand, polls only active
+2026-10-28. Unused native feedback UI, hooks and the uncalled API client were removed per
+the later PM handoff. No client code is retained; history feedback metadata
+still parses the server response. Details, History and Working context are nested main-content pages. History
+shares the paged Recents browser with an agent filter. Details uses the existing
+rename/delete endpoints with dirty/critical-write guards. Working context reads
+real checkpoint/pending-action state on demand, polls only active
 turns, links agent memory management and confirms reset through the existing
 context endpoint. Reset preserves the transcript and refreshes it afterward.
 
@@ -289,7 +291,6 @@ below headings. First/last blocks add no outer margin. Both transcripts share th
 layout. Tables retain cell padding and a trailing 12pt scroll inset so their last
 border is visible at the end. The web text-block renderer uses mt-2/first:mt-0;
 the larger native rhythm follows the user's 2026-10-28 review decision.
-
 
 Native sidebar Search is a main-content page. It searches the same conversation
 index (50 per page), agent index and crew list used by web assistant-search,

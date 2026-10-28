@@ -586,6 +586,11 @@ account pages and QR/terminal quick actions use the retained pull-up surface. Se
   the safe-area inset rather than adding a second padded strip. The one-row
   private header stays compact; group name, ownership context and settings
   share one header, with member details retained.
+- Chat Details, History and Working context are nested pages in the content slab.
+  History shares the cursor-paged Recents browser, filtered to the current agent.
+  Title edits, deletion and context reset retain dirty/critical-write guards.
+  The agent/permissions/options and recipients/connections pickers remain task-local
+  transient choices, alongside media preview and voice conversation.
 - Native permissions controls contain Full access, Auto and Ask every time only,
   with the effective agent override shown read-only. Chat and agent settings use
   the server default without a native selector or per-turn override. Voice automatically uses an available server default, without a source selector. This is the user's deliberate native scope (2026-10-28).

@@ -43,6 +43,9 @@ function linked(path: string) {
   return state;
 }
 const mainEntries = [
+  ["AssistantDetails", { agentId: "agent", conversationId: "thread" }],
+  ["AssistantHistory", { agentId: "agent" }],
+  ["AssistantWorkingContext", { conversationId: "thread" }],
   ["Automations", undefined],
   ["Agents", { tab: "groups" }],
   ["Plugins", { tab: "skills" }],
@@ -473,6 +476,9 @@ test("root pages reveal the sidebar while native nested pages and Settings retai
   for (const name of [
     undefined,
     "AssistantContext",
+    "AssistantDetails",
+    "AssistantHistory",
+    "AssistantWorkingContext",
     "GroupChat",
     "AgentDetail",
     "MachinePolicy",

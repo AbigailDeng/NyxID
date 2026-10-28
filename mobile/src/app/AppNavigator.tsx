@@ -1,6 +1,10 @@
 import { WorkspacePageSurface } from "./WorkspacePageSurface";
 import { workspaceContentAnimation } from "../components/workspace/workspacePushState";
 import {
+  AssistantDetailsScreen,
+  AssistantWorkingContextScreen,
+} from "../features/assistant/AssistantDetailsScreen";
+import {
   WorkspaceRecentsScreen,
   WorkspaceSearchScreen,
 } from "../components/workspace/WorkspaceBrowseScreen";
@@ -328,6 +332,21 @@ function WorkspaceNavigator() {
         component={AssistantContextRoute}
       />
       <ContentStack.Screen name="GroupChat" component={GroupChatRoute} />
+      <ContentStack.Screen
+        name="AssistantDetails"
+        component={AssistantDetailsScreen}
+        options={{ title: "Chat details" }}
+      />
+      <ContentStack.Screen
+        name="AssistantHistory"
+        component={WorkspaceRecentsScreen}
+        options={{ title: "Chat history" }}
+      />
+      <ContentStack.Screen
+        name="AssistantWorkingContext"
+        component={AssistantWorkingContextScreen}
+        options={{ title: "Working context" }}
+      />
       <ContentStack.Group
         screenOptions={{
           ...workspaceHeaderOptions({ role: "menu", onOpenMenu }),

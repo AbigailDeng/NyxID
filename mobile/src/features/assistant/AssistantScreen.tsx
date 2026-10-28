@@ -5,14 +5,7 @@ import {
 } from "./AssistantPendingState";
 import { AssistantSystemMessage } from "./AssistantSystemMessage";
 import { AssistantLinkContext } from "./AssistantLinkContext";
-import {
-  AssistantComposerSettings,
-  useComposerAccessMode,
-} from "./AssistantComposerSettings";
-import {
-  COMPOSER_ACCESS_LABEL,
-  COMPOSER_ACCESS_DESCRIPTION,
-} from "./composerSettings";
+import { AssistantComposerSettings } from "./AssistantComposerSettings";
 import { useComposerConnection } from "./useComposerConnection";
 import { useAssistantGuidance } from "./useAssistantGuidance";
 import { ComposerConnectionPicker } from "./ComposerConnectionPicker";
@@ -48,6 +41,7 @@ import {
   findNodeHandle,
   Keyboard,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -59,7 +53,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { NativeStackNavigationOptions } from "@react-navigation/native-stack";
 import * as WebBrowser from "expo-web-browser";
 import { AssistantReplyBody } from "./AssistantReplyBody";
-import { Check, MoreHorizontal, SquarePen, X } from "lucide-react-native";
+import { MoreHorizontal, SquarePen, X } from "lucide-react-native";
 import type {
   AssistantParams,
   WorkspaceNavigationProp,
@@ -77,7 +71,6 @@ import {
   WorkspacePage,
   ActionButton,
   Card,
-  Field,
   Label,
   Notice,
 } from "../../components/workspace/WorkspaceUI";
@@ -104,7 +97,6 @@ import {
   JumpToLatest,
 } from "./AssistantBanner";
 import { sanitizeAssistantMessageContent } from "./assistantChatContent";
-import { AssistantWorkingContext } from "./AssistantWorkingContext";
 import { AssistantMessageFooter } from "./AssistantMessageFooter";
 import { AssistantAttachmentView } from "./AssistantAttachmentView";
 import { AssistantPendingUploads } from "./AssistantPendingUploads";
@@ -199,10 +191,7 @@ export function AssistantScreen({
     assistantDraftStore.set(`text:${draftOwner.current}`, value);
     setDraft(value);
   }
-  const [sheet, setSheet] = useState<
-    "agents" | "history" | "permissions" | "details" | "context"
-  >();
-  const [title, setTitle] = useState("");
+  const [sheet, setSheet] = useState<"agents" | "permissions">();
   const [localError, setLocalError] = useState<string>();
   const [voiceThread, setVoiceThread] = useState<string>();
   const [openingVoice, setOpeningVoice] = useState(false);
@@ -248,9 +237,6 @@ export function AssistantScreen({
     : homeVisible
       ? "Home"
       : "New chat";
-  const accessMode = useComposerAccessMode(
-    assistant.agent?.access_mode_override,
-  );
 
   const pendingCount =
     (assistant.history?.acknowledgements.filter((a) => a.status === "pending")
@@ -590,8 +576,49 @@ export function AssistantScreen({
     setSheet(undefined);
   }
 
-  const headerHandlers = useRef({ newChat });
-  headerHandlers.current = { newChat };
+  const pickerDestination = useRef<(() => void) | undefined>(undefined);
+  const reducedMotion = useReducedMotion();
+  const pickerScope = `${getAuthEpoch()}:${draftKey}`;
+  useEffect(
+    () => () => {
+      pickerDestination.current = undefined;
+    },
+    [pickerScope],
+  );
+  function finishPickerDismissal() {
+    const action = pickerDestination.current;
+    pickerDestination.current = undefined;
+    action?.();
+  }
+  useEffect(() => {
+    // iOS reports native dismissal completion; Android Modal has no onDismiss.
+    if (sheet || Platform.OS === "ios" || !pickerDestination.current) return;
+    const timer = setTimeout(finishPickerDismissal, reducedMotion ? 0 : 350);
+    return () => clearTimeout(timer);
+  }, [sheet, reducedMotion]);
+  function afterPickerDismissal(action: () => void) {
+    if (pickerDestination.current) return;
+    if (sheet !== "agents") {
+      action();
+      return;
+    }
+    const epoch = getAuthEpoch();
+    pickerDestination.current = () => {
+      if (getAuthEpoch() === epoch) action();
+    };
+    setSheet(undefined);
+  }
+  function openDetails() {
+    afterPickerDismissal(() =>
+      navigation.push("AssistantDetails", {
+        agentId: currentAgent?.id ?? assistant.agentId,
+        conversationId: assistant.conversationId,
+      }),
+    );
+  }
+
+  const headerHandlers = useRef({ newChat, openDetails });
+  headerHandlers.current = { newChat, openDetails };
   const headerOptions = useMemo<NativeStackNavigationOptions>(() => {
     const actions = () => (
       <WorkspaceHeaderVisibility>
@@ -606,8 +633,7 @@ export function AssistantScreen({
           <IconButton
             label="Chat options"
             onPress={() => {
-              setTitle(conversation?.title ?? "");
-              setSheet("details");
+              headerHandlers.current.openDetails();
             }}
           >
             <MoreHorizontal size={23} color={colors.textPrimary} />
@@ -1505,17 +1531,8 @@ export function AssistantScreen({
       <Sheet
         visible={!!sheet && sheet !== "permissions"}
         scroll={sheet !== "agents"}
-        title={
-          sheet === "agents"
-            ? "Choose agent"
-            : sheet === "history"
-              ? `${agentName} · Chat history`
-              : sheet === "permissions"
-                ? "Permissions"
-                : sheet === "context"
-                  ? "Working context"
-                  : "Chat details"
-        }
+        title="Choose agent"
+        onDismiss={finishPickerDismissal}
         onClose={() => setSheet(undefined)}
       >
         {sheet === "agents" ? (
@@ -1551,15 +1568,20 @@ export function AssistantScreen({
                     label="Details"
                     variant="secondary"
                     onPress={() => {
-                      setTitle(conversation?.title ?? "");
-                      setSheet("details");
+                      openDetails();
                     }}
                   />
                   <ActionButton
                     compact
                     label="History"
                     variant="secondary"
-                    onPress={() => setSheet("history")}
+                    onPress={() => {
+                      afterPickerDismissal(() =>
+                        navigation.push("AssistantHistory", {
+                          agentId: currentAgent?.id ?? assistant.agentId,
+                        }),
+                      );
+                    }}
                   />
                 </View>
               </Card>
@@ -1569,8 +1591,9 @@ export function AssistantScreen({
                 label="Manage agents"
                 variant="secondary"
                 onPress={() => {
-                  setSheet(undefined);
-                  navigation.dispatch(workspaceNavigateAction("Agents"));
+                  afterPickerDismissal(() =>
+                    navigation.dispatch(workspaceNavigateAction("Agents")),
+                  );
                 }}
               />
             }
@@ -1607,221 +1630,6 @@ export function AssistantScreen({
               setSheet(undefined);
             }}
           />
-        ) : null}
-        {sheet === "history" ? (
-          <>
-            <ActionButton
-              label="New chat"
-              onPress={newChat}
-              disabled={newChatDisabled}
-            />
-            {!assistant.conversations.length && !assistant.loadingIndex ? (
-              <Label muted>Your saved chats will appear here.</Label>
-            ) : null}
-            {assistant.conversations.map((item) => (
-              <Pressable
-                key={item.id}
-                accessibilityRole="button"
-                accessibilityLabel={`Open chat ${item.title}${item.active_turn ? ", Working" : ""}${item.pending_acknowledgements ? `, ${item.pending_acknowledgements} requests` : ""}, ${formatDate(item.last_message_at)}`}
-                accessibilityState={{
-                  selected: item.id === assistant.conversationId,
-                }}
-                onPress={() => {
-                  if (item.id !== assistant.conversationId) {
-                    navigation.setParams({
-                      conversationId: item.id,
-                      acknowledgementId: undefined,
-                      agentId: item.agent?.id ?? assistant.agentId,
-                      home: false,
-                      draft: false,
-                      draftId: undefined,
-                      openLatest: false,
-                    });
-                  }
-                  assistant.openConversation(item.id);
-                  setSheet(undefined);
-                }}
-              >
-                <Card
-                  style={
-                    item.id === assistant.conversationId
-                      ? {
-                          borderColor: colors.primary,
-                          backgroundColor: colors.primaryGlow,
-                        }
-                      : undefined
-                  }
-                >
-                  <View style={styles.row}>
-                    <Label
-                      numberOfLines={2}
-                      style={[styles.cardTitle, styles.fill]}
-                    >
-                      {item.title}
-                    </Label>
-                    {item.id === assistant.conversationId ? (
-                      <View style={styles.currentChatBadge}>
-                        <Check size={16} color={colors.primaryOnTint} />
-                        <Label
-                          style={[
-                            styles.actionLabel,
-                            { color: colors.primaryOnTint },
-                          ]}
-                        >
-                          Current
-                        </Label>
-                      </View>
-                    ) : null}
-                  </View>
-                  <Label muted>
-                    {item.agent?.display_name ?? item.agent?.name ?? "NyxBot"}
-                    {item.active_turn ? " · Working" : ""}
-                    {item.pending_acknowledgements
-                      ? ` · ${item.pending_acknowledgements} requests`
-                      : ""}
-                  </Label>
-                  <Label muted mono>
-                    {formatDate(item.last_message_at)}
-                  </Label>
-                </Card>
-              </Pressable>
-            ))}
-            {assistant.loadingIndex ? (
-              <ActivityIndicator color={colors.primary} />
-            ) : null}
-            {assistant.hasMoreConversations ? (
-              <ActionButton
-                label="Load more chats"
-                variant="secondary"
-                loading={assistant.loadingIndex}
-                onPress={() => void assistant.loadMoreConversations()}
-              />
-            ) : null}
-          </>
-        ) : null}
-        {sheet === "context" && assistant.conversationId ? (
-          <AssistantWorkingContext
-            key={assistant.conversationId}
-            conversationId={assistant.conversationId}
-            active={assistant.active}
-            onReset={() => void assistant.recover()}
-            onManageMemory={(agentId) => {
-              setSheet(undefined);
-              navigation.dispatch(
-                openWorkspacePageAction("AgentDetail", { agentId }),
-              );
-            }}
-          />
-        ) : null}
-        {sheet === "details" ? (
-          <>
-            <ActionButton
-              label="Chat history"
-              variant="secondary"
-              onPress={() => setSheet("history")}
-            />
-            {assistant.conversationId ? (
-              <ActionButton
-                label="Working context"
-                variant="secondary"
-                onPress={() => setSheet("context")}
-              />
-            ) : null}
-            <Card>
-              <Label style={styles.cardTitle}>Agent</Label>
-              <Label>{agentName}</Label>
-              <Label muted>
-                {assistant.agent?.owner_kind === "org"
-                  ? (assistant.agent.owner_name ?? "Organization")
-                  : currentAgent?.kind === "specialist"
-                    ? "Personal specialist"
-                    : "Your personal assistant"}
-              </Label>
-            </Card>
-            <Card>
-              <Label style={styles.cardTitle}>Permissions</Label>
-              <Label>
-                {accessMode
-                  ? COMPOSER_ACCESS_LABEL[accessMode]
-                  : "Loading permissions…"}
-              </Label>
-              <Label muted>
-                {accessMode ? COMPOSER_ACCESS_DESCRIPTION[accessMode] : ""}
-              </Label>
-              {assistant.agent?.access_mode_override ? (
-                <Label muted>This agent’s override is read-only here.</Label>
-              ) : null}
-              <ActionButton
-                label="Change permissions"
-                variant="secondary"
-                disabled={permissionsLocked}
-                onPress={() => setSheet("permissions")}
-              />
-            </Card>
-            {currentAgent?.id ? (
-              <ActionButton
-                label="Agent details"
-                variant="secondary"
-                onPress={() => {
-                  setSheet(undefined);
-                  navigation.dispatch(
-                    openWorkspacePageAction("AgentDetail", {
-                      agentId: currentAgent.id,
-                    }),
-                  );
-                }}
-              />
-            ) : null}
-            {assistant.conversationId ? (
-              <View style={styles.detailActions}>
-                <Field
-                  label="Chat title"
-                  value={title}
-                  onChangeText={setTitle}
-                  maxLength={200}
-                  autoCapitalize="sentences"
-                />
-                <ActionButton
-                  label="Save title"
-                  loading={assistant.mutating}
-                  disabled={!title.trim()}
-                  onPress={() =>
-                    void perform(async () => {
-                      if (await assistant.rename(title)) setSheet(undefined);
-                    })
-                  }
-                />
-                <ActionButton
-                  label="Delete chat"
-                  variant="danger"
-                  disabled={assistant.mutating}
-                  onPress={() =>
-                    Alert.alert(
-                      "Delete this chat?",
-                      "This deletes its saved messages and permissions. Active work will be stopped.",
-                      [
-                        { text: "Cancel", style: "cancel" },
-                        {
-                          text: "Delete",
-                          style: "destructive",
-                          onPress: () => {
-                            setSheet(undefined);
-                            void assistant.remove().then((removed) => {
-                              if (removed)
-                                navigation.setParams(
-                                  newAssistantChatParams(assistant.agentId),
-                                );
-                              if (removed) updateDraft("");
-                            });
-                          },
-                        },
-                      ],
-                    )
-                  }
-                />
-              </View>
-            ) : null}
-          </>
         ) : null}
       </Sheet>
     </WorkspacePage>
@@ -1866,8 +1674,10 @@ function Sheet({
   onClose,
   children,
   scroll = true,
+  onDismiss,
 }: {
   scroll?: boolean;
+  onDismiss?: () => void;
   visible: boolean;
   title: string;
   onClose: () => void;
@@ -1881,6 +1691,7 @@ function Sheet({
       animationType={reducedMotion ? "none" : "slide"}
       presentationStyle="pageSheet"
       onRequestClose={onClose}
+      onDismiss={onDismiss}
     >
       <View style={[styles.sheet, { backgroundColor: colors.bg }]}>
         <View style={styles.sheetHeader}>
@@ -1924,9 +1735,6 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   row: { flexDirection: "row", alignItems: "center", gap: 8 },
   headerActions: { flexDirection: "row", alignItems: "center" },
-  actionLabel: { fontSize: 11, fontFamily: fonts.bodySemi },
-  currentChatBadge: { flexDirection: "row", alignItems: "center", gap: 4 },
-  detailActions: { gap: 14 },
   iconButton: {
     minWidth: 44,
     minHeight: 44,
@@ -1969,7 +1777,6 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   thinking: { alignSelf: "flex-start", marginVertical: 10 },
-  cardTitle: { fontFamily: fonts.bodySemi },
   composerInset: { paddingHorizontal: 12 },
   chatPage: { paddingHorizontal: 0, paddingTop: 0, paddingBottom: 4, gap: 8 },
   composer: { marginBottom: 0 },

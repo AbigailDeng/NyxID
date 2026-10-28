@@ -71,7 +71,12 @@ function composerButton(props: {
 }
 
 // Exercise enabled and unavailable server/runtime admission separately.
-function setup(conversationId?: string, enableVoiceForTest = true) {
+function setup(
+  conversationId?: string,
+  enableVoiceForTest = true,
+  platform = "ios",
+  reducedMotion = false,
+) {
   let onAdopt: ((id: string) => void) | undefined;
   let headerOptions: Record<string, any> = {};
   const headerModule = {};
@@ -192,7 +197,7 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
   };
   const harness = hookHarness<Element>({
     "../../lib/accessibility/useReducedMotion": {
-      useReducedMotion: () => false,
+      useReducedMotion: () => reducedMotion,
     },
     "./assistantDraftStore": {
       assistantDraftKey,
@@ -246,6 +251,7 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
           "View",
         ].map((name) => [name, name]),
       ),
+      Platform: { OS: platform },
       Alert: { alert: () => {} },
       Keyboard: { dismiss: () => events.push(["dismissKeyboard"]) },
       StyleSheet: { create: (value: unknown) => value },
@@ -256,7 +262,9 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
           events.push(["params", { ...params }]);
           Object.assign(props.route.params, params);
         },
-        dispatch: () => {},
+        dispatch: (action: unknown) => events.push(["dispatch", action]),
+        push: (name: string, params: unknown) =>
+          events.push(["push", name, params]),
         navigate: (name: string, params: unknown) =>
           events.push(["navigate", name, params]),
         goBack: () => {},
@@ -478,6 +486,12 @@ function setup(conversationId?: string, enableVoiceForTest = true) {
     all,
     button,
     header: () => expand(headerOptions.headerTitle()),
+    options: () => {
+      elements(expand(headerOptions.headerRight()))
+        .find((n) => n.props.accessibilityLabel === "Chat options")!
+        .props.onPress();
+      harness.flush();
+    },
     compose: () => {
       const actions = expand(headerOptions.headerRight());
       elements(actions)
@@ -1102,52 +1116,76 @@ test("home roster Chat reuses latest-thread navigation and crew navigation retai
   x.harness.unmount();
 });
 
-test("Choose agent uses the shared hierarchy and links the existing thread sheets", () => {
+test("Choose agent preserves its hierarchy and dismisses before pushing History or Details into main content", () => {
+  for (const [label, route] of [
+    ["History", "AssistantHistory"],
+    ["Details", "AssistantDetails"],
+  ]) {
+    const x = setup(A);
+    x.chooseAgent();
+    const hierarchy = x.all().find((n) => n.type === "WorkspaceChatList")!;
+    assert.equal(hierarchy.props.mode, "picker");
+    assert.equal(hierarchy.props.current.agentId, "agent-a");
+    assert.equal(hierarchy.props.current.conversationId, A);
+    const labels = x
+      .all()
+      .filter((n) => n.type === "Label")
+      .flatMap((n) => n.props.children.flat(Infinity));
+    assert.ok(labels.includes("This thread"));
+    assert.ok(labels.includes("Saved chat"));
+    assert.ok(labels.includes(12));
+    const button = x
+      .all()
+      .find((n) => n.type === "ActionButton" && n.props.label === label)!;
+    button.props.onPress();
+    button.props.onPress();
+    x.harness.flush();
+    assert.equal(
+      x.all().some((n) => n.type === "WorkspaceChatList"),
+      false,
+    );
+    assert.equal(
+      x.events.some((e) => e[0] === "push"),
+      false,
+    );
+    const modal = x.all().find((n) => n.type === "Modal")!;
+    assert.equal(modal.props.visible, false);
+    modal.props.onDismiss();
+    modal.props.onDismiss();
+    const pushed = x.events.filter((e) => e[0] === "push");
+    assert.equal(pushed.length, 1);
+    assert.equal(pushed[0]![1], route);
+    assert.equal((pushed[0]![2] as any).agentId, "agent-a");
+    if (label === "Details")
+      assert.equal((pushed[0]![2] as any).conversationId, A);
+    x.harness.unmount();
+  }
+});
+
+test("header Details uses the latest conversation even when header identity stays unchanged", () => {
+  const x = setup(A);
+  x.adopt(B);
+  x.options();
+  const pushed = x.events.find((e) => e[0] === "push")!;
+  assert.equal(pushed[1], "AssistantDetails");
+  assert.equal((pushed[2] as any).conversationId, B);
+  x.harness.unmount();
+});
+
+test("an account change while the picker dismisses cancels its queued content destination", () => {
   const x = setup(A);
   x.chooseAgent();
-  const hierarchy = x.all().find((node) => node.type === "WorkspaceChatList")!;
-  assert.equal(hierarchy.props.mode, "picker");
-  assert.equal(hierarchy.props.current.agentId, "agent-a");
-  assert.equal(hierarchy.props.current.conversationId, A);
-  const labels = x
-    .all()
-    .filter((node) => node.type === "Label")
-    .flatMap((node) => node.props.children.flat(Infinity));
-  assert.ok(labels.includes("This thread"));
-  assert.ok(labels.includes("Saved chat"));
-  assert.ok(labels.includes(12));
   x.all()
-    .find(
-      (node) => node.type === "ActionButton" && node.props.label === "History",
-    )!
+    .find((n) => n.type === "ActionButton" && n.props.label === "History")!
     .props.onPress();
   x.harness.flush();
+  x.setEpoch(8);
+  x.all()
+    .find((n) => n.type === "Modal")!
+    .props.onDismiss();
   assert.equal(
-    x.all().some((node) => node.type === "WorkspaceChatList"),
+    x.events.some((e) => e[0] === "push"),
     false,
-  );
-  assert.ok(
-    x
-      .all()
-      .some(
-        (node) =>
-          node.type === "ActionButton" && node.props.label === "New chat",
-      ),
-  );
-  x.chooseAgent();
-  x.all()
-    .find(
-      (node) => node.type === "ActionButton" && node.props.label === "Details",
-    )!
-    .props.onPress();
-  x.harness.flush();
-  assert.ok(
-    x
-      .all()
-      .some(
-        (node) =>
-          node.type === "Label" && node.props.children.includes("Permissions"),
-      ),
   );
   x.harness.unmount();
 });
@@ -1621,12 +1659,16 @@ test("History selection retains the source thread draft and restores the selecte
     .find((n) => n.type === "ActionButton" && n.props.label === "History")!
     .props.onPress();
   x.harness.flush();
+  assert.equal(x.input().props.value, "Original draft");
   x.all()
-    .find((n) =>
-      n.props.accessibilityLabel?.startsWith("Open chat Other chat"),
-    )!
-    .props.onPress();
-  x.harness.flush();
+    .find((n) => n.type === "Modal")!
+    .props.onDismiss();
+  const pushed = x.events.find((e) => e[0] === "push")!;
+  assert.equal(pushed[1], "AssistantHistory");
+  // The shared history browser selects the thread through a root chat action.
+  x.props.route.params = { home: false, conversationId: B, agentId: "agent-a" };
+  x.assistant.openConversation(B);
+  x.harness.render();
   assert.equal(x.input().props.value, "");
   assert.equal(x.props.route.params.home, false);
   x.input().props.onChangeText("Other draft");
@@ -1781,4 +1823,22 @@ test("Home header names the dashboard without calling it a new chat", () => {
     false,
   );
   x.harness.unmount();
+});
+
+test("Android picker destinations wait for the dismiss slide; reduced motion skips the delay", async () => {
+  for (const reduced of [false, true]) {
+    const x = setup(A, false, "android", reduced);
+    x.chooseAgent();
+    x.all()
+      .find((n) => n.type === "ActionButton" && n.props.label === "History")!
+      .props.onPress();
+    x.harness.flush();
+    assert.equal(
+      x.events.some((e) => e[0] === "push"),
+      false,
+    );
+    await new Promise((resolve) => setTimeout(resolve, reduced ? 10 : 380));
+    assert.equal(x.events.filter((e) => e[0] === "push").length, 1);
+    x.harness.unmount();
+  }
 });

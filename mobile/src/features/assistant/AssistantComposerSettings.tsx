@@ -24,6 +24,7 @@ type Props = {
   disabled: boolean;
   visible: boolean;
   onOpenChange: (open: boolean) => void;
+  hideTrigger?: boolean;
 };
 
 /** Owner permissions are separate from the human-only per-agent override editor. */
@@ -138,32 +139,34 @@ export function AssistantComposerSettings(props: Props) {
   }
   return (
     <>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Permissions: ${accessLabel}${props.agentOverride ? " (this agent)" : ""}`}
-        disabled={unavailable}
-        onPress={() => props.onOpenChange(true)}
-        style={{
-          minHeight: 44,
-          minWidth: 44,
-          maxWidth: 180,
-          flexShrink: 1,
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 4,
-          paddingHorizontal: 6,
-          opacity: unavailable ? 0.5 : 1,
-        }}
-      >
-        <Label
-          numberOfLines={1}
-          maxFontSizeMultiplier={1.3}
-          style={{ fontSize: 12, flexShrink: 1 }}
+      {!props.hideTrigger && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Permissions: ${accessLabel}${props.agentOverride ? " (this agent)" : ""}`}
+          disabled={unavailable}
+          onPress={() => props.onOpenChange(true)}
+          style={{
+            minHeight: 44,
+            minWidth: 44,
+            maxWidth: 180,
+            flexShrink: 1,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 4,
+            paddingHorizontal: 6,
+            opacity: unavailable ? 0.5 : 1,
+          }}
         >
-          {accessLabel}
-        </Label>
-        <ChevronDown size={12} color={colors.textSecondary} />
-      </Pressable>
+          <Label
+            numberOfLines={1}
+            maxFontSizeMultiplier={1.3}
+            style={{ fontSize: 12, flexShrink: 1 }}
+          >
+            {accessLabel}
+          </Label>
+          <ChevronDown size={12} color={colors.textSecondary} />
+        </Pressable>
+      )}
       <Modal
         visible={
           props.visible && availability.focused && availability.foreground

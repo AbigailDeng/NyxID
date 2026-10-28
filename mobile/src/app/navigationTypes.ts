@@ -30,8 +30,7 @@ export type WorkspaceParamList = {
   Agents: { tab?: "agents" | "groups" } | undefined;
   Activity: { challengeId?: string } | undefined;
   AccountSettings:
-    | { section?: "display" | "privacy" | "notifications" }
-    | undefined;
+    { section?: "display" | "privacy" | "notifications" } | undefined;
 };
 
 export type SkillPageParams = {
@@ -64,6 +63,9 @@ export type WorkspaceContentParamList = Omit<
 > & {
   AssistantContext: AssistantParams | undefined;
   GroupChat: { groupId: string };
+  AssistantDetails: { agentId?: string; conversationId?: string };
+  AssistantHistory: { agentId?: string } | undefined;
+  AssistantWorkingContext: { conversationId: string };
   WorkspaceSearch: undefined;
   WorkspaceRecents: { agentId?: string } | undefined;
   AgentCreate: undefined;
@@ -128,6 +130,9 @@ export const workspaceContentRouteNames: (keyof WorkspaceContentParamList)[] = [
   "Assistant",
   "AssistantContext",
   "GroupChat",
+  "AssistantDetails",
+  "AssistantHistory",
+  "AssistantWorkingContext",
   "Automations",
   "Agents",
   "Plugins",

@@ -118,7 +118,7 @@ function BrowseSearchField({
 export function WorkspaceRecentsScreen({
   navigation,
   route,
-}: ContentScreenProps<"WorkspaceRecents">) {
+}: ContentScreenProps<"WorkspaceRecents" | "AssistantHistory">) {
   const { colors } = useTheme();
   const [query, setQuery] = useState("");
   const [agentId, setAgentId] = useState(route.params?.agentId);
@@ -127,6 +127,7 @@ export function WorkspaceRecentsScreen({
     setQuery("");
   }, [route.params?.agentId]);
   const data = useBrowseData(agentId);
+  const history = route.name === "AssistantHistory";
   const rows = useMemo(
     () => filterWorkspaceRecents(data.rows, query, agentId),
     [data.rows, query, agentId],
@@ -160,12 +161,22 @@ export function WorkspaceRecentsScreen({
   ];
   return (
     <WorkspacePage
-      title="Recents"
+      title={history ? "Chat history" : "Recents"}
       showHeading={false}
       scroll={false}
       contentStyle={styles.page}
     >
       <View style={styles.toolbar}>
+        {history && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="New chat"
+            style={styles.more}
+            onPress={() => openChat({ kind: "agent", agentId: route.params?.agentId })}
+          >
+            <Text style={{ color: colors.textPrimary }}>New chat</Text>
+          </Pressable>
+        )}
         <BrowseSearchField
           label="Search chats"
           value={query}
