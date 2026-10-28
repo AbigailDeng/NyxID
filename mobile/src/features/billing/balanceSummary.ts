@@ -1,7 +1,7 @@
 import type { BillingAllowance, BillingGrant, BillingWallet } from "./billingContracts";
-import { billingDate, creditUnits, decimalCredits, formatCredits, formatQuantity } from "./credits";
+import { billingDate, creditUnits, decimalCredits, formatExactCredits, formatQuantity } from "./credits";
 
-export type BalanceRow = { key: string; label: string; value: string; unit?: string };
+export type BalanceRow = { key: string; label: string; value: string; exactValue?: string; unit?: string };
 const positive = (value: string | null | undefined) => value != null && creditUnits(value) > 0n;
 const maxZero = (value: bigint) => value > 0n ? value : 0n;
 const min = (a: bigint, b: bigint) => a < b ? a : b;
@@ -28,7 +28,7 @@ export function spendableGrant(grant: BillingGrant, now: number): bigint {
 export function balanceRows(wallet: BillingWallet, grants: BillingGrant[], allowances: BillingAllowance[], now: number): BalanceRow[] {
   const rows: BalanceRow[] = [];
   function credits(key: string, label: string, value: string | null) {
-    if (positive(value)) rows.push({ key, label, value: formatCredits(value) });
+    if (positive(value)) rows.push({ key, label, value: formatExactCredits(value!), exactValue: value! });
   }
   credits("limit", "Credit limit", wallet.overdraftCap);
   const pending = [wallet.reserved, wallet.pendingDebits].filter((value): value is string => value !== null);

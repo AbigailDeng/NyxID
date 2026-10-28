@@ -49,7 +49,8 @@ test("expiring-soon row contains only the earliest dated spendable credits, grou
     grant({ id: "expired", expires_at: "2026-10-27T00:00:00Z" }),
   ], [], now);
   const expiring = rows.find((row) => row.key === "expiring")!;
-  assert.equal(expiring.value, "20.246913578022");
+  assert.equal(expiring.value, "20.246914");
+  assert.equal(expiring.exactValue, "20.246913578022");
   assert.match(expiring.label, /Oct 30, 2026.*UTC/);
   assert.equal(rows.filter((row) => row.key === "expiring").length, 1);
   assert.equal(balanceRows(wallet, [grant({ expires_at: null })], [], now).some((row) => row.key === "expiring"), false);

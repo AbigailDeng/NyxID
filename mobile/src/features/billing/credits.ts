@@ -25,6 +25,47 @@ export function formatCredits(value: string | null | undefined): string {
   return `${whole!.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}${fraction ? `.${fraction}` : ""}`;
 }
 
+function creditLocale(locale?: string) {
+  // Hermes exposes neither formatToParts nor BigInt formatting. Fixed integer
+  // probes discover separators/group widths; money itself never enters Intl.
+  const formatter = new Intl.NumberFormat(locale, { numberingSystem: "latn", maximumFractionDigits: 0 });
+  const sample = formatter.format(1_234_567_890);
+  const groups = sample.split(/[^0-9]+/).filter(Boolean);
+  const separator = sample.match(/[^0-9]+/)?.[0] ?? "";
+  const primary = groups.at(-1)!.length;
+  const secondary = groups.at(-2)?.length ?? primary;
+  const minimum = /[^0-9]/.test(formatter.format(1_000)) ? 4 : 5;
+  const decimal = new Intl.NumberFormat(locale, { numberingSystem: "latn", useGrouping: false, minimumFractionDigits: 1, maximumFractionDigits: 1 })
+    .format(0).replace(/[0-9]/g, "");
+  return {
+    decimal,
+    group(whole: string) {
+      if (!separator || whole.length < minimum) return whole;
+      const pieces: string[] = [];
+      let end = whole.length;
+      let width = primary;
+      while (end > 0) {
+        pieces.unshift(whole.slice(Math.max(0, end - width), end));
+        end -= width;
+        width = secondary;
+      }
+      return pieces.join(separator);
+    },
+  };
+}
+
+/** Matches the web's six-decimal, half-away-from-zero credit display. */
+export function formatExactCredits(value: string, locale?: string): string {
+  const pico = creditUnits(value);
+  const magnitude = pico < 0n ? -pico : pico;
+  const step = 1_000_000n;
+  const syntax = creditLocale(locale);
+  if (magnitude > 0n && magnitude < step) return `${pico < 0n ? ">-" : "<"}0${syntax.decimal}000001`;
+  const rounded = ((magnitude + step / 2n) / step) * step;
+  const [whole, fraction] = decimalCredits(rounded).split(".");
+  return `${pico < 0n ? "-" : ""}${syntax.group(whole!)}${fraction ? syntax.decimal + fraction : ""}`;
+}
+
 export function sumCredits(values: readonly (string | null)[]): string | null {
   if (values.some((value) => value === null)) return null;
   return decimalCredits(values.reduce<bigint>((sum, value) => sum + creditUnits(value!), 0n));
