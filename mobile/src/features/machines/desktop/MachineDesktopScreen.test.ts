@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { URL, fileURLToPath } from 'node:url';
 import { deferred, hookHarness } from '../../assistant/assistantHookTestHarness';
+import type { ViewerState } from './viewer';
 
 type Element = { type: unknown; props: Record<string, any> };
 const elements = (root: Element): Element[] => [root, ...[root.props.children].flat(Infinity)
@@ -11,6 +12,9 @@ function setup() {
   let focused = true;
   let epoch = 0;
   let invalidate: (() => void) | undefined;
+  let viewerState: ((value: ViewerState) => void) | undefined;
+  let inputAccepted = true;
+  const inputs: unknown[] = [];
   const calls: string[] = [];
   const orientation = deferred<void>();
   const listeners: ((state:string)=>void)[] = [];
@@ -27,12 +31,12 @@ function setup() {
     '../../../lib/auth/sessionStore': {}, '../../../lib/api/http': {}, '../../../lib/env': {},
     './canvasDocument': {canvasDocument:()=>''},
     './compositor': {createCompositor:()=>({reset:()=>0,enqueue:()=>{},acknowledge:()=>true})},
-    './viewer': {refusalLabel:(e:Error)=>e.message,createDesktopViewer:(deps:{invalidated():void})=>{invalidate=deps.invalidated;return {start:()=>calls.push('start'),stop:()=>calls.push('stop'),refresh:()=>{},input:()=>{},fail:()=>{}};}},
+    './viewer': {refusalLabel:(e:Error)=>e.message,createDesktopViewer:(deps:{invalidated():void;state(value:ViewerState):void})=>{invalidate=deps.invalidated;viewerState=deps.state;return {start:()=>calls.push('start'),stop:()=>calls.push('stop'),refresh:()=>{},input:(value:unknown)=>{inputs.push(value);return inputAccepted;},fail:()=>{}};}},
   });
   const Screen=harness.load(fileURLToPath(new URL('./MachineDesktopScreen.tsx',import.meta.url))).MachineDesktopScreen as (p:unknown)=>Element;
   harness.mount(()=>Screen({route:{params:{nodeId:'node'}},navigation:{goBack:()=>calls.push('close')},privacyProtected:true}));
   const ready=()=>{elements(harness.value()).find(e=>e.type==='WebView')!.props.onMessage({nativeEvent:{data:'{"type":"ready"}'}});harness.flush();};
-  return {harness,calls,orientation,ready,invalidateAuth:()=>{epoch++;invalidate?.();},blur:()=>{focused=false;harness.render();},background:()=>{appState.currentState='background';listeners.forEach(fn=>fn('background'));harness.flush();}};
+  return {harness,calls,orientation,ready,inputs,rejectInput:()=>{inputAccepted=false;},acceptInput:()=>{inputAccepted=true;},state:(value:ViewerState)=>{viewerState?.(value);harness.flush();},invalidateAuth:()=>{epoch++;invalidate?.();},blur:()=>{focused=false;harness.render();},background:()=>{appState.currentState='background';listeners.forEach(fn=>fn('background'));harness.flush();}};
 }
 test('screen acquires landscape on mount and restores portrait with teardown on background/blur/unmount',async()=>{
   for(const exit of ['background','blur','unmount'] as const){
@@ -58,4 +62,31 @@ test('desktop has no browser fallback or purchase/navigation escape',()=>{
   for(const file of ['MachineDesktopScreen.tsx','viewer.ts','desktopRoutes.ts']){
     const source=readFileSync(new URL(file,import.meta.url),'utf8');assert.equal(source.includes(forbidden),false);assert.equal(source.includes('openBrowserAsync'),false);
   }
+});
+
+test('rejected text stays editable with feedback and only an accepted send clears it', async () => {
+  const f = setup();
+  f.orientation.resolve(); await f.harness.settle(); f.ready();
+  f.state({ phase: 'attention', controls: true, label: 'You are controlling this desktop' });
+  const button = (label: string) => elements(f.harness.value()).find(e => e.props.accessibilityLabel === label)!;
+  button('Keyboard').props.onPress(); f.harness.flush();
+  button('Desktop text to send').props.onChangeText('Keep this draft'); f.harness.flush();
+  f.rejectInput();
+  button('Send').props.onPress(); f.harness.flush();
+  assert.equal(button('Desktop text to send').props.value, 'Keep this draft');
+  assert.ok(elements(f.harness.value()).some(e => e.type === 'Text' && e.props.children === 'Check control and try again in a moment, or send a shorter message.'));
+  f.acceptInput();
+  button('Send').props.onPress(); f.harness.flush();
+  assert.equal(button('Desktop text to send').props.value, '');
+  assert.equal(f.inputs.length, 2);
+  assert.ok(elements(f.harness.value()).every(e => e.props.children !== 'Check control and try again in a moment, or send a shorter message.'));
+  button('Desktop text to send').props.onChangeText('Private draft'); f.harness.flush();
+  f.rejectInput(); button('Send').props.onPress(); f.harness.flush();
+  f.state({ phase: 'reconnecting', controls: false, label: 'Reconnecting to the desktop…' });
+  assert.ok(elements(f.harness.value()).every(e => e.props.accessibilityLabel !== 'Desktop text to send'));
+  f.state({ phase: 'attention', controls: true, label: 'You are controlling this desktop' });
+  button('Keyboard').props.onPress(); f.harness.flush();
+  assert.equal(button('Desktop text to send').props.value, '', 'losing control clears private text and never restores it for retry');
+  assert.equal(f.inputs.length, 3, 'reacquiring control never resends retained text');
+  f.harness.unmount();
 });

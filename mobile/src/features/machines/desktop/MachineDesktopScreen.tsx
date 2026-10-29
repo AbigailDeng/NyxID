@@ -40,6 +40,7 @@ export function MachineDesktopScreen({ route, navigation, privacyProtected = fal
   const [overlay, setOverlay] = useState(true);
   const [keyboard, setKeyboard] = useState(false);
   const [draft, setDraft] = useState('');
+  const [inputError, setInputError] = useState<string>();
   const viewerEpoch = useRef(-1);
   const viewer = useRef<ReturnType<typeof createDesktopViewer>>(undefined);
   const decodeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -51,7 +52,7 @@ export function MachineDesktopScreen({ route, navigation, privacyProtected = fal
     pendingRead.current?.abort(); pendingRead.current = undefined;
     clearTimeout(decodeTimer.current); decoding.current = undefined;
     privacyCover.current?.setNativeProps({ style: { opacity: 1 } });
-    setHasPixels(false); setKeyboard(false); setDraft(''); Keyboard.dismiss();
+    setHasPixels(false); setKeyboard(false); setDraft(''); setInputError(undefined); Keyboard.dismiss();
     const generation = compositor.current?.reset() ?? 0;
     webView.current?.injectJavaScript(`window.nyxDesktop?.clear(${generation});true;`);
   };
@@ -99,7 +100,7 @@ export function MachineDesktopScreen({ route, navigation, privacyProtected = fal
         if (!current()) return;
         setState(value);
         webView.current?.injectJavaScript(`window.nyxDesktop?.control(${value.controls === true});true;`);
-        if (!value.controls) { setKeyboard(false); setDraft(''); Keyboard.dismiss(); }
+        if (!value.controls) { setKeyboard(false); setDraft(''); setInputError(undefined); Keyboard.dismiss(); }
         revealOverlay();
       },
       invalidated: () => {
@@ -137,7 +138,11 @@ export function MachineDesktopScreen({ route, navigation, privacyProtected = fal
   </Pressable>;
   const sendText = () => {
     if (!draft) return;
-    viewer.current?.input({ tool: 'type_text', arguments: { text: draft } }); setDraft('');
+    if (viewer.current?.input({ tool: 'type_text', arguments: { text: draft } })) {
+      setDraft(''); setInputError(undefined);
+    } else {
+      setInputError('Check control and try again in a moment, or send a shorter message.');
+    }
   };
   const controlOptions = () => {
     if (!state.controls) return;
@@ -190,6 +195,7 @@ export function MachineDesktopScreen({ route, navigation, privacyProtected = fal
       {unavailable && <View style={styles.retryRow}>{button('Retry', () => { stop(); setReady(false); webView.current?.reload(); setState({ phase: 'connecting', label: 'Connecting to the desktop…' }); setRetry(value => value + 1); })}{button('Close desktop', close)}</View>}
     </View>}
     {keyboard && state.controls && <View style={[styles.keyboard, { bottom: Math.max(8, insets.bottom), left: Math.max(8, insets.left), right: Math.max(8, insets.right) }]}>
+      {inputError && <Text accessibilityLiveRegion="polite" style={styles.buttonText}>{inputError}</Text>}
       <View style={styles.keyRow}>
         {(['ENTER', 'TAB', 'BACKSPACE', 'ESC'] as const).map(key => button(key === 'BACKSPACE' ? '⌫' : key, () => viewer.current?.input({ tool: 'press_key', arguments: { key } })))}
         {button('Hide keyboard', () => { setKeyboard(false); Keyboard.dismiss(); })}
