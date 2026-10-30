@@ -7,7 +7,10 @@ import {
   type AssistantAgent,
 } from "../../features/agents/agentContracts";
 import { conversationSchema } from "../../features/assistant/assistantTypes";
-import { hookHarness } from "../../features/assistant/assistantHookTestHarness";
+import {
+  deferred,
+  hookHarness,
+} from "../../features/assistant/assistantHookTestHarness";
 import { groupSchema } from "../../features/groups/groupContracts";
 import { formatRelativeTimeFromMs } from "../../lib/time";
 import { lightColors } from "../../theme/mobileTheme";
@@ -109,12 +112,29 @@ type SetupOptions = {
   agent?: Partial<AssistantAgent>;
   online?: boolean;
   chats?: ReturnType<typeof chatsFor>;
+  agentError?: boolean;
+  refetchAgents?: () => Promise<unknown>;
 };
 
 function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
   const selections: WorkspaceChatTarget[] = [];
   const creations: string[] = [];
   const historyQueries: QueryOptions[] = [];
+  const agentRefreshes: unknown[] = [];
+  let epoch = 17;
+  let online = options.online !== false;
+  let onAppState: ((state: string) => void) | undefined;
+  const appState = {
+    currentState: "active",
+    addEventListener: (_: string, listener: (state: string) => void) => {
+      onAppState = listener;
+      return {
+        remove: () => {
+          onAppState = undefined;
+        },
+      };
+    },
+  };
   const liveAgents = agents.map((agent) => ({ ...agent }));
   const targetAgentId = current?.kind === "agent" ? current.agentId : undefined;
   if (targetAgentId && options.agent) {
@@ -148,14 +168,16 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     },
     "react-native": {
       ...Object.fromEntries(
-        ["ActivityIndicator", "Pressable", "ScrollView", "Text", "View"].map(
-          (name) => [name, name],
-        ),
+        [
+          "ActivityIndicator",
+          "Pressable",
+          "RefreshControl",
+          "ScrollView",
+          "Text",
+          "View",
+        ].map((name) => [name, name]),
       ),
-      AppState: {
-        currentState: "active",
-        addEventListener: () => ({ remove: () => {} }),
-      },
+      AppState: appState,
       StyleSheet: { create: (styles: unknown) => styles },
     },
     "lucide-react-native": Object.fromEntries(
@@ -167,15 +189,22 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
         "MessageSquare",
         "Users",
         "Plus",
+        "RefreshCw",
       ].map((name) => [name, name]),
     ),
     "@tanstack/react-query": {
       useQuery: ({ queryKey }: QueryOptions) => ({
         data: queryKey.includes("agents") ? { agents: liveAgents } : groups,
-        isSuccess: true,
+        isSuccess: !queryKey.includes("agents") || !options.agentError,
         isPending: false,
-        isError: false,
-        refetch: async () => {},
+        isFetching: false,
+        isError: queryKey.includes("agents") && !!options.agentError,
+        refetch: async (args: unknown) => {
+          if (queryKey.includes("agents")) {
+            agentRefreshes.push(args);
+            await options.refetchAgents?.();
+          }
+        },
       }),
       useInfiniteQuery: (options: QueryOptions) => {
         historyQueries.push(options);
@@ -214,12 +243,12 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
       livePollInterval: (value: number) => value,
     },
     "../../hooks/useNetworkStatus": {
-      useNetworkStatus: () => ({ isConnected: options.online !== false }),
+      useNetworkStatus: () => ({ isConnected: online }),
     },
     "../../lib/api/agentsApi": { agentsApi: {} },
     "../../lib/api/assistantApi": { assistantApi: {} },
     "../../lib/api/groupsApi": { groupsApi: {} },
-    "../../lib/auth/authEpoch": { getAuthEpoch: () => 17 },
+    "../../lib/auth/authEpoch": { getAuthEpoch: () => epoch },
     "../../theme/ThemeContext": { useTheme: () => ({ colors: lightColors }) },
     "../../theme/designTokens": { fonts: {} },
     "./WorkspaceChatBrowser": { WorkspaceChatBrowser: "WorkspaceChatBrowser" },
@@ -299,6 +328,7 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     },
     selections,
     creations,
+    agentRefreshes,
     all,
     label,
     press,
@@ -309,6 +339,23 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     groupRows,
     historyQuery,
     pressBrowserItem,
+    scroll: () => one((row) => row.type === "ScrollView"),
+    setVisible: (value: boolean) => {
+      props.visible = value;
+      harness.render();
+    },
+    setOnline: (value: boolean) => {
+      online = value;
+      harness.render();
+    },
+    setAppState: (value: string) => {
+      appState.currentState = value;
+      onAppState?.(value);
+      harness.flush();
+    },
+    changeAccount: () => {
+      epoch++;
+    },
     patchAgent: (id: string, patch: Partial<AssistantAgent>) => {
       const index = liveAgents.findIndex((row) => row.id === id);
       assert.ok(index >= 0);
@@ -317,6 +364,85 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     },
   };
 }
+
+test("agents can be refreshed from the section, pull gesture, and full browser without duplicate requests", async () => {
+  const pending = deferred<void>();
+  const env = setup(undefined, { refetchAgents: () => pending.promise });
+  const displayed = env.agentRows().map((row) => row.props.accessibilityLabel);
+  env.press("Refresh agents");
+  env.scroll().props.refreshControl.props.onRefresh();
+  assert.equal(env.agentRefreshes.length, 1);
+  assert.deepEqual(plain(env.agentRefreshes[0]), { cancelRefetch: false });
+  assert.equal(env.label("Refresh agents").props.accessibilityState.busy, true);
+  assert.equal(env.label("Refresh agents").props.disabled, true);
+  assert.equal(env.scroll().props.refreshControl.props.refreshing, true);
+  assert.deepEqual(
+    env.agentRows().map((row) => row.props.accessibilityLabel),
+    displayed,
+  );
+  env.more("View all agents (9)");
+  assert.equal(env.browser().refreshLabel, "Refresh agents");
+  assert.equal(env.browser().refreshing, true);
+  env.browser().onRefresh();
+  assert.equal(env.agentRefreshes.length, 1);
+  pending.resolve();
+  await env.harness.settle();
+  assert.equal(env.browser().refreshing, false);
+  env.browser().onRefresh();
+  await env.harness.settle();
+  assert.equal(env.agentRefreshes.length, 2);
+  env.harness.unmount();
+});
+
+test("refresh errors retain agents and expose retry in the full agent browser", async () => {
+  const options: SetupOptions = {};
+  const env = setup(undefined, options);
+  options.refetchAgents = async () => {
+    options.agentError = true;
+  };
+  env.more("View all agents (9)");
+  env.browser().onRefresh();
+  await env.harness.settle();
+  assert.equal(env.browser().items.length, 9);
+  const footer = elements(env.browser().footer);
+  assert.ok(
+    footer.some((row) => content(row).includes("Couldn’t refresh agents.")),
+  );
+  options.refetchAgents = async () => {
+    options.agentError = false;
+    env.patchAgent("agent-1", { display_name: "Freshly renamed" });
+  };
+  footer.find((row) => row.type === "Pressable")!.props.onPress();
+  await env.harness.settle();
+  assert.equal(
+    env.browser().items.find((row: { id: string }) => row.id === "agent-1")
+      .agent.display_name,
+    "Freshly renamed",
+  );
+  assert.equal(env.browser().footer, undefined);
+  env.harness.unmount();
+});
+
+test("saved refresh callbacks cannot request agents while hidden, offline, backgrounded, after account change, or unmounted", () => {
+  for (const transition of [
+    "hidden",
+    "offline",
+    "background",
+    "account",
+    "unmount",
+  ]) {
+    const env = setup();
+    const refresh = env.label("Refresh agents").props.onPress;
+    if (transition === "hidden") env.setVisible(false);
+    if (transition === "offline") env.setOnline(false);
+    if (transition === "background") env.setAppState("background");
+    if (transition === "account") env.changeAccount();
+    if (transition === "unmount") env.harness.unmount();
+    refresh();
+    assert.equal(env.agentRefreshes.length, 0, transition);
+    env.harness.unmount();
+  }
+});
 
 test("agent and group creation buttons stay separate from section disclosure", () => {
   const env = setup();

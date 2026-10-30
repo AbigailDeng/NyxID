@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   AppState,
   Pressable,
+  RefreshControl,
   ScrollView,
   type ScrollViewProps,
   StyleSheet,
@@ -21,6 +22,7 @@ import {
   ChevronRight,
   MessageSquare,
   Plus,
+  RefreshCw,
   Users,
 } from "lucide-react-native";
 import type { WorkspaceChatTarget } from "../../app/workspaceChatNavigation";
@@ -102,6 +104,10 @@ export function WorkspaceChatList({
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
   const active = visible && foreground && isConnected;
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const refreshLock = useRef(false);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
   const available = () =>
     visible &&
     AppState.currentState === "active" &&
@@ -117,7 +123,10 @@ export function WorkspaceChatList({
     const subscription = AppState.addEventListener("change", (state) =>
       setForeground(state === "active"),
     );
-    return () => subscription.remove();
+    return () => {
+      activeRef.current = false;
+      subscription.remove();
+    };
   }, []);
   useEffect(() => {
     if (!visible) {
@@ -134,6 +143,24 @@ export function WorkspaceChatList({
     refetchInterval: livePollInterval(5000, live),
     retry: false,
   });
+  const refreshingAgents = pullRefreshing || agents.isFetching;
+  const refreshAgents = async () => {
+    if (
+      refreshLock.current ||
+      !activeRef.current ||
+      AppState.currentState !== "active" ||
+      epoch !== getAuthEpoch()
+    )
+      return;
+    refreshLock.current = true;
+    setPullRefreshing(true);
+    try {
+      await agents.refetch({ cancelRefetch: false });
+    } finally {
+      refreshLock.current = false;
+      setPullRefreshing(false);
+    }
+  };
   const groups = useQuery({
     queryKey: [...groupKeys(epoch), "list"],
     queryFn: ({ signal }) => groupsApi.list(signal),
@@ -362,6 +389,9 @@ export function WorkspaceChatList({
         createLabel="New agent"
         onCreate={onCreateAgent}
         createDisabled={!active}
+        onRefresh={() => void refreshAgents()}
+        refreshing={refreshingAgents}
+        refreshDisabled={!active}
         onPress={() =>
           setSections((value) => ({ ...value, agents: !value.agents }))
         }
@@ -389,8 +419,10 @@ export function WorkspaceChatList({
         ) : null}
         {agents.isError ? (
           <DrawerMessage
-            text="Couldn’t load agents."
-            retry={() => void agents.refetch()}
+            text={
+              agents.data ? "Couldn’t refresh agents." : "Couldn’t load agents."
+            }
+            retry={() => void refreshAgents()}
             disabled={!active}
           />
         ) : null}
@@ -659,6 +691,18 @@ export function WorkspaceChatList({
     <View style={styles.fill}>
       <ScrollView
         {...scrollProps}
+        alwaysBounceVertical
+        refreshControl={
+          <RefreshControl
+            accessibilityLabel="Refresh agents"
+            enabled={active}
+            refreshing={pullRefreshing}
+            onRefresh={() => void refreshAgents()}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+            progressBackgroundColor={colors.card}
+          />
+        }
         stickyHeaderIndices={
           stickyIndex !== undefined && !pastThreads ? [stickyIndex] : []
         }
@@ -738,6 +782,12 @@ export function WorkspaceChatList({
             )
           }
           visible={!browserClosing}
+          onRefresh={
+            browser.kind === "agents" ? () => void refreshAgents() : undefined
+          }
+          refreshing={refreshingAgents}
+          refreshDisabled={!active}
+          refreshLabel="Refresh agents"
           onClose={() => dismissBrowser()}
           onDismiss={() => finishBrowserDismissal(browserClosing)}
           primaryAction={
@@ -778,7 +828,17 @@ export function WorkspaceChatList({
                           : "No chats yet. Start your first conversation above."
           }
           footer={
-            browser.kind === "chats" ? (
+            browser.kind === "agents" && agents.isError ? (
+              <DrawerMessage
+                text={
+                  agents.data
+                    ? "Couldn’t refresh agents."
+                    : "Couldn’t load agents."
+                }
+                retry={() => void refreshAgents()}
+                disabled={!active || refreshingAgents}
+              />
+            ) : browser.kind === "chats" ? (
               <>
                 {historyStatus}
                 {currentRow}
@@ -812,6 +872,9 @@ function SectionHeading({
   createLabel,
   onCreate,
   createDisabled,
+  onRefresh,
+  refreshing = false,
+  refreshDisabled = false,
 }: {
   label: string;
   count: number;
@@ -820,6 +883,9 @@ function SectionHeading({
   createLabel: string;
   onCreate: () => void;
   createDisabled: boolean;
+  onRefresh?: () => void;
+  refreshing?: boolean;
+  refreshDisabled?: boolean;
 }) {
   const { colors } = useTheme();
   const Chevron = expanded ? ChevronDown : ChevronRight;
@@ -843,6 +909,25 @@ function SectionHeading({
         </Text>
         <Chevron size={16} color={colors.textMuted} />
       </Pressable>
+      {onRefresh ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Refresh ${label.toLowerCase()}`}
+          accessibilityState={{
+            disabled: refreshDisabled || refreshing,
+            busy: refreshing,
+          }}
+          disabled={refreshDisabled || refreshing}
+          onPress={onRefresh}
+          style={[styles.createButton, { opacity: refreshDisabled ? 0.4 : 1 }]}
+        >
+          {refreshing ? (
+            <ActivityIndicator size="small" color={colors.textSecondary} />
+          ) : (
+            <RefreshCw size={18} color={colors.textSecondary} />
+          )}
+        </Pressable>
+      ) : null}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={createLabel}
