@@ -168,12 +168,13 @@ export function WorkspaceChatList({
     refetchInterval: livePollInterval(5000, live),
     retry: false,
   });
-  const allAgents = (
+  const indexedAgents = (
     mode === "drawer" ? sidebarOrderedAgents : orderedDrawerAgents
-  )(agents.data?.agents ?? []).filter(
+  )(agents.data?.agents ?? []);
+  const allAgents = indexedAgents.filter(
     (agent) =>
-      mode !== "picker" ||
-      (agent.status !== "destroyed" && agent.can_use === true),
+      agent.status !== "destroyed" &&
+      (mode !== "picker" || agent.can_use === true),
   );
   const allGroups = [...(groups.data ?? [])].sort((a, b) =>
     (b.last_message_at || b.created_at).localeCompare(
@@ -183,7 +184,11 @@ export function WorkspaceChatList({
   const currentAgentId =
     current?.kind === "agent" ? current.agentId : undefined;
   const openId = expandedAgent !== undefined ? expandedAgent : currentAgentId;
-  const agent = allAgents.find((row) => row.id === openId);
+  // Retain historical context for an open chat/browser without adding deleted
+  // agents back to the current roster or its count.
+  const agent = (mode === "drawer" ? indexedAgents : allAgents).find(
+    (row) => row.id === openId,
+  );
   useEffect(() => {
     sticky.current.bottom = Infinity;
     setPastThreads(false);
@@ -401,10 +406,12 @@ export function WorkspaceChatList({
   if (sections.agents || mode === "picker") {
     rows.push(
       <View key="agent-status">
-        {current?.kind === "agent" &&
+        {mode === "drawer" &&
+        current?.kind === "agent" &&
         current.conversationId &&
-        !current.agentId &&
-        !chats.some((row) => row.id === current.conversationId) ? (
+        (current.agentId
+          ? !allAgents.some((row) => row.id === current.agentId)
+          : !chats.some((row) => row.id === current.conversationId)) ? (
           <ChatRow
             label="Current chat"
             selected

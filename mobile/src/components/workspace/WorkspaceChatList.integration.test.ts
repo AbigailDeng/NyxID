@@ -711,17 +711,18 @@ test("the agent-history browser keeps New chat separate from its saved history",
   }
 });
 
-test("past and view-only agents explain chat unavailability and offer another agent", () => {
+test("a browser already open for an agent that becomes unavailable offers another agent", () => {
   for (const unavailable of [
     { status: "destroyed" as const },
     { can_use: false },
   ]) {
     const env = setup(
       { kind: "agent", agentId: "agent-1" },
-      { agent: unavailable, history: "empty" },
+      { history: "empty" },
     );
     env.more("View all agents (9)");
     env.pressBrowserItem("agent-1");
+    env.patchAgent("agent-1", unavailable);
     const model = env.browser();
     assert.match(
       `${model.description} ${model.emptyText}`,
@@ -740,26 +741,120 @@ test("past and view-only agents explain chat unavailability and offer another ag
   }
 });
 
-test("a destroyed agent retains readable saved conversations without offering a new one", () => {
-  const env = setup(
-    { kind: "agent", agentId: "agent-1" },
-    { agent: { status: "destroyed" } },
-  );
+test("an agent deleted while browsing retains readable saved conversations without returning to the roster", () => {
+  const env = setup({ kind: "agent", agentId: "agent-1" });
+  env.more("View all agents (9)");
+  env.pressBrowserItem("agent-1");
+  env.patchAgent("agent-1", { status: "destroyed" });
   assert.equal(env.historyQuery().enabled, true);
+  assert.equal(
+    env
+      .agentRows()
+      .some((row) => /chats for Agent 1,/.test(row.props.accessibilityLabel)),
+    false,
+  );
   assert.equal(
     env
       .all()
       .some((row) => row.props.accessibilityLabel === "New chat with Agent 1"),
     false,
   );
-  env.more("View all agents (9)");
-  env.pressBrowserItem("agent-1");
   assert.equal(env.browser().primaryAction.label, "Choose another agent");
   const saved = chatsFor("agent-1")[0]!;
   env.pressBrowserItem(saved.id);
   assert.deepEqual(env.selections, [
     { kind: "agent", agentId: "agent-1", conversationId: saved.id },
   ]);
+  env.harness.unmount();
+});
+
+test("deleted agents stay out of the sidebar count and full roster while the current saved chat remains reachable", async () => {
+  const current = {
+    kind: "agent" as const,
+    agentId: "agent-1",
+    conversationId: chatsFor("agent-1")[0]!.id,
+  };
+  const options: SetupOptions = { agent: { status: "destroyed" } };
+  const env = setup(current, options);
+  env.patchAgent("agent-2", { status: "destroyed" });
+  assert.equal(content(env.label("Collapse agents")), "Agents7");
+  assert.equal(
+    env
+      .agentRows()
+      .some((row) =>
+        /chats for Agent [12],/.test(row.props.accessibilityLabel),
+      ),
+    false,
+  );
+  env.press("Open current chat");
+  assert.deepEqual(env.selections, [current]);
+  env.more("View all agents (7)");
+  assert.equal(env.browser().items.length, 7);
+  assert.equal(
+    env
+      .browser()
+      .items.some((row: { id: string }) =>
+        ["agent-1", "agent-2"].includes(row.id),
+      ),
+    false,
+  );
+  options.refetchAgents = async () =>
+    env.patchAgent("agent-3", { status: "destroyed" });
+  env.browser().onRefresh();
+  await env.harness.settle();
+  assert.equal(content(env.label("Collapse agents")), "Agents6");
+  assert.equal(env.browser().items.length, 6);
+  assert.equal(
+    env.browser().items.some((row: { id: string }) => row.id === "agent-3"),
+    false,
+  );
+  env.harness.unmount();
+});
+
+test("the picker offers no current-chat fallback for deleted or view-only agents", () => {
+  for (const unavailable of [
+    { status: "destroyed" as const },
+    { can_use: false },
+  ]) {
+    const env = setup(
+      {
+        kind: "agent",
+        agentId: "agent-1",
+        conversationId: chatsFor("agent-1")[0]!.id,
+      },
+      { mode: "picker", agent: unavailable },
+    );
+    assert.equal(
+      env
+        .all()
+        .some((row) => row.props.accessibilityLabel === "Open current chat"),
+      false,
+    );
+    assert.equal(
+      env
+        .agentRows()
+        .some((row) => /chats for Agent 1,/.test(row.props.accessibilityLabel)),
+      false,
+    );
+    env.harness.unmount();
+  }
+});
+
+test("a roster containing only deleted agents shows an empty state and no deleted choices", () => {
+  const env = setup();
+  for (const row of agents) env.patchAgent(row.id, { status: "destroyed" });
+  assert.equal(content(env.label("Collapse agents")), "Agents0");
+  assert.equal(env.agentRows().length, 0);
+  assert.ok(env.all().some((row) => content(row) === "No agents yet."));
+  assert.equal(
+    env
+      .all()
+      .some(
+        (row) =>
+          row.type === "Pressable" && /^View all agents/.test(content(row)),
+      ),
+    false,
+  );
   env.harness.unmount();
 });
 

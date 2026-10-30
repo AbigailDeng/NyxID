@@ -74,8 +74,6 @@ export function sidebarOrderedAgents(agents: readonly AssistantAgent[]) {
       );
     }
     if (a.kind !== b.kind) return a.kind === "nyxbot" ? -1 : 1;
-    if ((a.status === "destroyed") !== (b.status === "destroyed"))
-      return a.status === "destroyed" ? 1 : -1;
     return (a.display_name || a.name).localeCompare(b.display_name || b.name);
   });
 }
