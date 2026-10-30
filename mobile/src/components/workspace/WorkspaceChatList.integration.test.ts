@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import type { WorkspaceChatTarget } from "../../app/workspaceChatNavigation";
 import {
   agentSchema,
@@ -18,7 +19,12 @@ import { sidebarSectionTitle } from "./workspaceSidebarStyles";
 import * as listHelpers from "./workspaceChatListModel";
 
 type Element = { type: unknown; props: Record<string, any> };
-type QueryOptions = { queryKey: unknown[]; enabled: boolean };
+type QueryOptions = {
+  queryKey: unknown[];
+  enabled: boolean;
+  staleTime?: number;
+  refetchInterval?: number | false;
+};
 const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const conversationId = (value: number) =>
   `nyxa-${value.toString(16).padStart(32, "0")}`;
@@ -114,12 +120,14 @@ type SetupOptions = {
   chats?: ReturnType<typeof chatsFor>;
   agentError?: boolean;
   refetchAgents?: () => Promise<unknown>;
+  live?: boolean;
 };
 
 function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
   const selections: WorkspaceChatTarget[] = [];
   const creations: string[] = [];
   const historyQueries: QueryOptions[] = [];
+  const agentQueries: QueryOptions[] = [];
   const agentRefreshes: unknown[] = [];
   let epoch = 17;
   let online = options.online !== false;
@@ -193,19 +201,23 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
       ].map((name) => [name, name]),
     ),
     "@tanstack/react-query": {
-      useQuery: ({ queryKey }: QueryOptions) => ({
-        data: queryKey.includes("agents") ? { agents: liveAgents } : groups,
-        isSuccess: !queryKey.includes("agents") || !options.agentError,
-        isPending: false,
-        isFetching: false,
-        isError: queryKey.includes("agents") && !!options.agentError,
-        refetch: async (args: unknown) => {
-          if (queryKey.includes("agents")) {
-            agentRefreshes.push(args);
-            await options.refetchAgents?.();
-          }
-        },
-      }),
+      useQuery: (query: QueryOptions) => {
+        const { queryKey } = query;
+        if (queryKey.includes("agents")) agentQueries.push(query);
+        return {
+          data: queryKey.includes("agents") ? { agents: liveAgents } : groups,
+          isSuccess: !queryKey.includes("agents") || !options.agentError,
+          isPending: false,
+          isFetching: false,
+          isError: queryKey.includes("agents") && !!options.agentError,
+          refetch: async (args: unknown) => {
+            if (queryKey.includes("agents")) {
+              agentRefreshes.push(args);
+              await options.refetchAgents?.();
+            }
+          },
+        };
+      },
       useInfiniteQuery: (options: QueryOptions) => {
         historyQueries.push(options);
         const agentId = options.queryKey.at(-1);
@@ -238,7 +250,9 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
       },
     },
     "../../lib/time": { formatRelativeTimeFromMs },
-    "../../features/groups/useGroupsLive": { useGroupsLive: () => false },
+    "../../features/groups/useGroupsLive": {
+      useGroupsLive: () => options.live ?? false,
+    },
     "../../lib/api/assistantLiveTransport": {
       livePollInterval: (value: number) => value,
     },
@@ -338,6 +352,10 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     chatRows,
     groupRows,
     historyQuery,
+    agentQuery: () => {
+      harness.flush();
+      return agentQueries.at(-1)!;
+    },
     pressBrowserItem,
     scroll: () => one((row) => row.type === "ScrollView"),
     setVisible: (value: boolean) => {
@@ -364,6 +382,59 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     },
   };
 }
+
+test("cached agents refresh immediately on reopen, foreground and reconnect with a thirty-second polling fallback", async () => {
+  for (const live of [false, true]) {
+    const env = setup(undefined, { live });
+    // Use the screen's actual query policy with a real cache/observer. A fresh
+    // cache must not postpone synchronization when this native view resumes.
+    const client = new QueryClient({
+      defaultOptions: { queries: { staleTime: 60_000, gcTime: Infinity } },
+    });
+    let requests = 0;
+    const queryOptions = () => ({
+      ...env.agentQuery(),
+      queryKey: plain(env.agentQuery().queryKey),
+      queryFn: async () => ++requests,
+    });
+    client.setQueryData(queryOptions().queryKey, 0);
+    const observer = new QueryObserver(client, queryOptions());
+    const release = observer.subscribe(() => {});
+    try {
+      await observer.getCurrentQuery().promise;
+      assert.equal(requests, 1);
+      assert.equal(queryOptions().refetchInterval, 30_000);
+      for (const [pause, resume] of [
+        [() => env.setVisible(false), () => env.setVisible(true)],
+        [() => env.setAppState("background"), () => env.setAppState("active")],
+        [() => env.setOnline(false), () => env.setOnline(true)],
+      ]) {
+        const before = requests;
+        pause!();
+        observer.setOptions(queryOptions());
+        assert.equal(queryOptions().enabled, false);
+        assert.equal(queryOptions().refetchInterval, false);
+        await client.invalidateQueries({ queryKey: ["workspace", "agents"] });
+        assert.equal(requests, before);
+
+        // Even cache data updated while paused must be checked on resuming.
+        client.setQueryData(queryOptions().queryKey, before);
+        resume!();
+        observer.setOptions(queryOptions());
+        await observer.getCurrentQuery().promise;
+        assert.equal(requests, before + 1);
+        assert.equal(queryOptions().refetchInterval, 30_000);
+      }
+      const beforeEvent = requests;
+      await client.invalidateQueries({ queryKey: ["workspace", "agents"] });
+      assert.equal(requests, beforeEvent + 1);
+    } finally {
+      release();
+      client.clear();
+      env.harness.unmount();
+    }
+  }
+});
 
 test("agents can be refreshed from the section, pull gesture, and full browser without duplicate requests", async () => {
   const pending = deferred<void>();

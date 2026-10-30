@@ -140,7 +140,10 @@ export function WorkspaceChatList({
     queryKey: ["workspace", "agents", "drawer", epoch],
     queryFn: ({ signal }) => agentsApi.list(signal),
     enabled: active,
-    refetchInterval: livePollInterval(5000, live),
+    // Reopening/resuming enables a stale read immediately; events and manual
+    // refresh can update it sooner than this foreground fallback interval.
+    staleTime: 0,
+    refetchInterval: active ? 30_000 : false,
     retry: false,
   });
   const refreshingAgents = pullRefreshing || agents.isFetching;
