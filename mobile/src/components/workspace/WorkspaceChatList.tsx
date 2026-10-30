@@ -383,13 +383,26 @@ export function WorkspaceChatList({
       onPress={() => openChat(selectedChatId)}
     />
   ) : null;
+  const previewAgents = boundedDrawerPreview(
+    allAgents,
+    openId || currentAgentId,
+  );
+  const ownerCounts = new Map<string, { total: number; shown: number }>();
+  for (const row of allAgents) {
+    const key = sidebarAgentOwner(row).key;
+    const counts = ownerCounts.get(key) ?? { total: 0, shown: 0 };
+    counts.total += 1;
+    ownerCounts.set(key, counts);
+  }
+  for (const row of previewAgents)
+    ownerCounts.get(sidebarAgentOwner(row).key)!.shown += 1;
   const rows: ReactNode[] = [<View key="workspace">{scrollHeader}</View>];
   if (mode === "drawer")
     rows.push(
       <SectionHeading
         key="agents"
         label="Agents"
-        count={allAgents.length}
+        count={`${allAgents.length} total`}
         expanded={sections.agents}
         createLabel="New agent"
         onCreate={onCreateAgent}
@@ -439,20 +452,22 @@ export function WorkspaceChatList({
       </View>,
     );
     let previousOwner: string | undefined;
-    for (const row of boundedDrawerPreview(
-      allAgents,
-      openId || currentAgentId,
-    )) {
+    for (const row of previewAgents) {
       if (mode === "drawer") {
         const owner = sidebarAgentOwner(row);
+        const counts = ownerCounts.get(owner.key)!;
         if (owner.key !== previousOwner)
           rows.push(
             <Text
               key={`owner:${owner.key}`}
               accessibilityRole="header"
+              accessibilityLabel={`${owner.label}, ${counts.shown} of ${counts.total} agents shown`}
               style={[styles.ownerHeading, { color: colors.textMuted }]}
             >
-              {owner.label}
+              {owner.label} ·{" "}
+              {counts.shown === counts.total
+                ? counts.total
+                : `${counts.shown} of ${counts.total}`}
             </Text>,
           );
         previousOwner = owner.key;
@@ -884,7 +899,7 @@ function SectionHeading({
   refreshDisabled = false,
 }: {
   label: string;
-  count: number;
+  count: number | string;
   expanded: boolean;
   onPress: () => void;
   createLabel: string;
@@ -902,6 +917,7 @@ function SectionHeading({
         accessibilityRole="button"
         accessibilityLabel={`${expanded ? "Collapse" : "Expand"} ${label.toLowerCase()}`}
         accessibilityState={{ expanded }}
+        accessibilityValue={{ text: String(count) }}
         onPress={onPress}
         style={styles.sectionRow}
       >

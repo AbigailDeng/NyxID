@@ -777,7 +777,7 @@ test("deleted agents stay out of the sidebar count and full roster while the cur
   const options: SetupOptions = { agent: { status: "destroyed" } };
   const env = setup(current, options);
   env.patchAgent("agent-2", { status: "destroyed" });
-  assert.equal(content(env.label("Collapse agents")), "Agents7");
+  assert.equal(content(env.label("Collapse agents")), "Agents7 total");
   assert.equal(
     env
       .agentRows()
@@ -802,7 +802,7 @@ test("deleted agents stay out of the sidebar count and full roster while the cur
     env.patchAgent("agent-3", { status: "destroyed" });
   env.browser().onRefresh();
   await env.harness.settle();
-  assert.equal(content(env.label("Collapse agents")), "Agents6");
+  assert.equal(content(env.label("Collapse agents")), "Agents6 total");
   assert.equal(env.browser().items.length, 6);
   assert.equal(
     env.browser().items.some((row: { id: string }) => row.id === "agent-3"),
@@ -843,7 +843,7 @@ test("the picker offers no current-chat fallback for deleted or view-only agents
 test("a roster containing only deleted agents shows an empty state and no deleted choices", () => {
   const env = setup();
   for (const row of agents) env.patchAgent(row.id, { status: "destroyed" });
-  assert.equal(content(env.label("Collapse agents")), "Agents0");
+  assert.equal(content(env.label("Collapse agents")), "Agents0 total");
   assert.equal(env.agentRows().length, 0);
   assert.ok(env.all().some((row) => content(row) === "No agents yet."));
   assert.equal(
@@ -1190,6 +1190,53 @@ test("agent picker reuses the thread hierarchy without crew or creation sections
   env.harness.unmount();
 });
 
+test("sidebar counts distinguish the full roster, owner totals, and truncated preview after deletion", () => {
+  const env = setup();
+  for (const id of ["agent-3", "agent-4", "agent-5"])
+    env.patchAgent(id, {
+      owner_kind: "org",
+      owner_id: "chrono",
+      owner_name: "ChronoAI",
+    });
+  for (const id of ["agent-6", "agent-7", "agent-8"])
+    env.patchAgent(id, { status: "destroyed" });
+
+  assert.equal(content(env.label("Collapse agents")), "Agents6 total");
+  assert.equal(
+    env.label("Collapse agents").props.accessibilityValue.text,
+    "6 total",
+  );
+  assert.equal(
+    content(env.label("Personal, 3 of 3 agents shown")),
+    "Personal · 3",
+  );
+  assert.equal(
+    content(env.label("ChronoAI, 2 of 3 agents shown")),
+    "ChronoAI · 2 of 3",
+  );
+  assert.equal(env.agentRows().length, 5);
+  env.more("View all agents (6)");
+  assert.equal(env.browser().items.length, 6);
+
+  env.patchAgent("agent-5", { status: "destroyed" });
+  assert.equal(content(env.label("Collapse agents")), "Agents5 total");
+  assert.equal(
+    content(env.label("ChronoAI, 2 of 2 agents shown")),
+    "ChronoAI · 2",
+  );
+  assert.equal(env.agentRows().length, 5);
+  assert.equal(env.browser().items.length, 5);
+  env.press("Collapse agents");
+  assert.equal(content(env.label("Expand agents")), "Agents5 total");
+  assert.equal(
+    env
+      .all()
+      .some((row) => row.props.accessibilityLabel?.includes("agents shown")),
+    false,
+  );
+  env.harness.unmount();
+});
+
 test("sidebar owner sections and real channel badges keep personal agents before organizations", () => {
   const env = setup(
     { kind: "agent", agentId: "agent-7" },
@@ -1213,7 +1260,10 @@ test("sidebar owner sections and real channel badges keep personal agents before
     .all()
     .filter((row) => row.type === "Text")
     .map(content);
-  assert.ok(texts.indexOf("Personal") < texts.indexOf("Product team"));
+  assert.deepEqual(
+    texts.filter((text) => /^(Personal|Product team) · /.test(text)),
+    ["Personal · 4 of 8", "Product team · 1"],
+  );
   assert.ok(texts.includes("Telegram"));
   assert.ok(
     env
