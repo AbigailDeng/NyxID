@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Platform, Switch } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { AppState, Platform, Switch } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import {
   ActionButton,
@@ -47,6 +47,7 @@ export function SavedLoginEditor({
   const [acknowledged, setAcknowledged] = useState(!login);
   const [privacyReady, setPrivacyReady] = useState(false);
   const [privacyError, setPrivacyError] = useState(false);
+  const submitting = useRef(false);
   useEffect(() => {
     let mounted = true;
     let privacy: DesktopPrivacy | undefined;
@@ -88,6 +89,14 @@ export function SavedLoginEditor({
     if (!write.active) clear();
   }, [write.active]);
   useEffect(() => {
+    // Native lifecycle events can be batched into one active render. Clear on
+    // the event itself so returning cannot retain the pre-background secrets.
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state !== "active") clear();
+    });
+    return () => subscription.remove();
+  }, []);
+  useEffect(() => {
     if (write.uncertain) onUncertain();
   }, [write.uncertain]);
   const owner =
@@ -100,7 +109,7 @@ export function SavedLoginEditor({
   const enabled =
     privacyReady && write.active && !!owner && !write.busy && !write.uncertain;
   async function submit() {
-    if (!enabled || !acknowledged) return;
+    if (submitting.current || !enabled || !acknowledged) return;
     const parsed = savedLoginInputSchema.safeParse({
       label,
       allowed_origins: origins
@@ -118,6 +127,9 @@ export function SavedLoginEditor({
       );
       return;
     }
+    // Own the parent lock for the whole submit, including any run admission
+    // refusal. A queued press must not release another submit's pending lock.
+    submitting.current = true;
     setValidation(undefined);
     clear();
     onBusy(true);
@@ -133,6 +145,7 @@ export function SavedLoginEditor({
       parsed.data.username = "";
       parsed.data.password = "";
       parsed.data.totp_secret = "";
+      submitting.current = false;
       onBusy(false);
     }
   }

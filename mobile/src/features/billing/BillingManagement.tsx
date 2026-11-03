@@ -80,8 +80,6 @@ export function BillingManagementContents({
   const [ownerId, setOwnerId] = useState<string | undefined>(
     () => z.string().uuid().safeParse(initialOwnerId).data,
   );
-  const currentOwner = useRef(ownerId);
-  currentOwner.current = ownerId;
   const [page, setPage] = useState(1);
   const [topupPage, setTopupPage] = useState(1);
   const [amount, setAmount] = useState("100");
@@ -106,23 +104,55 @@ export function BillingManagementContents({
       : undefined;
   // A removed membership cannot keep an old owner selection active.
   const authorized = !ownerId || !!selectedOrg;
+  const mayReadBills = !ownerId || selectedOrg?.your_role === "admin";
   const enabled = write.active && visible && available && authorized;
   const bill = useQuery({
     queryKey: [...root, ownerId ?? "personal", "bill"],
     queryFn: ({ signal }) => api.bill(ownerId, signal),
-    enabled,
+    enabled: enabled && mayReadBills,
     retry: false,
   });
   const invoices = useQuery({
     queryKey: [...root, ownerId ?? "personal", "invoices", page],
     queryFn: ({ signal }) => api.invoices(page, ownerId, signal),
-    enabled,
+    enabled: enabled && mayReadBills,
     retry: false,
   });
   const topups = useQuery({
     queryKey: [...root, "personal", "topups", topupPage],
     queryFn: ({ signal }) => api.topups(topupPage, signal),
     enabled: enabled && !ownerId && hasWallet,
+    retry: false,
+  });
+  const paymentReadEnabled = enabled && !ownerId && hasWallet;
+  const paymentContext = useRef({
+    ownerId,
+    enabled: paymentReadEnabled,
+    generation: 0,
+  });
+  if (
+    paymentContext.current.ownerId !== ownerId ||
+    paymentContext.current.enabled !== paymentReadEnabled
+  )
+    paymentContext.current = {
+      ownerId,
+      enabled: paymentReadEnabled,
+      generation: paymentContext.current.generation + 1,
+    };
+  const paymentReview = useQuery({
+    queryKey: [...root, "personal", "payment-review"],
+    queryFn: ({ signal }) => {
+      const generation = paymentContext.current.generation;
+      const lifecycleCurrent = write.captureWriteGuard();
+      return api.paymentReview(
+        () =>
+          lifecycleCurrent() &&
+          paymentContext.current.enabled &&
+          paymentContext.current.generation === generation,
+        signal,
+      );
+    },
+    enabled: paymentReadEnabled,
     retry: false,
   });
   const grants = useQuery({
@@ -137,6 +167,101 @@ export function BillingManagementContents({
     enabled: enabled && !!ownerId,
     retry: false,
   });
+  // Changes revoke an in-flight receipt even if the user later returns to the
+  // same owner/page. A late signed URL must not revive an abandoned action.
+  const receiptInputs = [
+    ownerId,
+    visible,
+    available,
+    write.active,
+    page,
+    topupPage,
+    selectedOrg?.your_role,
+    orgs.isError,
+    orgs.isFetching,
+    invoices.data,
+    invoices.isError,
+    invoices.isFetching,
+    topups.data,
+    topups.isError,
+    topups.isFetching,
+  ];
+  const receiptContext = useRef({ inputs: receiptInputs, generation: 0 });
+  if (
+    !receiptContext.current.inputs.every((value, index) =>
+      Object.is(value, receiptInputs[index]),
+    )
+  )
+    receiptContext.current = {
+      inputs: receiptInputs,
+      generation: receiptContext.current.generation + 1,
+    };
+  const receiptAllowed = (id: string, source: "invoice" | "topup") =>
+    visible &&
+    available &&
+    write.interactive() &&
+    authorized &&
+    mayReadBills &&
+    (!ownerId ||
+      (!orgs.isError && !orgs.isFetching && orgs.data?.kind === "ready")) &&
+    (source === "invoice"
+      ? invoices.isSuccess &&
+        !invoices.isError &&
+        !invoices.isFetching &&
+        invoices.data?.invoices.some((row) => row.id === id) === true
+      : !ownerId &&
+        hasWallet &&
+        topups.isSuccess &&
+        !topups.isError &&
+        !topups.isFetching &&
+        topups.data?.topups.some(
+          (row) => row.receipt_available && row.lago_invoice_id === id,
+        ) === true);
+  const liveReceiptAllowed = useRef(receiptAllowed);
+  liveReceiptAllowed.current = receiptAllowed;
+  const paymentStatusVerified =
+    paymentReview.isSuccess &&
+    !paymentReview.isError &&
+    !paymentReview.isFetching;
+  const pendingServerPayment = paymentReview.data?.status === "pending";
+  const newPaymentAllowed =
+    paymentReadEnabled &&
+    paymentStatusVerified &&
+    paymentReview.data?.status === "clear";
+  const mayOpenNewWebPayment =
+    !attempt && !write.uncertain && newPaymentAllowed;
+  const checkoutAuthority =
+    visible &&
+    available &&
+    hasWallet &&
+    !ownerId &&
+    !write.uncertain &&
+    write.interactive() &&
+    paymentStatusVerified &&
+    (!!attempt || paymentReview.data?.status === "clear") &&
+    Number.isSafeInteger(Number(amount)) &&
+    Number(amount) > 0 &&
+    Number(amount) <= 10_000_000;
+  const checkoutAllowed = checkoutAuthority && !write.busy && !browserBusy;
+  const livePayment = useRef({
+    checkoutAllowed,
+    checkoutAuthority,
+    newPaymentAllowed,
+    mayOpenNewWebPayment,
+  });
+  livePayment.current = {
+    checkoutAllowed,
+    checkoutAuthority,
+    newPaymentAllowed,
+    mayOpenNewWebPayment,
+  };
+  function selectOwner(nextOwner: string | undefined) {
+    // Invalidate synchronously, before React commits the owner selection.
+    receiptContext.current.generation++;
+    if (nextOwner !== ownerId) paymentContext.current.generation++;
+    setOwnerId(nextOwner);
+    setPage(1);
+  }
   async function refresh() {
     await Promise.allSettled([
       client.invalidateQueries({
@@ -146,20 +271,28 @@ export function BillingManagementContents({
     ]);
   }
   async function review() {
-    const [billResult, invoiceResult, orgResult, topupResult] =
+    const [billResult, invoiceResult, orgResult, topupResult, paymentResult] =
       await Promise.all([
-        bill.refetch(),
-        invoices.refetch(),
+        mayReadBills && authorized
+          ? bill.refetch()
+          : Promise.resolve(undefined),
+        mayReadBills && authorized
+          ? invoices.refetch()
+          : Promise.resolve(undefined),
         orgs.refetch(),
         !ownerId && hasWallet ? topups.refetch() : Promise.resolve(undefined),
+        !ownerId && hasWallet
+          ? paymentReview.refetch()
+          : Promise.resolve(undefined),
       ]);
     if (!write.current()) return;
     if (
       canReviewBilling([
-        billResult,
-        invoiceResult,
+        ...(billResult ? [billResult] : []),
+        ...(invoiceResult ? [invoiceResult] : []),
         orgResult,
         ...(topupResult ? [topupResult] : []),
+        ...(paymentResult ? [paymentResult] : []),
       ]) &&
       (!ownerId ||
         (orgResult.data?.kind === "ready" &&
@@ -182,6 +315,12 @@ export function BillingManagementContents({
     if (write.active && visible) void refresh();
     else void client.cancelQueries({ queryKey: root });
   }, [write.active, write.epoch, visible]);
+  useEffect(() => {
+    if (!paymentReadEnabled)
+      void client.cancelQueries({
+        queryKey: [...root, "personal", "payment-review"],
+      });
+  }, [paymentReadEnabled, ownerId, write.epoch]);
   async function browser(url: string, payment = false) {
     if (browserLock.current || !write.interactive()) return;
     browserLock.current = true;
@@ -207,6 +346,9 @@ export function BillingManagementContents({
     }
   }
   async function checkoutRequest() {
+    if (!livePayment.current.checkoutAllowed) return;
+    const generation = paymentContext.current.generation;
+    const retrying = !!session.attempt;
     if (!session.attempt)
       session.attempt = {
         input: {
@@ -217,7 +359,14 @@ export function BillingManagementContents({
     const pending = session.attempt;
     setAttempt(pending);
     await write.run(async (current) => {
-      const result = await api.checkout(pending.input, current);
+      const result = await api.checkout(
+        pending.input,
+        () =>
+          current() &&
+          paymentContext.current.generation === generation &&
+          livePayment.current.checkoutAuthority &&
+          (retrying || livePayment.current.newPaymentAllowed),
+      );
       if (!current()) return;
       session.attempt = {
         ...pending,
@@ -232,29 +381,26 @@ export function BillingManagementContents({
       await refresh();
     });
   }
-  async function receipt(id: string) {
-    if (browserLock.current || !write.interactive()) return;
+  async function receipt(id: string, source: "invoice" | "topup") {
+    if (browserLock.current || !liveReceiptAllowed.current(id, source)) return;
     const capturedOwner = ownerId;
+    const generation = receiptContext.current.generation;
+    const lifecycleCurrent = write.captureWriteGuard();
+    const current = () =>
+      lifecycleCurrent() &&
+      receiptContext.current.generation === generation &&
+      liveReceiptAllowed.current(id, source);
     try {
-      const url = await api.receipt(id, capturedOwner);
-      if (write.interactive() && currentOwner.current === capturedOwner)
-        await browser(url);
+      const url = await api.receipt(id, capturedOwner, current);
+      if (current()) await browser(url);
     } catch {
-      if (write.current())
+      if (current())
         setBrowserError(
           "The receipt is not available yet. Refresh and try again.",
         );
     }
   }
   const busy = write.busy || browserBusy;
-  const pendingServerPayment =
-    topups.data?.topups.some((row) => row.status === "pending") === true;
-  const mayOpenNewWebPayment =
-    !attempt &&
-    !write.uncertain &&
-    !pendingServerPayment &&
-    topups.isSuccess &&
-    !topups.isError;
   if (!visible) return null;
   return (
     <>
@@ -271,10 +417,7 @@ export function BillingManagementContents({
         label="Personal billing"
         variant="secondary"
         disabled={busy}
-        onPress={() => {
-          setOwnerId(undefined);
-          setPage(1);
-        }}
+        onPress={() => selectOwner(undefined)}
       />
       {!orgs.isError &&
         orgs.data?.kind === "ready" &&
@@ -285,10 +428,7 @@ export function BillingManagementContents({
             label={`Billing for ${org.display_name ?? org.slug}`}
             variant="secondary"
             disabled={busy}
-            onPress={() => {
-              setOwnerId(org.id);
-              setPage(1);
-            }}
+            onPress={() => selectOwner(org.id)}
           />
         ))}
       {orgs.isError && (
@@ -333,6 +473,13 @@ export function BillingManagementContents({
               {pendingServerPayment && !attempt && (
                 <Notice message="A pending payment already exists. Review recent recharge history or continue on web before starting another payment." />
               )}
+              {(!paymentStatusVerified ||
+                paymentReview.data?.status === "unknown") && (
+                <Label muted>
+                  Payment status is not fully verified. Refresh or review
+                  payments on web before starting another payment.
+                </Label>
+              )}
               {!checkout && (
                 <ActionButton
                   label={
@@ -340,21 +487,7 @@ export function BillingManagementContents({
                       ? "Retry same checkout request"
                       : "Create secure checkout"
                   }
-                  disabled={
-                    busy ||
-                    write.uncertain ||
-                    !write.active ||
-                    topups.isError ||
-                    !topups.isSuccess ||
-                    topups.isFetching ||
-                    (!attempt &&
-                      topups.data.topups.some(
-                        (row) => row.status === "pending",
-                      )) ||
-                    !Number.isSafeInteger(Number(amount)) ||
-                    Number(amount) <= 0 ||
-                    Number(amount) > 10_000_000
-                  }
+                  disabled={!checkoutAllowed}
                   loading={write.busy}
                   onPress={() => void checkoutRequest()}
                 />
@@ -384,7 +517,7 @@ export function BillingManagementContents({
                 disabled={busy || !write.active}
                 onPress={() =>
                   void browser(
-                    `${NYXID_FRONTEND_URL.replace(/\/$/, "")}/billing${mayOpenNewWebPayment ? "?action=topup" : ""}`,
+                    `${NYXID_FRONTEND_URL.replace(/\/$/, "")}/billing${livePayment.current.mayOpenNewWebPayment ? "?action=topup" : ""}`,
                     true,
                   )
                 }
@@ -396,9 +529,15 @@ export function BillingManagementContents({
       {ownerId && authorized && (
         <>
           <Label muted>
-            Organization bills and benefits are shown below. Personal wallet
-            balances and recharge history are never used for an organization.
+            Organization benefits are shown below. Personal wallet balances and
+            recharge history are never used for an organization.
           </Label>
+          {!mayReadBills && (
+            <Label muted>
+              Organization bills and receipts require an organization admin.
+              Your available benefits are shown here.
+            </Label>
+          )}
           {grants.data?.kind === "ready" &&
             grants.data.data.grants.map((grant) => (
               <Label key={grant.id}>
@@ -471,9 +610,9 @@ export function BillingManagementContents({
                   label="Open recharge receipt"
                   variant="secondary"
                   disabled={
-                    busy || topups.isError || topups.isFetching || !write.active
+                    busy || !receiptAllowed(row.lago_invoice_id, "topup")
                   }
-                  onPress={() => void receipt(row.lago_invoice_id!)}
+                  onPress={() => void receipt(row.lago_invoice_id!, "topup")}
                 />
               )}
             </Card>
@@ -500,7 +639,7 @@ export function BillingManagementContents({
             )}
         </Card>
       )}
-      {authorized && available && (
+      {authorized && available && mayReadBills && (
         <>
           <Card>
             <Label>Current bill</Label>
@@ -559,13 +698,8 @@ export function BillingManagementContents({
                   compact
                   label={`Receipt for ${row.number}`}
                   variant="secondary"
-                  disabled={
-                    busy ||
-                    invoices.isError ||
-                    invoices.isFetching ||
-                    !write.active
-                  }
-                  onPress={() => void receipt(row.id)}
+                  disabled={busy || !receiptAllowed(row.id, "invoice")}
+                  onPress={() => void receipt(row.id, "invoice")}
                 />
               </Card>
             ))}

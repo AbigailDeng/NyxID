@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, AppState } from "react-native";
-import { useIsFocused } from "@react-navigation/native";
+import { useIsFocused, useNavigation } from "@react-navigation/native";
 import * as WebBrowser from "expo-web-browser";
 import { z } from "zod";
 import { useNetworkStatus } from "../../hooks/useNetworkStatus";
@@ -23,43 +23,79 @@ export function machineError(cause: unknown) {
 export async function openMachineWeb(path: string) {
   const base = new URL(NYXID_FRONTEND_URL);
   const url = new URL(path, base);
-  if (!path.startsWith("/assistant/machines") || url.origin !== base.origin || url.username || url.password ||
-    (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname))))
+  if (
+    !path.startsWith("/assistant/machines") ||
+    url.origin !== base.origin ||
+    url.username ||
+    url.password ||
+    (url.protocol !== "https:" &&
+      !(
+        url.protocol === "http:" &&
+        ["localhost", "127.0.0.1"].includes(url.hostname)
+      ))
+  )
     throw new Error("The Machines web address is unavailable.");
   await WebBrowser.openBrowserAsync(url.href);
 }
 
 export function useMachineRuntime() {
+  const navigation = useNavigation();
   const focused = useIsFocused();
   const [foreground, setForeground] = useState(
     AppState.currentState === "active",
   );
   const { isConnected } = useNetworkStatus();
   const epoch = getAuthEpoch();
-  const state = useRef({ mounted: true, focused, isConnected });
+  const state = useRef({
+    mounted: true,
+    focused,
+    isConnected,
+    generation: 0,
+    appState: AppState.currentState,
+  });
+  if (
+    state.current.focused !== focused ||
+    state.current.isConnected !== isConnected
+  )
+    state.current.generation++;
   state.current.focused = focused;
   state.current.isConnected = isConnected;
   useEffect(() => {
     state.current.mounted = true;
-    const subscription = AppState.addEventListener("change", (value) =>
-      setForeground(value === "active"),
-    );
+    const subscription = AppState.addEventListener("change", (value) => {
+      // Latch the transition before React renders: an away-and-back cycle
+      // must not revive an action waiting on an authority read or response.
+      if (state.current.appState !== value) state.current.generation++;
+      state.current.appState = value;
+      setForeground(value === "active");
+    });
+    const unsubscribeBlur = navigation.addListener("blur", () => {
+      state.current.generation++;
+      state.current.focused = false;
+    });
     return () => {
       state.current.mounted = false;
       subscription.remove();
+      unsubscribeBlur();
     };
-  }, []);
+  }, [navigation]);
+  const interactive = () =>
+    state.current.mounted &&
+    getAuthEpoch() === epoch &&
+    state.current.focused &&
+    state.current.appState === "active" &&
+    AppState.currentState === "active" &&
+    state.current.isConnected;
   return {
     epoch,
     active: focused && foreground && isConnected,
     online: isConnected,
     current: () => state.current.mounted && getAuthEpoch() === epoch,
-    interactive: () =>
-      state.current.mounted &&
-      getAuthEpoch() === epoch &&
-      state.current.focused &&
-      AppState.currentState === "active" &&
-      state.current.isConnected,
+    interactive,
+    captureWriteGuard: () => {
+      const generation = state.current.generation;
+      return () => state.current.generation === generation && interactive();
+    },
   };
 }
 
@@ -72,11 +108,12 @@ export function useMachineWrite() {
   const [uncertain, setUncertain] = useState(false);
   async function run(action: (current: () => boolean) => Promise<void>) {
     if (lock.current || needsReview.current || !runtime.interactive()) return;
+    const current = runtime.captureWriteGuard();
     lock.current = true;
     setBusy(true);
     setError(undefined);
     try {
-      await action(() => runtime.current() && runtime.interactive());
+      await action(current);
     } catch (cause) {
       if (runtime.current()) {
         const unknown =

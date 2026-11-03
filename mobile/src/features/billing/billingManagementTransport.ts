@@ -59,9 +59,9 @@ export const invoicesSchema = z.object({
 });
 export const topupsSchema = z.object({
   owner_id: z.string(),
-  page: pageNumber.default(1),
-  per_page: pageNumber.default(10),
-  total: z.number().int().nonnegative().default(0),
+  page: pageNumber,
+  per_page: pageNumber,
+  total: z.number().int().nonnegative(),
   topups: z.array(
     z.object({
       id: z.string(),
@@ -123,6 +123,26 @@ export type BillingManagementRequest = (
 export function createBillingManagementApi(request: BillingManagementRequest) {
   const ownerQuery = (ownerId?: string) =>
     ownerId ? `owner_id=${encodeURIComponent(owner.parse(ownerId))}` : "";
+  async function topupPage(
+    page: number,
+    perPage: number,
+    signal?: AbortSignal,
+    authorityGuard?: () => void,
+  ) {
+    authorityGuard?.();
+    const result = topupsSchema.parse(
+      await request(
+        `/billing/topups?page=${pageNumber.parse(page)}&per_page=${perPage}&period=all`,
+        { method: "GET", signal, authorityGuard },
+      ),
+    );
+    authorityGuard?.();
+    if (result.page !== page || result.per_page !== perPage)
+      throw new Error(
+        "Recharge history returned a different page. Refresh before continuing.",
+      );
+    return result;
+  }
   return {
     async provision(current: () => boolean) {
       const guard = () => {
@@ -164,12 +184,29 @@ export function createBillingManagementApi(request: BillingManagementRequest) {
       return result;
     },
     async topups(page = 1, signal?: AbortSignal) {
-      return topupsSchema.parse(
-        await request(
-          `/billing/topups?page=${pageNumber.parse(page)}&per_page=10&period=all`,
-          { method: "GET", signal },
-        ),
-      );
+      return topupPage(page, 10, signal);
+    },
+    async paymentReview(current: () => boolean, signal?: AbortSignal) {
+      const guard = () => {
+        if (signal?.aborted || !current())
+          throw new Error(
+            "Billing context changed. Refresh payment status before continuing.",
+          );
+      };
+      let reviewedOwner: string | undefined;
+      // History pagination is presentation only. A new payment needs a complete,
+      // bounded review, including pending records outside the displayed page.
+      for (let page = 1; page <= 10; page++) {
+        const result = await topupPage(page, 50, signal, guard);
+        if (reviewedOwner && reviewedOwner !== result.owner_id)
+          throw new Error("Recharge history belongs to a different account.");
+        reviewedOwner = result.owner_id;
+        if (result.topups.some((row) => row.status === "pending"))
+          return { status: "pending" as const };
+        if (page * result.per_page >= result.total)
+          return { status: "clear" as const };
+      }
+      return { status: "unknown" as const };
     },
     async bill(ownerId?: string, signal?: AbortSignal) {
       const result = billSchema.parse(
@@ -193,15 +230,27 @@ export function createBillingManagementApi(request: BillingManagementRequest) {
         throw new Error("The invoices belong to a different account.");
       return result;
     },
-    async receipt(id: string, ownerId?: string) {
+    async receipt(
+      id: string,
+      ownerId: string | undefined,
+      current: () => boolean,
+    ) {
+      const guard = () => {
+        if (!current())
+          throw new Error(
+            "Billing context changed. Refresh before opening a receipt.",
+          );
+      };
+      guard();
       const result = z
         .object({ file_url: z.string().transform(secureExternalUrl) })
         .parse(
           await request(
             `/billing/invoices/${encodeURIComponent(z.string().min(1).parse(id))}/download${ownerId ? `?${ownerQuery(ownerId)}` : ""}`,
-            { method: "GET" },
+            { method: "GET", authorityGuard: guard },
           ),
         );
+      guard();
       return result.file_url;
     },
   };
