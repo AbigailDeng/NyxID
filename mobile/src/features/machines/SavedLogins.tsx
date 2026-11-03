@@ -25,6 +25,8 @@ import {
   useMachineWrite,
 } from "./MachineUI";
 import { machineStyles, machineTabs } from "./MachinePresentation";
+import { SavedLoginEditor } from "./SavedLoginEditor";
+import { savedLoginReviewed, savedLoginReviewRequired } from "./savedLoginEditorTransport";
 
 export function SavedLogins({
   inventory,
@@ -42,6 +44,11 @@ export function SavedLogins({
   const [deleting, setDeleting] = useState<SavedLogin>();
   const [notice, setNotice] = useState<string>();
   const [refreshError, setRefreshError] = useState<string>();
+  const [editing, setEditing] = useState<SavedLogin | "new">();
+  const [needsReview, setNeedsReview] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const busy = write.busy || saving;
+  const reviewRequired = needsReview || (!!inventory?.userId && savedLoginReviewRequired(inventory.userId));
   const logins = useQuery({
     queryKey: [...machineKeys(write.epoch), "logins"],
     queryFn: ({ signal }) => machinesApi.logins(signal),
@@ -49,13 +56,13 @@ export function SavedLogins({
     retry: false,
   });
   useWorkspaceBack({
-    active: !!deleting || write.busy,
-    disabled: write.busy,
-    onBack: () => setDeleting(undefined),
-    discardOnClose: deleting
+    active: !!deleting || !!editing || busy,
+    disabled: busy,
+    onBack: () => { setDeleting(undefined); setEditing(undefined); },
+    discardOnClose: deleting || editing
       ? {
           title: "Close saved-login review?",
-          message: "The login will not be deleted.",
+          message: editing ? "Unsaved credentials will be cleared." : "The login will not be deleted.",
         }
       : undefined,
   });
@@ -65,15 +72,17 @@ export function SavedLogins({
       : (inventory?.nodes.find((node) => node.owner.id === login.owner_id)
           ?.owner.display_name ?? `Organization ${login.owner_id}`);
   const blocked =
-    write.busy || write.uncertain || !write.active || !!logins.error;
+    busy || write.uncertain || reviewRequired || !write.active || !!logins.error;
   async function refresh() {
     const result = await logins.refetch();
     if (!write.current()) return;
-    if (result.error) setRefreshError(machineError(result.error));
+    if (!result.isSuccess || result.error) setRefreshError(result.error ? machineError(result.error) : "Saved-login metadata could not be verified. Refresh again before editing.");
     else {
       write.reviewed();
       setDeleting(undefined);
       setRefreshError(undefined);
+      setNeedsReview(false);
+      if (inventory?.userId) savedLoginReviewed(inventory.userId);
     }
   }
   return (
@@ -82,20 +91,20 @@ export function SavedLogins({
       showHeading={false}
       refreshing={logins.isRefetching}
       onRefresh={() => {
-        if (!write.busy && write.active) void refresh();
+        if (!busy && write.active) void refresh();
       }}
     >
       <SegmentControl
         segments={machineTabs}
         activeIndex={1}
-        disabled={write.busy}
+        disabled={busy}
         onPress={(index) => {
-          if (index === 0) confirmDiscard(!!deleting, onMachines);
+          if (index === 0) confirmDiscard(!!deleting || !!editing, onMachines);
         }}
       />
       <Label muted style={machineStyles.metadata}>
         Metadata only. Passwords and TOTP secrets are never returned or stored
-        by this screen. Create or edit logins on the web.
+        by this screen. Create or fully replace credentials using the secure form.
       </Label>
       {handoffError && <Notice tone="error" message={handoffError} />}
       {logins.isPending && <Label muted>Loading saved logins…</Label>}
@@ -105,7 +114,16 @@ export function SavedLogins({
       {write.error && <Notice tone="error" message={write.error} />}
       {refreshError && <Notice tone="error" message={refreshError} />}
       {notice && <Notice message={notice} />}
-      {deleting ? (
+      {reviewRequired && <Notice message="A save may have reached the server. Refresh and review the metadata before editing again." />}
+      {editing && inventory?.userId ? <SavedLoginEditor
+        key={editing === "new" ? "new" : editing.id}
+        userId={inventory.userId}
+        login={editing === "new" ? undefined : editing}
+        onClose={() => setEditing(undefined)}
+        onUncertain={() => setNeedsReview(true)}
+        onBusy={setSaving}
+        onSaved={() => { setNotice("Saved login updated. Credentials are not returned by the server."); void client.invalidateQueries({ queryKey: machineKeys(write.epoch) }); void client.invalidateQueries({ queryKey: ["workspace", "agents"] }); }}
+      /> : deleting ? (
         <Card>
           <Label>
             Delete {deleting.label} from {ownerLabel(deleting)}?
@@ -181,6 +199,14 @@ export function SavedLogins({
             </Label>
             <ActionButton
               compact
+              label="Replace credentials"
+              accessibilityLabel={`Replace credentials for ${login.label}`}
+              variant="secondary"
+              disabled={blocked || !inventory?.userId}
+              onPress={() => setEditing(login)}
+            />
+            <ActionButton
+              compact
               label="Review deletion"
               accessibilityLabel={`Review deletion of ${login.label}`}
               variant="danger"
@@ -195,9 +221,22 @@ export function SavedLogins({
       )}
       <ActionButton
         compact
-        label="Create or edit saved logins on web"
+        label="Add saved login"
+        disabled={blocked || !inventory?.userId || !!editing}
+        onPress={() => setEditing("new")}
+      />
+      <ActionButton
+        compact
+        label="Refresh saved login metadata"
         variant="secondary"
-        disabled={write.busy}
+        disabled={busy || !write.active || !!editing}
+        onPress={() => void refresh()}
+      />
+      <ActionButton
+        compact
+        label="Saved logins on web"
+        variant="secondary"
+        disabled={busy}
         onPress={() => onWeb(machineWebPath(undefined, "logins"))}
       />
     </WorkspacePage>

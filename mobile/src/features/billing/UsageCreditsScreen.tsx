@@ -3,7 +3,7 @@ import { AppState } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
 import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { z } from "zod";
-import { ActionButton, Label, Notice, WorkspacePage } from "../../components/workspace/WorkspaceUI";
+import { ActionButton, Card, Label, Notice, WorkspacePage } from "../../components/workspace/WorkspaceUI";
 import { SegmentControl } from "../../components/SegmentControl";
 import { useNetworkStatus } from "../../hooks/useNetworkStatus";
 import { getAuthEpoch } from "../../lib/auth/authEpoch";
@@ -13,8 +13,10 @@ import { useAuthSession } from "../auth/AuthSessionContext";
 import { billingPeriodSchema, serviceUsage, type BillingPeriod } from "./billingContracts";
 import type { BillingRead } from "./billingTransport";
 import { BillingHistoryRow, BillingServiceCard, BillingWalletCard } from "./BillingPresentation";
+import { BillingManagement } from "./BillingManagement";
+import { formatCredits } from "./credits";
 
-// ownerId is retained for route compatibility; this screen reads personal billing only.
+// The balance summary remains personal; ownerId opens scoped organization management.
 export type UsageCreditsRouteParams = { period?: BillingPeriod; ownerId?: string };
 export type UsageCreditsScreenProps = { route?: { params?: UsageCreditsRouteParams } };
 const periods = ["24h", "7d", "30d"] as const;
@@ -39,6 +41,7 @@ export function UsageCreditsScreen({ route }: UsageCreditsScreenProps = {}) {
   const [history, setHistory] = useState({ epoch: getAuthEpoch(), expanded: false });
   const [foreground, setForeground] = useState(AppState.currentState === "active");
   const [serviceLimit, setServiceLimit] = useState(10);
+  const [details, setDetails] = useState(false);
   const focused = useIsFocused();
   const { isConnected, recheckConnection } = useNetworkStatus();
   const { isAuthenticated } = useAuthSession();
@@ -93,7 +96,6 @@ export function UsageCreditsScreen({ route }: UsageCreditsScreenProps = {}) {
     </> : <>
       {!isConnected && <Notice message="Offline. Showing your saved balance." />}
       <BillingWalletCard {...loaded} now={Date.now()} />
-      <Label muted style={{ fontSize: 12, lineHeight: 16 }}>To add credits, use NyxID on the web.</Label>
       <BillingHistoryRow expanded={expanded} onPress={toggleHistory} />
       {expanded && <>
         <SegmentControl segments={[{ label: "24 hours" }, { label: "7 days" }, { label: "30 days" }]} activeIndex={periods.indexOf(period)} onPress={(index) => setPeriod(periods[index] ?? "30d")} />
@@ -104,9 +106,15 @@ export function UsageCreditsScreen({ route }: UsageCreditsScreenProps = {}) {
           {usage.data.data.billing.rates_are_approximate && <Label muted>Usage costs are estimates.</Label>}
           {services.length === 0 && <Label muted>No usage recorded for this period.</Label>}
           {services.slice(0, serviceLimit).map((service) => <BillingServiceCard key={`${period}:${service.key}`} service={service} />)}
+          <ActionButton label={details ? "Hide usage details" : "Show model, metric & funding details"} variant="secondary" onPress={() => setDetails(!details)} />
+          {details && services.slice(0, serviceLimit).map((service) => <Card key={`detail:${service.key}`}>
+            <Label>{service.name}</Label>
+            {service.rows.map((row, index) => <Label key={index}>{row.model ?? "All models"} · {row.metric} · {row.layer} · {row.quantity} units · {row.billable ? `${formatCredits(row.cost)} credits (wallet ${formatCredits(row.wallet)}, grants ${formatCredits(row.grants)}, allowance ${formatCredits(row.allowances)})` : "Metering only"}</Label>)}
+          </Card>)}
           {services.length > serviceLimit && <ActionButton label="Show more services" variant="secondary" onPress={() => setServiceLimit((limit) => limit + 10)} />}
         </> : <Label muted>{isConnected ? "Loading usage…" : "Offline. Connect to load usage."}</Label>}
       </>}
     </>}
+    <BillingManagement key={epoch} hasWallet={hasWallet} available={!issue} initialOwnerId={route?.params?.ownerId} period={period} />
   </WorkspacePage>;
 }

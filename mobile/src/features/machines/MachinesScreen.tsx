@@ -1,6 +1,6 @@
-import { useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { View } from "react-native";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ContentScreenProps } from "../../app/navigationTypes";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import { SegmentControl } from "../../components/SegmentControl";
@@ -13,6 +13,7 @@ import {
   WorkspacePage,
 } from "../../components/workspace/WorkspaceUI";
 import { SavedLogins } from "./SavedLogins";
+import { HostedMachines } from "./HostedMachines";
 import { MachineDesktopEntries } from "./MachineDesktopEntries";
 import {
   MachineBadges,
@@ -44,6 +45,7 @@ export function MachinesScreen({
   navigation,
 }: ContentScreenProps<"Machines"> | ContentScreenProps<"MachineDetail">) {
   const runtime = useMachineRuntime();
+  const client = useQueryClient();
   const selected =
     route.name === "MachineDetail" ? route.params.machineId : undefined;
   const tab = route.name === "Machines" ? route.params?.tab : undefined;
@@ -66,6 +68,10 @@ export function MachinesScreen({
     refetchIntervalInBackground: false,
   });
   const node = inventory.data?.nodes.find((row) => row.id === selected);
+  useEffect(() => {
+    if (runtime.active) void client.invalidateQueries({ queryKey: machineKeys(runtime.epoch) });
+    else void client.cancelQueries({ queryKey: machineKeys(runtime.epoch) });
+  }, [runtime.active, runtime.epoch, client]);
   const update = inventory.data?.updates.find(
     (row) => row.node_id === selected,
   );
@@ -88,6 +94,7 @@ export function MachinesScreen({
   async function handoff(path: string) {
     try {
       await openMachineWeb(path);
+      if (runtime.current()) await client.invalidateQueries({ queryKey: machineKeys(runtime.epoch) });
     } catch (cause) {
       if (runtime.current()) setHandoffError(machineError(cause));
     }
@@ -104,6 +111,7 @@ export function MachinesScreen({
   if (!selected && tab === "logins") {
     return (
       <SavedLogins
+        key={runtime.epoch}
         inventory={inventory.data}
         handoffError={handoffError}
         onWeb={(path) => void handoff(path)}
@@ -194,10 +202,11 @@ export function MachinesScreen({
             )}
           <ActionButton
             compact
-            label="Hosted machines and setup on web"
+            label="Set up a self-hosted machine"
             variant="secondary"
-            onPress={() => void handoff(machineWebPath())}
+            onPress={() => void handoff("/assistant/machines/new")}
           />
+          <HostedMachines canCreate={!inventory.isError && !!inventory.data?.features.includes("experimental:remote-machines")} onWeb={(path) => void handoff(path)} />
         </>
       )}
       {selected && !inventory.isPending && !inventory.error && !node && (

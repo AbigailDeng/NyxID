@@ -63,6 +63,7 @@ function setup({ params = {}, states = {} }: { params?: { period?: string; owner
     "./billingContracts": contracts,
     "./credits": credits,
     "./BillingPresentation": Object.fromEntries(["BillingHistoryRow", "BillingServiceCard", "BillingWalletCard"].map((name) => [name, name])),
+    "./BillingManagement": { BillingManagement: "BillingManagement" },
   });
   const { UsageCreditsScreen } = harness.load(fileURLToPath(new URL("./UsageCreditsScreen.tsx", import.meta.url))) as { UsageCreditsScreen: (props: unknown) => Element };
   harness.mount(() => UsageCreditsScreen({ route: { params } }));
@@ -91,7 +92,7 @@ function setup({ params = {}, states = {} }: { params?: { period?: string; owner
   };
 }
 
-test("personal balance alone is visible, without headings, account selectors or eager usage", async (t) => {
+test("personal balance remains read-only while owner links open isolated billing management", async (t) => {
   const screen = setup({ params: { ownerId: ORG_ADMIN } });
   t.after(screen.harness.unmount);
   assert.equal(screen.harness.value().props.showHeading, false);
@@ -100,7 +101,8 @@ test("personal balance alone is visible, without headings, account selectors or 
   assert.equal(screen.find("BillingWalletCard").props.grants.length, 1);
   assert.equal(screen.find("BillingWalletCard").props.allowances.length, 1);
   assert.equal(screen.find("BillingHistoryRow").props.expanded, false);
-  assert.match(screen.text(), /To add credits, use NyxID on the web\./);
+  assert.equal(screen.find("BillingManagement").props.initialOwnerId, ORG_ADMIN);
+  assert.equal(screen.find("BillingManagement").props.hasWallet, true);
   assert.doesNotMatch(screen.text(), /Personal usage|Credit grants|account selection|Personal account/);
   assert.equal(screen.all().some((item) => item.type === "SegmentControl" || item.type === "BillingServiceCard"), false);
   assert.equal(screen.all().some((item) => item.props.accessibilityRole === "link" || item.props.href || item.props.url), false);

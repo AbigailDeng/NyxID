@@ -21,9 +21,12 @@ export function machineError(cause: unknown) {
     : "Could not complete this machine action.";
 }
 export async function openMachineWeb(path: string) {
-  await WebBrowser.openBrowserAsync(
-    `${NYXID_FRONTEND_URL.replace(/\/$/, "")}${path}`,
-  );
+  const base = new URL(NYXID_FRONTEND_URL);
+  const url = new URL(path, base);
+  if (!path.startsWith("/assistant/machines") || url.origin !== base.origin || url.username || url.password ||
+    (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname))))
+    throw new Error("The Machines web address is unavailable.");
+  await WebBrowser.openBrowserAsync(url.href);
 }
 
 export function useMachineRuntime() {
