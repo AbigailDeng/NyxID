@@ -42,8 +42,19 @@ node .planning/2026-11-03-issue-10-assistant/check-changed-syntax.cjs
 git diff --check
 ```
 
-Result: scopes frontend/mobile; syntax check passes for 29 changed TS/TSX files (syntax only, no semantic typecheck); diff whitespace check passes. No reliable affected semantic typecheck exists; full frontend suite/build/typecheck delegated to GitHub CI. No local full validation or production build was run.
+Result: scopes frontend/mobile; syntax check passes for 30 changed TS/TSX files (syntax only, no semantic typecheck); diff whitespace check passes. No reliable affected semantic typecheck exists; full frontend suite/build/typecheck delegated to GitHub CI. No local full validation or production build was run.
 
 ## Acceptance and remaining manual evidence
 
 See `acceptance.md`. No iPhone installation/launch, browser product walkthrough, third-party bot configuration, or voice/dictation acceptance was performed. These are explicitly pending manual validation, not inferred from harness tests.
+
+## Final asynchronous authority review
+
+The first source commit was `6ef14aa0a`. Review found that checking only current active state could revive a pending preflight after background/foreground or blur/focus. Added `useManagementWriteScope`: each save captures an activation generation; direct AppState inactive/background events, page deactivation and unmount permanently invalidate that captured guard. Recheck it before dispatch (including transport's deferred authority callback), after response and after refresh. Post-dispatch interruption remains unconfirmed until reload; unmounted components do not update local state.
+
+```sh
+# from mobile
+pnpm exec tsx --test src/features/assistant-management/AssistantManagementScreen.test.ts src/features/plugins/SkillActivationControls.test.ts
+```
+
+Final result: 10/10 passed, including background-return during preflight, blur-return, unmount, delayed auth/dispatch guard callback, and uncertain response after a write was dispatched for settings, activation and preload. These two files add four tests beyond the earlier 71-test batch. Final changed-source syntax check: 30 files; diff whitespace check passes. File-scoped Prettier passed for the new/changed management and activation files. Existing unrelated Web tail formatting was preserved.

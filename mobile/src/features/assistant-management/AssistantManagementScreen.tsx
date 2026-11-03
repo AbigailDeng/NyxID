@@ -22,6 +22,7 @@ import {
 } from "../automations/AutomationUI";
 import { deviceTimezone } from "../automations/automationTime";
 import { ManagementHandoff } from "./ManagementHandoff";
+import { useManagementWriteScope } from "./useManagementWriteScope";
 import {
   settingFields,
   settingsForm,
@@ -59,6 +60,7 @@ export function AssistantManagementScreen({
   navigation,
 }: SheetScreenProps<"AssistantManagement">) {
   const runtime = useAutomationRuntime();
+  const writeScope = useManagementWriteScope(runtime.active);
   const client = useQueryClient();
   const epoch = useRef(getAuthEpoch()).current;
   const authority = useRef(runtime);
@@ -181,10 +183,15 @@ export function AssistantManagementScreen({
     setError(undefined);
     setNotice(undefined);
     let sent = false;
+    const assertScope = writeScope.capture();
+    const writeGuard = () => {
+      assertScope();
+      guard();
+    };
     try {
-      guard();
+      writeGuard();
       const latest = await api.settings();
-      guard();
+      writeGuard();
       const patch = settingsPatch(form, baseline, latest);
       const latestForm = settingsForm(latest, deviceTimezone());
       if (
@@ -198,16 +205,17 @@ export function AssistantManagementScreen({
           "These settings changed elsewhere. Reload and review before saving.",
         );
       sent = true;
-      const saved = await api.update(patch, guard);
-      guard();
+      const saved = await api.update(patch, writeGuard);
+      writeGuard();
       accept(saved);
       client.setQueryData([...ROOT, "settings", epoch], saved);
       await client.invalidateQueries({
         queryKey: ["workspace", "automations", "settings"],
       });
+      writeGuard();
       setNotice("NyxBot settings saved.");
     } catch (cause) {
-      if (getAuthEpoch() === epoch) {
+      if (writeScope.isMounted() && getAuthEpoch() === epoch) {
         setError(
           `${automationError(cause)}${sent ? " The result is unconfirmed. Reload settings before trying again." : ""}`,
         );
@@ -215,7 +223,7 @@ export function AssistantManagementScreen({
       }
     } finally {
       lock.current = false;
-      if (getAuthEpoch() === epoch) setBusy(false);
+      if (writeScope.isMounted() && getAuthEpoch() === epoch) setBusy(false);
     }
   }
   return (

@@ -23,3 +23,5 @@ Baseline: dc46415065fac9e80200d0711b729db7f8c7d2c8. Related issue: https://githu
 5. From a Skill open exact agent Skills & learning. Confirm consent/settings/runs/proposals are present where allowed and return to the prior native context.
 
 No device/manual evidence is claimed. Standard Web DOM tests are blocked by baseline missing `motion/react`; full suite/build/semantic typecheck belongs to GitHub CI.
+
+Async review additionally verifies captured activation generations. A pending save cannot resume after background/foreground, blur/focus or unmount, including through a transport dispatch guard after authentication wait. A response received after dispatch interruption remains unconfirmed and requires reload. Both affected native component test files pass all 10 targeted tests.

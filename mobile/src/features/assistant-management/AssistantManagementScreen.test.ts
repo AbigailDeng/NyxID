@@ -21,13 +21,25 @@ function setup() {
   const writes: any[] = [];
   let fail = false;
   let queryData = original;
-  const h = hookHarness<E>({
+  let appState: (state: string) => void = () => {};
+  let beforeDispatch: (guard: () => void) => Promise<void> = async () => {};
+  let response: () => Promise<void> = async () => {};
+  const mocks: Record<string, unknown> = {
     "react/jsx-runtime": {
       jsx: (type: any, props: any) => ({ type, props }),
       jsxs: (type: any, props: any) => ({ type, props }),
       Fragment: "Fragment",
     },
-    "react-native": { View: "View", Alert: { alert() {} } },
+    "react-native": {
+      View: "View",
+      Alert: { alert() {} },
+      AppState: {
+        addEventListener: (_: string, callback: typeof appState) => {
+          appState = callback;
+          return { remove() {} };
+        },
+      },
+    },
     "@tanstack/react-query": {
       useQueryClient: () => ({
         invalidateQueries: async () => {},
@@ -58,8 +70,10 @@ function setup() {
       assistantManagementApi: {
         settings: () => latest(),
         update: async (patch: any, guard: () => void) => {
+          await beforeDispatch(guard);
           guard();
           writes.push(patch);
+          await response();
           if (fail) throw new Error("Network response lost");
           return { ...original, ...patch };
         },
@@ -74,7 +88,11 @@ function setup() {
     "../automations/automationTime": { deviceTimezone: () => "UTC" },
     "./ManagementHandoff": { ManagementHandoff: "ManagementHandoff" },
     "./managementContracts": contracts,
-  });
+  };
+  const h = hookHarness<E>(mocks);
+  mocks["./useManagementWriteScope"] = h.load(
+    fileURLToPath(new URL("./useManagementWriteScope.ts", import.meta.url)),
+  );
   const Component = h.load(
     fileURLToPath(new URL("./AssistantManagementScreen.tsx", import.meta.url)),
   ).AssistantManagementScreen as any;
@@ -86,6 +104,22 @@ function setup() {
     writes,
     runtime,
     control,
+    backgroundReturn: () => {
+      appState("background");
+      appState("active");
+    },
+    blurReturn: () => {
+      runtime.active = false;
+      h.render();
+      runtime.active = true;
+      h.render();
+    },
+    beforeDispatch: (wait: typeof beforeDispatch) => {
+      beforeDispatch = wait;
+    },
+    response: (wait: typeof response) => {
+      response = wait;
+    },
     edit: (label: string, value: string) => {
       control(label).props.onChangeText(value);
       h.flush();
@@ -156,5 +190,60 @@ test("account switch during preflight prevents a write and uncertain network res
   y.control("Save settings").props.onPress();
   await y.h.settle();
   assert.equal(y.writes.length, 1);
+  y.h.unmount();
+});
+
+test("an interrupted settings preflight stays invalid after foreground or focus returns and after unmount", async () => {
+  for (const interruption of ["background", "blur", "unmount"] as const) {
+    const x = setup();
+    const read = deferred<contracts.AssistantSettings>();
+    x.edit("Live specialists", "5");
+    x.latest(() => read.promise);
+    x.control("Save settings").props.onPress();
+    if (interruption === "background") x.backgroundReturn();
+    else if (interruption === "blur") x.blurReturn();
+    else x.h.unmount();
+    read.resolve(original);
+    await x.h.settle();
+    assert.equal(x.writes.length, 0, interruption);
+    x.h.unmount();
+  }
+});
+
+test("the settings dispatch guard cannot revive after auth wait and a dispatched interrupted write stays unconfirmed", async () => {
+  const x = setup();
+  const dispatch = deferred<void>();
+  let callback: (() => void) | undefined;
+  x.beforeDispatch(async (guard) => {
+    callback = guard;
+    await dispatch.promise;
+  });
+  x.edit("Live specialists", "5");
+  x.control("Save settings").props.onPress();
+  await x.h.settle();
+  x.backgroundReturn();
+  assert.throws(() => callback!(), /interrupted/);
+  dispatch.resolve();
+  await x.h.settle();
+  assert.equal(x.writes.length, 0);
+  assert.equal(x.control("Save settings").props.disabled, true);
+  x.h.unmount();
+
+  const y = setup();
+  const response = deferred<void>();
+  y.response(() => response.promise);
+  y.edit("Live specialists", "5");
+  y.control("Save settings").props.onPress();
+  await y.h.settle();
+  assert.equal(y.writes.length, 1);
+  y.backgroundReturn();
+  response.resolve();
+  await y.h.settle();
+  assert.equal(y.control("Save settings").props.disabled, true);
+  assert.ok(
+    nodes(y.h.value()).some(
+      (n) => n.type === "Notice" && /unconfirmed/.test(n.props.message),
+    ),
+  );
   y.h.unmount();
 });

@@ -9,6 +9,7 @@ import {
 import { pluginSkillsApi as api } from "../../lib/api/pluginSkillsApi";
 import { agentsApi } from "../../lib/api/agentsApi";
 import { getAuthEpoch } from "../../lib/auth/authEpoch";
+import { useManagementWriteScope } from "../assistant-management/useManagementWriteScope";
 import {
   automationError,
   automationStyles as s,
@@ -40,6 +41,7 @@ export function SkillActivationControls({
   onDirty: (value: boolean) => void;
 }) {
   const runtime = useAutomationRuntime();
+  const writeScope = useManagementWriteScope(runtime.active);
   const authority = useRef(runtime);
   authority.current = runtime;
   const epoch = useRef(getAuthEpoch()).current;
@@ -83,13 +85,18 @@ export function SkillActivationControls({
     setError(undefined);
     setNotice(undefined);
     let sent = false;
-    try {
+    const assertScope = writeScope.capture();
+    const writeGuard = () => {
+      assertScope();
       guard();
+    };
+    try {
+      writeGuard();
       const [latest, agent] = await Promise.all([
         api.current(agentId),
         agentsApi.detail(agentId),
       ]);
-      guard();
+      writeGuard();
       if (
         agent.agent.can_maintain === false ||
         agent.agent.status === "destroyed"
@@ -112,7 +119,7 @@ export function SkillActivationControls({
           agentId,
           pin.skill_id,
           { expected_revision: latest.revision, paths: selected },
-          guard,
+          writeGuard,
         );
       } else {
         sent = true;
@@ -123,16 +130,17 @@ export function SkillActivationControls({
             pin.skill_id,
             Boolean(attached.disabled),
           ),
-          guard,
+          writeGuard,
         );
       }
-      guard();
+      writeGuard();
       await onRefresh();
+      writeGuard();
       setNotice(
         mode === "enabled" ? "Skill activation saved." : "Skill preload saved.",
       );
     } catch (cause) {
-      if (epoch === getAuthEpoch()) {
+      if (writeScope.isMounted() && epoch === getAuthEpoch()) {
         setError(
           `${automationError(cause)}${sent ? " The result is unconfirmed. Reload before trying again." : ""}`,
         );
@@ -140,8 +148,10 @@ export function SkillActivationControls({
       }
     } finally {
       lock.current = false;
-      onBusy(false);
-      if (epoch === getAuthEpoch()) setBusy(false);
+      if (writeScope.isMounted()) {
+        onBusy(false);
+        if (epoch === getAuthEpoch()) setBusy(false);
+      }
     }
   }
   return (
