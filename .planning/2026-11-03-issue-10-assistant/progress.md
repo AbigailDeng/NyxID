@@ -58,3 +58,7 @@ pnpm exec tsx --test src/features/assistant-management/AssistantManagementScreen
 ```
 
 Final result: 10/10 passed, including background-return during preflight, blur-return, unmount, delayed auth/dispatch guard callback, and uncertain response after a write was dispatched for settings, activation and preload. These two files add four tests beyond the earlier 71-test batch. Final changed-source syntax check: 30 files; diff whitespace check passes. File-scoped Prettier passed for the new/changed management and activation files. Existing unrelated Web tail formatting was preserved.
+
+## Delivery
+
+Personal PR: https://github.com/AbigailDeng/NyxID/pull/16. Branch `codex/native-10-assistant-management`; base `AbigailDeng/NyxID:codex/mobile-ios-integration`. Source commits: `6ef14aa0a` and `d65903b06`. PR artifact attached to the parent chat. No merge, feature branch deletion, issue closure or CI babysitting. One read-only metadata command requested the unsupported gh JSON field `baseRepository`; verification switched to the REST pull endpoint to inspect actual base/head repository identity.

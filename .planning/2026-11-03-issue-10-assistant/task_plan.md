@@ -19,7 +19,7 @@ Baseline dc46415065fac9e80200d0711b729db7f8c7d2c8. Personal branch codex/native-
 - [x] Implement isolated native management entry and settings
 - [x] Implement contextual handoffs/return refresh and preload/enable
 - [x] Focused verification, diff review
-- [ ] Commit, push, personal PR; no merge
+- [x] Commit, push, personal PR; no merge
 
 ## Constraints
 No full local suite/lint/typecheck/build or CI edits. Only focused commands. Full verification belongs to GitHub CI. No team repository writes.
