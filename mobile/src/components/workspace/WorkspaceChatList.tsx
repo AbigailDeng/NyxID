@@ -106,7 +106,15 @@ export function WorkspaceChatList({
   const active = visible && foreground && isConnected;
   const activeRef = useRef(active);
   activeRef.current = active;
-  const refreshLock = useRef(false);
+  const refreshRequests = useRef<{
+    agents?: Promise<void>;
+    groups?: Promise<void>;
+  }>({});
+  const [manualRefreshing, setManualRefreshing] = useState({
+    agents: false,
+    groups: false,
+  });
+  const pullRefreshLock = useRef(false);
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const available = () =>
     visible &&
@@ -146,24 +154,6 @@ export function WorkspaceChatList({
     refetchInterval: active ? 30_000 : false,
     retry: false,
   });
-  const refreshingAgents = pullRefreshing || agents.isFetching;
-  const refreshAgents = async () => {
-    if (
-      refreshLock.current ||
-      !activeRef.current ||
-      AppState.currentState !== "active" ||
-      epoch !== getAuthEpoch()
-    )
-      return;
-    refreshLock.current = true;
-    setPullRefreshing(true);
-    try {
-      await agents.refetch({ cancelRefetch: false });
-    } finally {
-      refreshLock.current = false;
-      setPullRefreshing(false);
-    }
-  };
   const groups = useQuery({
     queryKey: [...groupKeys(epoch), "list"],
     queryFn: ({ signal }) => groupsApi.list(signal),
@@ -171,6 +161,49 @@ export function WorkspaceChatList({
     refetchInterval: livePollInterval(5000, live),
     retry: false,
   });
+  const refreshingAgents = manualRefreshing.agents;
+  const refreshingGroups = manualRefreshing.groups;
+  const canRefresh = () =>
+    activeRef.current &&
+    AppState.currentState === "active" &&
+    epoch === getAuthEpoch();
+  const refreshList = (kind: "agents" | "groups"): Promise<void> => {
+    if (!canRefresh() || (kind === "groups" && mode !== "drawer"))
+      return Promise.resolve();
+    const pending = refreshRequests.current[kind];
+    if (pending) return pending;
+    // Track user-requested progress separately from quiet live/poll updates.
+    // Share the promise so a pull gesture can join an in-flight section read.
+    setManualRefreshing((value) => ({ ...value, [kind]: true }));
+    const request = (
+      kind === "agents"
+        ? agents.refetch({ cancelRefetch: false })
+        : groups.refetch({ cancelRefetch: false })
+    )
+      .then(() => {})
+      .finally(() => {
+        delete refreshRequests.current[kind];
+        setManualRefreshing((value) => ({ ...value, [kind]: false }));
+      });
+    refreshRequests.current[kind] = request;
+    return request;
+  };
+  const refreshAgents = () => refreshList("agents");
+  const refreshGroups = () => refreshList("groups");
+  const refreshLists = async () => {
+    if (pullRefreshLock.current || !canRefresh()) return;
+    pullRefreshLock.current = true;
+    setPullRefreshing(true);
+    try {
+      await Promise.all([
+        refreshAgents(),
+        ...(mode === "drawer" ? [refreshGroups()] : []),
+      ]);
+    } finally {
+      pullRefreshLock.current = false;
+      setPullRefreshing(false);
+    }
+  };
   const indexedAgents = (
     mode === "drawer" ? sidebarOrderedAgents : orderedDrawerAgents
   )(agents.data?.agents ?? []);
@@ -405,7 +438,7 @@ export function WorkspaceChatList({
       <SectionHeading
         key="agents"
         label="Agents"
-        count={`${allAgents.length} total`}
+        count={agents.data !== undefined ? `${allAgents.length} total` : "—"}
         expanded={sections.agents}
         createLabel="New agent"
         onCreate={onCreateAgent}
@@ -416,6 +449,19 @@ export function WorkspaceChatList({
         onPress={() =>
           setSections((value) => ({ ...value, agents: !value.agents }))
         }
+      />,
+    );
+  if (agents.isError)
+    rows.push(
+      <DrawerMessage
+        key="agent-error"
+        text={
+          agents.data !== undefined
+            ? "Couldn’t refresh agents. Showing saved list."
+            : "Couldn’t load agents."
+        }
+        retry={() => void refreshAgents()}
+        disabled={!active || refreshingAgents}
       />,
     );
   let stickyIndex: number | undefined;
@@ -435,19 +481,10 @@ export function WorkspaceChatList({
           />
         ) : null}
         {!isConnected ? (
-          <DrawerMessage text="Offline · showing saved chats" />
+          <DrawerMessage text="Offline · Showing saved list" />
         ) : null}
         {agents.isPending ? (
           <DrawerMessage text="Loading agents…" loading={active} />
-        ) : null}
-        {agents.isError ? (
-          <DrawerMessage
-            text={
-              agents.data ? "Couldn’t refresh agents." : "Couldn’t load agents."
-            }
-            retry={() => void refreshAgents()}
-            disabled={!active}
-          />
         ) : null}
         {agents.isSuccess && !allAgents.length ? (
           <DrawerMessage text="No agents yet." />
@@ -674,28 +711,40 @@ export function WorkspaceChatList({
       <SectionHeading
         key="crews"
         label="Crews"
-        count={allGroups.length}
+        count={groups.data !== undefined ? `${allGroups.length} total` : "—"}
         expanded={sections.groups}
         createLabel="New crew"
         onCreate={onCreateGroup}
         createDisabled={!active}
+        onRefresh={() => void refreshGroups()}
+        refreshing={refreshingGroups}
+        refreshDisabled={!active}
         onPress={() =>
           setSections((value) => ({ ...value, groups: !value.groups }))
         }
       />,
     );
+  if (mode === "drawer" && groups.isError)
+    rows.push(
+      <DrawerMessage
+        key="crew-error"
+        text={
+          groups.data !== undefined
+            ? "Couldn’t refresh crews. Showing saved list."
+            : "Couldn’t load crews."
+        }
+        retry={() => void refreshGroups()}
+        disabled={!active || refreshingGroups}
+      />,
+    );
   if (sections.groups && mode === "drawer")
     rows.push(
       <View key="crew-rows">
+        {!isConnected ? (
+          <DrawerMessage text="Offline · Showing saved list" />
+        ) : null}
         {groups.isPending ? (
           <DrawerMessage text="Loading crews..." loading={active} />
-        ) : null}
-        {groups.isError ? (
-          <DrawerMessage
-            text="Couldn’t load crews."
-            retry={() => void groups.refetch()}
-            disabled={!active}
-          />
         ) : null}
         {groups.isSuccess && !allGroups.length ? (
           <DrawerMessage text="No crews yet." />
@@ -719,10 +768,12 @@ export function WorkspaceChatList({
         alwaysBounceVertical
         refreshControl={
           <RefreshControl
-            accessibilityLabel="Refresh agents"
+            accessibilityLabel={
+              mode === "drawer" ? "Refresh agents and crews" : "Refresh agents"
+            }
             enabled={active}
             refreshing={pullRefreshing}
-            onRefresh={() => void refreshAgents()}
+            onRefresh={() => void refreshLists()}
             tintColor={colors.primary}
             colors={[colors.primary]}
             progressBackgroundColor={colors.card}
@@ -808,11 +859,21 @@ export function WorkspaceChatList({
           }
           visible={!browserClosing}
           onRefresh={
-            browser.kind === "agents" ? () => void refreshAgents() : undefined
+            browser.kind === "agents"
+              ? () => void refreshAgents()
+              : browser.kind === "groups"
+                ? () => void refreshGroups()
+                : undefined
           }
-          refreshing={refreshingAgents}
+          refreshing={
+            browser.kind === "agents"
+              ? refreshingAgents
+              : browser.kind === "groups" && refreshingGroups
+          }
           refreshDisabled={!active}
-          refreshLabel="Refresh agents"
+          refreshLabel={
+            browser.kind === "groups" ? "Refresh crews" : "Refresh agents"
+          }
           onClose={() => dismissBrowser()}
           onDismiss={() => finishBrowserDismissal(browserClosing)}
           primaryAction={
@@ -837,9 +898,17 @@ export function WorkspaceChatList({
           }
           emptyText={
             browser.kind === "agents"
-              ? "No agents available."
+              ? agents.isPending
+                ? "Loading agents…"
+                : agents.isError && agents.data === undefined
+                  ? "Couldn’t load agents. You can retry below."
+                  : "No agents available."
               : browser.kind === "groups"
-                ? "No crews yet."
+                ? groups.isPending
+                  ? "Loading crews…"
+                  : groups.isError && groups.data === undefined
+                    ? "Couldn’t load crews. You can retry below."
+                    : "No crews yet."
                 : !agent
                   ? "This agent is no longer available."
                   : agent.can_use === false
@@ -856,12 +925,22 @@ export function WorkspaceChatList({
             browser.kind === "agents" && agents.isError ? (
               <DrawerMessage
                 text={
-                  agents.data
-                    ? "Couldn’t refresh agents."
+                  agents.data !== undefined
+                    ? "Couldn’t refresh agents. Showing saved list."
                     : "Couldn’t load agents."
                 }
                 retry={() => void refreshAgents()}
                 disabled={!active || refreshingAgents}
+              />
+            ) : browser.kind === "groups" && groups.isError ? (
+              <DrawerMessage
+                text={
+                  groups.data !== undefined
+                    ? "Couldn’t refresh crews. Showing saved list."
+                    : "Couldn’t load crews."
+                }
+                retry={() => void refreshGroups()}
+                disabled={!active || refreshingGroups}
               />
             ) : browser.kind === "chats" ? (
               <>
@@ -920,7 +999,9 @@ function SectionHeading({
         accessibilityRole="button"
         accessibilityLabel={`${expanded ? "Collapse" : "Expand"} ${label.toLowerCase()}`}
         accessibilityState={{ expanded }}
-        accessibilityValue={{ text: String(count) }}
+        accessibilityValue={{
+          text: count === "—" ? "Total unavailable" : String(count),
+        }}
         onPress={onPress}
         style={styles.sectionRow}
       >
