@@ -63,8 +63,24 @@ export const pluginSkillsApi = {
   async write(
     agentId: string,
     body: { expected_revision: number; skills: AgentSkill[] },
+    authorityGuard?: () => void,
   ) {
-    await requestJson(skillsPath(agentId), { method: "PUT", body });
+    await requestJson(skillsPath(agentId), {
+      method: "PUT",
+      body,
+      ...(authorityGuard ? { authorityGuard, retryOnAuthFailure: false } : {}),
+    });
+  },
+  async preload(
+    agentId: string,
+    skillId: string,
+    body: { expected_revision: number; paths: string[] },
+    authorityGuard: () => void,
+  ) {
+    await requestJson(
+      `${skillsPath(agentId)}/${encodeURIComponent(skillId)}/preload`,
+      { method: "PUT", body, authorityGuard, retryOnAuthFailure: false },
+    );
   },
   async search(query: string, page: number, signal?: AbortSignal) {
     return skillSearchSchema.parse(

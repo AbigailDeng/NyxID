@@ -35,6 +35,7 @@ import { AgentKeyLoginScreen } from "../features/auth/AgentKeyLoginScreen";
 import { useAuthSession } from "../features/auth/AuthSessionContext";
 import { AccountSettingsScreen } from "../features/account/AccountSettingsScreen";
 import { AccountSecurityScreen } from "../features/account/AccountSecurityScreen";
+import { AssistantManagementScreen } from "../features/assistant-management/AssistantManagementScreen";
 import { MachinePolicyScreen } from "../features/machines/MachinePolicyScreen";
 import { MachineActivityScreen } from "../features/machines/MachineActivityScreen";
 import { AgentMachinesScreen } from "../features/machines/AgentMachinesScreen";
@@ -646,6 +647,11 @@ function SettingsSheetRoute({
             name="AccountSecurity"
             component={AccountSecurityScreen}
             options={{ title: "Account & security" }}
+          />
+          <SheetStack.Screen
+            name="AssistantManagement"
+            component={AssistantManagementScreen}
+            options={{ title: "NyxBot management" }}
           />
           <SheetStack.Screen
             name="TermsOfService"

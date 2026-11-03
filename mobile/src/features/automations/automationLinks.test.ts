@@ -5,14 +5,14 @@ import { parseAutomationLink } from "./automationLinks";
 const frontend = "https://nyx.example";
 const setup = "4b47953b-92cc-482f-8443-e0bcc30ade21";
 
-test("trusted setup links open read-only Automations and preserve only the agent filter", () => {
+test("trusted setup links open read-only Automations and preserve bounded context for Web authoring", () => {
   for (const path of ["/assistant/automations", "/automations"]) {
     assert.deepEqual(
       parseAutomationLink(
         `${frontend}${path}?setup=${setup}&agent=researcher&instruction=private&token=secret&return_to=https://other.example#review`,
         frontend,
       ),
-      { kind: "automation", params: { agentId: "researcher" } },
+      { kind: "automation", params: { agentId: "researcher", setupId: setup } },
     );
   }
 });
@@ -26,6 +26,12 @@ test("an ordinary automation link can open the list or an agent filter", () => {
     parseAutomationLink(`${frontend}/automations?agent=agent%20one`, frontend),
     { kind: "automation", params: { agentId: "agent one" } },
   );
+});
+
+test("native management links preserve an exact automation and reject ambiguous controls", () => {
+  assert.deepEqual(parseAutomationLink(`${frontend}/assistant/automations?automation=${setup}&agent=researcher`, frontend), { kind: "automation", params: { agentId: "researcher", automationId: setup } });
+  assert.deepEqual(parseAutomationLink(`${frontend}/assistant/automations?create=true`, frontend), { kind: "automation", params: { create: true } });
+  for (const query of ["automation=wrong", `automation=${setup}&automation=${setup}`, "create=true&create=true", "create=no"]) assert.equal(parseAutomationLink(`${frontend}/assistant/automations?${query}`, frontend)?.kind, "invalid");
 });
 
 test("origin matching rejects external, lookalike, credential and protocol destinations", () => {

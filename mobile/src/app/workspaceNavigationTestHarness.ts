@@ -44,6 +44,7 @@ export const contentNames = [
   "ActivityDetail",
 ];
 export const settingsNames = [
+  "AssistantManagement",
   "AccountSettings",
   "AccountSecurity",
   "UsageCredits",

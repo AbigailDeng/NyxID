@@ -11,6 +11,7 @@ import type {
 } from "../../app/navigationTypes";
 import { useOpenWorkspaceChat } from "../../app/WorkspaceHeader";
 import { newAssistantChatParams } from "../../app/assistantChatParams";
+import { ManagementHandoff } from "../assistant-management/ManagementHandoff";
 import {
   ActionButton,
   Card,
@@ -76,6 +77,7 @@ export function AutomationsScreen({
   const rows = (list.data?.triggers ?? []).filter(
     (row) =>
       (status === "all" || row.status === status) &&
+      (!route.params?.automationId || row.id === route.params.automationId) &&
       (!agentId ||
         (row.delivery.type === "assistant" &&
           row.delivery.agent_id === agentId)) &&
@@ -98,7 +100,12 @@ export function AutomationsScreen({
       leading: undefined,
     });
   return (
-    <WorkspacePage title="Automations" showHeading={false}>
+    <WorkspacePage
+      title="Automations"
+      showHeading={false}
+      refreshing={list.isFetching}
+      onRefresh={() => void list.refetch()}
+    >
       <View style={s.spread}>
         <View style={s.flex}>
           <Label style={s.section}>Tasks that run for you</Label>
@@ -111,6 +118,26 @@ export function AutomationsScreen({
         Times shown in {zone}
       </Label>
       <AutomationGuidance />
+      <ManagementHandoff
+        label={
+          route.params?.setupId
+            ? "Continue this automation setup on web"
+            : route.params?.automationId
+              ? "Manage this automation on web"
+              : "Create automation on web"
+        }
+        target={{
+          kind: "automations",
+          agentId: agentId || undefined,
+          setupId: route.params?.setupId,
+          automationId: route.params?.automationId,
+          create: !route.params?.automationId,
+        }}
+      />
+      <ManagementHandoff
+        label="Manage automations on web"
+        target={{ kind: "automations", agentId: agentId || undefined }}
+      />
       <Field
         label="Search automations"
         placeholder="Search by name or agent"
@@ -244,7 +271,12 @@ export function AutomationDetailScreen({
   const row = detail.data;
   const zone = settings.data?.timezone ?? deviceTimezone();
   return (
-    <WorkspacePage title="Automation" showHeading={false}>
+    <WorkspacePage
+      title="Automation"
+      showHeading={false}
+      refreshing={detail.isFetching}
+      onRefresh={() => void detail.refetch()}
+    >
       {detail.isPending && <AutomationLoading />}
       {detail.error && (
         <>
@@ -338,6 +370,17 @@ export function AutomationDetailScreen({
             onPress={() => navigation.push("AutomationRuns", { id: row.id })}
           />
           <AutomationGuidance />
+          <ManagementHandoff
+            label="Edit, run, pause or delete on web"
+            target={{
+              kind: "automations",
+              automationId: row.id,
+              agentId:
+                row.delivery.type === "assistant"
+                  ? row.delivery.agent_id
+                  : undefined,
+            }}
+          />
           {row.delivery.type === "assistant" && (
             <Label muted style={s.small}>
               Normal agent usage and billing apply. This automation uses

@@ -82,6 +82,7 @@ function setup(
     ),
     "../../lib/api/agentsApi": { agentsApi: {} },
     "../../lib/api/automationsApi": { automationsApi: {} },
+    "../assistant-management/ManagementHandoff": { ManagementHandoff: "ManagementHandoff" },
     "./automationPresentation": presentation,
     "./automationTime": time,
     "./AutomationUI": {

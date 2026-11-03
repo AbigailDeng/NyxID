@@ -120,6 +120,54 @@ function chooseOption(label: string, name: string) {
   fireEvent.keyDown(screen.getByRole("option", { name }), { key: "Enter" });
 }
 
+it("a native management handoff shows only the selected automation and never runs or changes it", () => {
+  mocks.search.mockReturnValue({ automation: trigger.id, agent: "nyxbot" });
+  mocks.triggers.mockReturnValue({
+    data: {
+      triggers: [
+        trigger,
+        {
+          ...trigger,
+          id: "d0dc7ac1-0637-469f-9aac-7caf02336f23",
+          label: "Other task",
+        },
+      ],
+    },
+  });
+  render(<AutomationsPage />);
+  expect(screen.getByText("Morning summary")).toBeVisible();
+  expect(screen.queryByText("Other task")).toBeNull();
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect(mocks.update).not.toHaveBeenCalled();
+  expect(mocks.remove).not.toHaveBeenCalled();
+});
+
+it("a native creation handoff opens the editor and an unavailable selected row does not fall back to another task", () => {
+  mocks.search.mockReturnValue({ create: true, agent: "nyxbot" });
+  const view = render(<AutomationsPage />);
+  expect(
+    screen.getByRole("dialog", { name: "Create automation" }),
+  ).toBeVisible();
+  expect(mocks.create).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(
+    screen.queryByRole("dialog", { name: "Create automation" }),
+  ).toBeNull();
+  mocks.search.mockReturnValue({ automation: trigger.id });
+  view.rerender(<AutomationsPage />);
+  expect(
+    screen.getByText(
+      /This automation is unavailable for this account or agent/,
+    ),
+  ).toBeVisible();
+  mocks.search.mockReturnValue({ create: true, agent: "nyxbot" });
+  view.rerender(<AutomationsPage />);
+  expect(
+    screen.getByRole("dialog", { name: "Create automation" }),
+  ).toBeVisible();
+  expect(mocks.create).not.toHaveBeenCalled();
+});
+
 it("previews calendar times after the debounce and cancels stale previews", async () => {
   vi.useFakeTimers();
   render(<AutomationEditor onClose={vi.fn()} onSecrets={vi.fn()} />);

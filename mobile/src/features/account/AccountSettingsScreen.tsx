@@ -786,6 +786,12 @@ export function AccountSettingsScreen({ navigation, route }: Props) {
 
         {/* Actions */}
         <View style={styles.actionsWrap}>
+          <PrimaryButton
+            refreshLabelOnFontScaleChange
+            label="NyxBot limits & management"
+            kind="ghost"
+            onPress={() => navigation.push("AssistantManagement")}
+          />
           <PrimaryButton refreshLabelOnFontScaleChange label="Usage & credits" kind="ghost"
             onPress={() => navigation.push("UsageCredits")} />
           <PrimaryButton refreshLabelOnFontScaleChange label="Profile & account security" kind="ghost"

@@ -161,6 +161,8 @@ function setup({
   state.set("history", response({ items: [] }));
   const client = { invalidateQueries: record("invalidate") };
   const harness = hookHarness<Element>({
+    "./SkillActivationControls": { SkillActivationControls: "SkillActivationControls" },
+    "../assistant-management/ManagementHandoff": { ManagementHandoff: "ManagementHandoff" },
     "../../components/AgentAvatar": {
       AgentAvatar: "AgentAvatar",
       AgentAvatarStack: "AgentAvatarStack",
