@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 import { renderSegmentControl } from "../../components/SegmentControl.testHarness";
-import { hookHarness } from "../assistant/assistantHookTestHarness";
+import { hookHarness, deferred } from "../assistant/assistantHookTestHarness";
 import * as connectionPresentation from "./connectionPresentation";
 import * as serviceContracts from "./serviceContracts";
 import type { CatalogEntry, ServiceConnection } from "./serviceContracts";
@@ -12,9 +12,7 @@ type ApiCall = { method: string; args: unknown[] };
 
 const renderElement = (type: unknown, props: unknown) =>
   type === renderSegmentControl
-    ? renderSegmentControl(
-        props as Parameters<typeof renderSegmentControl>[0],
-      )
+    ? renderSegmentControl(props as Parameters<typeof renderSegmentControl>[0])
     : { type, props };
 
 function elements(root: Element): Element[] {
@@ -52,6 +50,7 @@ const connection: ServiceConnection = {
   is_active: true,
   auto_connected: false,
   credential_type: "oauth2",
+  service_type: "http",
   credential_source: { type: "personal" },
   catalog_service_slug: "cloudflare",
   catalog_service_name: "Cloudflare",
@@ -82,14 +81,19 @@ function setup({
   row = connection,
   catalogEntry = entry,
   add = false,
+  oauthInitiate,
 }: {
   row?: ServiceConnection;
   catalogEntry?: CatalogEntry;
   add?: boolean;
+  oauthInitiate?: Promise<{ authorization_url: string }>;
 } = {}) {
   const calls: ApiCall[] = [];
   const browsers: string[] = [];
   const copied: string[] = [];
+  const alerts: Array<{
+    buttons: Array<{ text: string; onPress?: () => void }>;
+  }> = [];
   const queryClient = {
     invalidateQueries: async () => {},
     setQueryData: () => {},
@@ -111,6 +115,13 @@ function setup({
     },
     "../../components/ServiceIcon": { ServiceIcon: "ServiceIcon" },
     "react-native": {
+      Alert: {
+        alert: (
+          _title: string,
+          _message: string,
+          buttons: Array<{ text: string; onPress?: () => void }>,
+        ) => alerts.push({ buttons }),
+      },
       AppState: {
         currentState: "active",
         addEventListener: () => ({ remove: () => {} }),
@@ -174,9 +185,12 @@ function setup({
     "../../lib/api/ApiError": { ApiError: class ApiError extends Error {} },
     "../../lib/api/servicesApi": {
       servicesApi: {
-        initiateOAuth: record("initiateOAuth", {
-          authorization_url: "https://provider.example/authorize?state=bound",
-        }),
+        initiateOAuth: record(
+          "initiateOAuth",
+          oauthInitiate ?? {
+            authorization_url: "https://provider.example/authorize?state=bound",
+          },
+        ),
         connection: async (id: string) => {
           calls.push({ method: "connection", args: [id] });
           return {
@@ -198,6 +212,13 @@ function setup({
     "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
     "./serviceContracts": serviceContracts,
     "./connectionPresentation": connectionPresentation,
+    "./console/ServiceMonitoringCard": {
+      ServiceMonitoringCard: "ServiceMonitoringCard",
+    },
+    "./console/ConsoleManagement": {
+      AdvancedConnectionLinks: "AdvancedConnectionLinks",
+      ConsoleManagement: "ConsoleManagement",
+    },
     "../plugins/PluginConnectionHistory": {
       PluginConnectionHistory: "PluginConnectionHistory",
     },
@@ -224,6 +245,7 @@ function setup({
     calls,
     browsers,
     copied,
+    alerts,
     button,
     find,
     text: () => textContent(harness.flush()),
@@ -262,6 +284,48 @@ test("a healthy OAuth connection explains provider access without asking to reau
   assert.doesNotMatch(env.text(), /Edit zones/);
   assert.equal(env.hasButton("Manage permissions in Web"), true);
   assert.deepEqual(env.calls, []);
+  env.harness.unmount();
+});
+
+test("monitoring locks parent navigation and other writes; changing tabs asks before discarding its draft", () => {
+  const env = setup();
+  const card = env.find((item) => item.type === "ServiceMonitoringCard");
+  card.props.onBusyChange(true);
+  env.harness.flush();
+  env.tab("Advanced");
+  assert.equal(env.hasButton("Copy proxy address"), false);
+  const enabled = env.find((item) => item.type === "Switch");
+  assert.equal(enabled.props.disabled, true);
+  card.props.onBusyChange(false);
+  card.props.onEditingChange(true);
+  env.harness.flush();
+  env.tab("Advanced");
+  assert.equal(env.alerts.length, 1);
+  assert.equal(env.hasButton("Copy proxy address"), false);
+  env.alerts[0]!.buttons.find((item) => item.text === "Discard changes")!
+    .onPress!();
+  env.harness.flush();
+  assert.equal(env.hasButton("Copy proxy address"), true);
+  env.harness.unmount();
+});
+
+test("monitoring false cannot unlock an existing OAuth repair action", async () => {
+  const pending = deferred<{ authorization_url: string }>();
+  const env = setup({
+    row: { ...connection, status: "failed" },
+    oauthInitiate: pending.promise,
+  });
+  env.button("Reconnect").props.onPress();
+  env.harness.flush();
+  env
+    .find((item) => item.type === "ServiceMonitoringCard")
+    .props.onBusyChange(false);
+  env.harness.flush();
+  env.tab("Advanced");
+  assert.equal(env.hasButton("Copy proxy address"), false);
+  assert.equal(env.find((item) => item.type === "Switch").props.disabled, true);
+  pending.resolve({ authorization_url: "https://provider.example/authorize" });
+  await env.harness.settle();
   env.harness.unmount();
 });
 
