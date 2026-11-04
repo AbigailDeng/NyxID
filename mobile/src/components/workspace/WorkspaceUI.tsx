@@ -1,4 +1,4 @@
-import type { PropsWithChildren } from "react";
+import type { PropsWithChildren, ReactNode } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -34,6 +34,7 @@ export function WorkspacePage({
   refreshing = false,
   onRefresh,
   contentStyle,
+  header,
 }: PropsWithChildren<{
   title: string;
   titleNumberOfLines?: number;
@@ -43,6 +44,7 @@ export function WorkspacePage({
   refreshing?: boolean;
   onRefresh?: () => void;
   contentStyle?: StyleProp<ViewStyle>;
+  header?: ReactNode;
 }>) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -111,13 +113,17 @@ export function WorkspacePage({
       style={[styles.fill, { backgroundColor: colors.bg }]}
     >
       {Platform.OS === "android" ? (
-        <AndroidKeyboardAvoidingView>{body}</AndroidKeyboardAvoidingView>
+        <AndroidKeyboardAvoidingView>
+          {header}
+          {body}
+        </AndroidKeyboardAvoidingView>
       ) : (
         <KeyboardAvoidingView
           style={styles.fill}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
           keyboardVerticalOffset={insets.top + 56}
         >
+          {header}
           {body}
         </KeyboardAvoidingView>
       )}
@@ -225,10 +231,10 @@ export function ActionButton({
     blocked && !loading
       ? colors.textTertiary
       : variant === "primary"
-      ? colors.onPrimary
-      : variant === "danger"
-        ? colors.danger
-        : colors.textPrimary;
+        ? colors.onPrimary
+        : variant === "danger"
+          ? colors.danger
+          : colors.textPrimary;
   const content = (
     <View style={styles.buttonContent}>
       {loading ? <ActivityIndicator size="small" color={color} /> : null}
@@ -347,7 +353,11 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   multiline: { minHeight: 96, textAlignVertical: "top" },
-  button: { minWidth: TOUCH_TARGET, borderRadius: radius.md, overflow: "hidden" },
+  button: {
+    minWidth: TOUCH_TARGET,
+    borderRadius: radius.md,
+    overflow: "hidden",
+  },
   compactButton: {
     alignSelf: "flex-start",
     maxWidth: "100%",

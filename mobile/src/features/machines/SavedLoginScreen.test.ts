@@ -11,7 +11,7 @@ type Element = { type: unknown; props: Record<string, any> };
 function all(value: Element): Element[] {
   return [
     value,
-    ...[value.props.children]
+    ...[value.props.header, value.props.children]
       .flat(Infinity)
       .flatMap((child) =>
         child && typeof child === "object" && "props" in child
@@ -26,6 +26,21 @@ const ui = Object.fromEntries(
     (name) => [name, name],
   ),
 );
+const toolbarNative = {
+  View: "View",
+  Pressable: "Pressable",
+  ActivityIndicator: "ActivityIndicator",
+  StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 },
+};
+const toolbarModules = {
+  "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
+  "../../theme/designTokens": { radius: { md: 8 }, TOUCH_TARGET: 44 },
+  "lucide-react-native": {
+    MoreHorizontal: "MoreHorizontal",
+    Plus: "Plus",
+    RefreshCw: "RefreshCw",
+  },
+};
 function editor(login?: SavedLogin) {
   const gate = deferred<void>();
   const busy: boolean[] = [];
@@ -274,12 +289,37 @@ test("save synchronously locks parent navigation until request completion", asyn
   await screen.harness.settle();
   assert.deepEqual(screen.busy, [true, false]);
 });
-test("parent locks Back, tabs, refresh and Web handoff while the editor saves", () => {
+test("parent rejects stale Web callbacks and refresh during editing, then locks navigation while saving", () => {
   let back: any;
-  const runtime = { epoch: 1, active: true, busy: false, uncertain: false };
+  let generation = 0;
+  let refreshes = 0;
+  const webPaths: string[] = [];
+  const optionCallbacks: Array<() => void> = [];
+  const runtime = {
+    epoch: 1,
+    active: true,
+    busy: false,
+    uncertain: false,
+    current: () => true,
+    reviewed() {},
+    captureWriteGuard: () => {
+      const admittedGeneration = generation;
+      return () => admittedGeneration === generation;
+    },
+  };
   const harness = hookHarness<Element>({
+    ...toolbarModules,
     "react/jsx-runtime": { jsx, jsxs: jsx, Fragment: "Fragment" },
-    "react-native": { View: "View" },
+    "react-native": {
+      ...toolbarNative,
+      Alert: {
+        alert: (_title: string, _message: unknown, options: any[]) => {
+          optionCallbacks.push(
+            options.find((option) => option.text === "Open on web").onPress,
+          );
+        },
+      },
+    },
     "../../app/WorkspaceHeader": {
       useWorkspaceBack: (options: any) => {
         back = options;
@@ -303,7 +343,14 @@ test("parent locks Back, tabs, refresh and Web handoff while the editor saves", 
     "./savedLoginEditorTransport": transport,
     "@tanstack/react-query": {
       useQueryClient: () => ({}),
-      useQuery: () => ({ data: [], isSuccess: true }),
+      useQuery: () => ({
+        data: [],
+        isSuccess: true,
+        refetch: async () => {
+          refreshes++;
+          return { isSuccess: true };
+        },
+      }),
     },
   });
   const module = harness.load(
@@ -312,14 +359,34 @@ test("parent locks Back, tabs, refresh and Web handoff while the editor saves", 
   harness.mount(() =>
     module.SavedLogins({
       inventory: { userId: USER, nodes: [] },
-      onWeb() {},
+      onWeb: (path: string) => webPaths.push(path),
       onMachines() {},
     }),
   );
+  const openOptions = () =>
+    all(harness.value())
+      .find((item) => item.props.accessibilityLabel === "Saved login options")!
+      .props.onPress();
+  openOptions();
+  optionCallbacks.shift()!();
+  assert.deepEqual(webPaths, ["/assistant/machines?tab=logins"]);
+  openOptions();
+  // A native options callback may arrive after an interruption invalidates
+  // its admitted action, even before React has rendered the new state.
+  generation++;
+  optionCallbacks.shift()!();
+  assert.equal(webPaths.length, 1);
+  openOptions();
   all(harness.value())
-    .find((item) => item.props.label === "Add saved login")!
+    .find((item) => item.props.accessibilityLabel === "Add saved login")!
     .props.onPress();
   harness.flush();
+  optionCallbacks.shift()!();
+  assert.equal(webPaths.length, 1);
+  all(harness.value())
+    .find((item) => item.type === "WorkspacePage")!
+    .props.onRefresh();
+  assert.equal(refreshes, 0, "pull refresh must preserve an unsaved editor");
   all(harness.value())
     .find((item) => item.type === "SavedLoginEditor")!
     .props.onBusy(true);
@@ -332,13 +399,14 @@ test("parent locks Back, tabs, refresh and Web handoff while the editor saves", 
   );
   assert.equal(
     all(harness.value()).find(
-      (item) => item.props.label === "Saved logins on web",
+      (item) => item.props.accessibilityLabel === "Saved login options",
     )!.props.disabled,
     true,
   );
   assert.equal(
     all(harness.value()).find(
-      (item) => item.props.label === "Refresh saved login metadata",
+      (item) =>
+        item.props.accessibilityLabel === "Refresh saved login metadata",
     )!.props.disabled,
     true,
   );
@@ -354,6 +422,7 @@ async function realEditor() {
   const blurListeners = new Set<() => void>();
   let focused = true;
   const native = {
+    ...toolbarNative,
     Platform: { OS: "ios" },
     Switch: "Switch",
     View: "View",
@@ -374,6 +443,7 @@ async function realEditor() {
   };
   const machineUI: Record<string, unknown> = {};
   const harness = hookHarness<Element>({
+    ...toolbarModules,
     "react/jsx-runtime": { jsx, jsxs: jsx, Fragment: "Fragment" },
     "react-native": native,
     "@react-navigation/native": {
@@ -455,12 +525,14 @@ async function realEditor() {
   });
   const find = (type: string, label: string) => {
     const element = all(harness.value()).find(
-      (item) => item.type === type && item.props.label === label,
+      (item) =>
+        item.type === type &&
+        (item.props.label === label || item.props.accessibilityLabel === label),
     );
     assert.ok(element, label);
     return element;
   };
-  find("ActionButton", "Add saved login").props.onPress();
+  find("Pressable", "Add saved login").props.onPress();
   await harness.settle();
   return {
     harness,
@@ -517,19 +589,23 @@ test("queued submissions keep the real parent and editor write locks until the a
     true,
   );
   for (const label of [
-    "Saved logins on web",
+    "Saved login options",
     "Refresh saved login metadata",
     "Cancel and clear credentials",
   ])
-    assert.equal(find("ActionButton", label).props.disabled, true, label);
+    assert.equal(
+      find(
+        label === "Cancel and clear credentials" ? "ActionButton" : "Pressable",
+        label,
+      ).props.disabled,
+      true,
+      label,
+    );
   gate.resolve();
   await harness.settle();
   assert.deepEqual(busy, [true, false]);
   assert.equal(screen.back().disabled, false);
-  assert.equal(
-    find("ActionButton", "Saved logins on web").props.disabled,
-    false,
-  );
+  assert.equal(find("Pressable", "Saved login options").props.disabled, false);
 });
 
 test("a temporary native interruption preserves the draft while pausing submission", async (t) => {

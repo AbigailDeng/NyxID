@@ -1,5 +1,12 @@
-import { useState } from "react";
-import { View } from "react-native";
+import { useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  StyleSheet,
+  View,
+} from "react-native";
+import { MoreHorizontal, Plus, RefreshCw } from "lucide-react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import { SegmentControl } from "../../components/SegmentControl";
@@ -13,6 +20,8 @@ import {
   WorkspacePage,
 } from "../../components/workspace/WorkspaceUI";
 import { machinesApi } from "../../lib/api/machinesApi";
+import { useTheme } from "../../theme/ThemeContext";
+import { radius, TOUCH_TARGET } from "../../theme/designTokens";
 import {
   machineWebPath,
   type MachineInventory,
@@ -42,6 +51,7 @@ export function SavedLogins({
   onWeb: (path: string) => void;
   onMachines: () => void;
 }) {
+  const { colors } = useTheme();
   const write = useMachineWrite();
   const client = useQueryClient();
   const [deleting, setDeleting] = useState<SavedLogin>();
@@ -88,7 +98,27 @@ export function SavedLogins({
     reviewRequired ||
     !write.active ||
     !!logins.error;
+  const refreshDisabled =
+    busy || !write.active || !!editing || logins.isFetching;
+  const webDisabled = busy || !write.active || !!editing || !!deleting;
+  const liveToolbar = useRef({ webDisabled, refreshDisabled });
+  liveToolbar.current = { webDisabled, refreshDisabled };
+  function showOptions() {
+    if (liveToolbar.current.webDisabled) return;
+    const current = write.captureWriteGuard();
+    Alert.alert("Saved login options", undefined, [
+      {
+        text: "Open on web",
+        onPress: () => {
+          if (current() && !liveToolbar.current.webDisabled)
+            onWeb(machineWebPath(undefined, "logins"));
+        },
+      },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }
   async function refresh() {
+    if (liveToolbar.current.refreshDisabled) return;
     const result = await logins.refetch();
     if (!write.current()) return;
     if (!result.isSuccess || result.error)
@@ -107,25 +137,109 @@ export function SavedLogins({
   }
   return (
     <WorkspacePage
+      key={
+        editing
+          ? `edit:${editing === "new" ? "new" : editing.id}`
+          : deleting
+            ? `delete:${deleting.id}`
+            : "list"
+      }
       title="Saved logins"
       showHeading={false}
       refreshing={logins.isRefetching}
-      onRefresh={() => {
-        if (!busy && write.active) void refresh();
-      }}
+      onRefresh={() => void refresh()}
+      contentStyle={styles.content}
+      header={
+        <View style={[styles.header, { borderBottomColor: colors.border }]}>
+          <SegmentControl
+            segments={machineTabs}
+            activeIndex={1}
+            disabled={busy}
+            onPress={(index) => {
+              if (index === 0)
+                confirmDiscard(!!deleting || !!editing, onMachines);
+            }}
+          />
+          <View style={styles.toolbar}>
+            <Label muted style={styles.count}>
+              {logins.data
+                ? `${logins.data.length} saved ${logins.data.length === 1 ? "login" : "logins"}`
+                : "Saved logins"}
+            </Label>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Add saved login"
+              accessibilityState={{
+                disabled: blocked || !inventory?.userId || !!editing,
+              }}
+              disabled={blocked || !inventory?.userId || !!editing}
+              onPress={() => {
+                setNotice(undefined);
+                setEditing("new");
+              }}
+              style={({ pressed }) => [
+                styles.add,
+                {
+                  backgroundColor: colors.primary,
+                  opacity:
+                    blocked || !inventory?.userId || editing
+                      ? 0.4
+                      : pressed
+                        ? 0.75
+                        : 1,
+                },
+              ]}
+            >
+              <Plus size={17} color={colors.onPrimary} />
+              <Label style={{ color: colors.onPrimary }}>Add</Label>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Refresh saved login metadata"
+              accessibilityState={{
+                disabled: !!refreshDisabled,
+                busy: logins.isRefetching,
+              }}
+              disabled={refreshDisabled}
+              onPress={() => void refresh()}
+              style={({ pressed }) => [
+                styles.icon,
+                {
+                  opacity:
+                    refreshDisabled && !logins.isRefetching
+                      ? 0.4
+                      : pressed
+                        ? 0.65
+                        : 1,
+                },
+              ]}
+            >
+              {logins.isRefetching ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <RefreshCw size={19} color={colors.textSecondary} />
+              )}
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Saved login options"
+              accessibilityHint="Open saved logins on web"
+              accessibilityState={{ disabled: webDisabled }}
+              disabled={webDisabled}
+              onPress={showOptions}
+              style={({ pressed }) => [
+                styles.icon,
+                { opacity: webDisabled ? 0.4 : pressed ? 0.65 : 1 },
+              ]}
+            >
+              <MoreHorizontal size={22} color={colors.textSecondary} />
+            </Pressable>
+          </View>
+        </View>
+      }
     >
-      <SegmentControl
-        segments={machineTabs}
-        activeIndex={1}
-        disabled={busy}
-        onPress={(index) => {
-          if (index === 0) confirmDiscard(!!deleting || !!editing, onMachines);
-        }}
-      />
       <Label muted style={machineStyles.metadata}>
-        Metadata only. Passwords and TOTP secrets are never returned or stored
-        by this screen. Create or fully replace credentials using the secure
-        form.
+        Use saved logins to sign in on your machines.
       </Label>
       {handoffError && <Notice tone="error" message={handoffError} />}
       {logins.isPending && <Label muted>Loading saved logins…</Label>}
@@ -147,9 +261,7 @@ export function SavedLogins({
           onUncertain={() => setNeedsReview(true)}
           onBusy={setSaving}
           onSaved={() => {
-            setNotice(
-              "Saved login updated. Credentials are not returned by the server.",
-            );
+            setNotice("Saved login updated.");
             void client.invalidateQueries({
               queryKey: machineKeys(write.epoch),
             });
@@ -254,26 +366,40 @@ export function SavedLogins({
       {!logins.isPending && !logins.error && !logins.data?.length && (
         <Label muted>No saved logins available.</Label>
       )}
-      <ActionButton
-        compact
-        label="Add saved login"
-        disabled={blocked || !inventory?.userId || !!editing}
-        onPress={() => setEditing("new")}
-      />
-      <ActionButton
-        compact
-        label="Refresh saved login metadata"
-        variant="secondary"
-        disabled={busy || !write.active || !!editing}
-        onPress={() => void refresh()}
-      />
-      <ActionButton
-        compact
-        label="Saved logins on web"
-        variant="secondary"
-        disabled={busy}
-        onPress={() => onWeb(machineWebPath(undefined, "logins"))}
-      />
     </WorkspacePage>
   );
 }
+
+const styles = StyleSheet.create({
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  toolbar: {
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  count: { flex: 1, minWidth: 0, marginRight: 8 },
+  add: {
+    minHeight: TOUCH_TARGET,
+    minWidth: TOUCH_TARGET,
+    paddingHorizontal: 12,
+    borderRadius: radius.md,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  icon: {
+    width: TOUCH_TARGET,
+    height: TOUCH_TARGET,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radius.md,
+  },
+  content: { paddingTop: 12 },
+});
