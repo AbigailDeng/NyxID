@@ -370,6 +370,156 @@ test("parent rejects refresh during editing, then locks navigation while saving"
   harness.unmount();
 });
 
+function loginList(initialData?: SavedLogin[]) {
+  const requests: ReturnType<typeof deferred<void>>[] = [];
+  const runtime = {
+    epoch: 1,
+    active: true,
+    busy: false,
+    uncertain: false,
+    current: () => true,
+    reviewed() {},
+  };
+  const query = {
+    data: initialData,
+    isPending: initialData === undefined,
+    isSuccess: initialData !== undefined,
+    isFetching: initialData === undefined,
+    isRefetching: false,
+    error: undefined as Error | undefined,
+    refetch: async () => {
+      const request = deferred<void>();
+      requests.push(request);
+      query.isFetching = true;
+      query.isRefetching = !query.isPending;
+      harness.render();
+      await request.promise;
+      query.isFetching = false;
+      query.isRefetching = false;
+      harness.render();
+      return { isSuccess: true };
+    },
+  };
+  const harness = hookHarness<Element>({
+    ...toolbarModules,
+    "react/jsx-runtime": { jsx, jsxs: jsx, Fragment: "Fragment" },
+    "react-native": toolbarNative,
+    "../../app/WorkspaceHeader": { useWorkspaceBack() {} },
+    "../../components/workspace/WorkspaceUI": ui,
+    "../../components/SegmentControl": { SegmentControl: "SegmentControl" },
+    "../../components/StatusBadge": { StatusBadge: "StatusBadge" },
+    "../../components/SectionBadge": { SectionBadge: "SectionBadge" },
+    "../../lib/api/machinesApi": { machinesApi: {} },
+    "./MachineUI": {
+      useMachineWrite: () => runtime,
+      machineKeys: () => [],
+      machineError: (error: Error) => error.message,
+      confirmDiscard: (_dirty: boolean, action: () => void) => action(),
+    },
+    "./MachinePresentation": { machineStyles: {}, machineTabs: [] },
+    "./SavedLoginEditor": { SavedLoginEditor: "SavedLoginEditor" },
+    "./savedLoginEditorTransport": transport,
+    "@tanstack/react-query": {
+      useQueryClient: () => ({}),
+      useQuery: () => query,
+    },
+  });
+  const { SavedLogins } = harness.load(
+    fileURLToPath(new URL("./SavedLogins.tsx", import.meta.url)),
+  ) as { SavedLogins: (props: any) => Element };
+  harness.mount(() =>
+    SavedLogins({ inventory: { userId: USER, nodes: [] }, onMachines() {} }),
+  );
+  const elements = () => all(harness.value());
+  const page = () => elements().find((item) => item.type === "WorkspacePage")!;
+  const button = (label: string) =>
+    elements().find((item) => item.props.accessibilityLabel === label)!;
+  const hasText = (text: string) =>
+    elements().some(
+      (item) => item.type === "Label" && item.props.children === text,
+    );
+  const indicators = () =>
+    elements().filter((item) => item.type === "ActivityIndicator").length;
+  return { harness, query, requests, page, button, hasText, indicators };
+}
+
+test("saved-login empty state waits for a result and disappears during creation", (t) => {
+  const screen = loginList();
+  t.after(screen.harness.unmount);
+  assert.equal(screen.hasText("Loading saved logins…"), true);
+  assert.equal(screen.hasText("0 saved logins"), false);
+  assert.equal(screen.hasText("No saved logins available."), false);
+
+  Object.assign(screen.query, {
+    data: [],
+    isPending: false,
+    isSuccess: true,
+    isFetching: false,
+  });
+  screen.harness.render();
+  assert.equal(screen.hasText("Loading saved logins…"), false);
+  assert.equal(screen.hasText("0 saved logins"), true);
+  assert.equal(screen.hasText("No saved logins available."), true);
+
+  screen.button("Add saved login").props.onPress();
+  screen.harness.flush();
+  assert.equal(screen.hasText("No saved logins available."), false);
+});
+
+test("toolbar and pull refresh each use one progress indicator until their request settles", async (t) => {
+  const screen = loginList([]);
+  t.after(screen.harness.unmount);
+  screen.button("Refresh saved login metadata").props.onPress();
+  screen.harness.flush();
+  assert.equal(screen.page().props.refreshing, false);
+  assert.equal(screen.indicators(), 1);
+  assert.equal(screen.hasText("0 saved logins"), true);
+  assert.equal(screen.hasText("No saved logins available."), true);
+  screen.requests[0].resolve();
+  await screen.harness.settle();
+  assert.equal(screen.page().props.refreshing, false);
+  assert.equal(screen.indicators(), 0);
+
+  screen.page().props.onRefresh();
+  screen.harness.flush();
+  assert.equal(screen.page().props.refreshing, true);
+  assert.equal(screen.indicators(), 0);
+  screen.requests[1].resolve();
+  await screen.harness.settle();
+  assert.equal(screen.page().props.refreshing, false);
+  assert.equal(screen.indicators(), 0);
+});
+
+test("passive refetch preserves the cached saved-login list without starting pull feedback", (t) => {
+  const screen = loginList([
+    {
+      id: "login-1",
+      owner_id: USER,
+      label: "GitHub",
+      allowed_origins: ["https://github.com"],
+      has_password: true,
+      has_totp: false,
+      confirm_each_sign_in: true,
+      created_at: "2026-11-04T00:00:00Z",
+      updated_at: "2026-11-04T00:00:00Z",
+    },
+  ]);
+  t.after(screen.harness.unmount);
+  Object.assign(screen.query, { isFetching: true, isRefetching: true });
+  screen.harness.render();
+  assert.equal(screen.page().props.refreshing, false);
+  assert.equal(screen.indicators(), 1);
+  assert.equal(screen.hasText("1 saved login"), true);
+  assert.equal(screen.hasText("GitHub"), true);
+  assert.equal(screen.hasText("Loading saved logins…"), false);
+  assert.equal(screen.hasText("No saved logins available."), false);
+
+  Object.assign(screen.query, { isFetching: false, isRefetching: false });
+  screen.harness.render();
+  assert.equal(screen.indicators(), 0);
+  assert.equal(screen.hasText("GitHub"), true);
+});
+
 async function realEditor() {
   const gate = deferred<void>();
   const busy: boolean[] = [];

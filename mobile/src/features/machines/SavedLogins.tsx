@@ -46,6 +46,7 @@ export function SavedLogins({
   const [editing, setEditing] = useState<SavedLogin | "new">();
   const [needsReview, setNeedsReview] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
   const busy = write.busy || saving;
   const reviewRequired =
     needsReview ||
@@ -88,22 +89,28 @@ export function SavedLogins({
     busy || !write.active || !!editing || logins.isFetching;
   const liveRefreshDisabled = useRef(refreshDisabled);
   liveRefreshDisabled.current = refreshDisabled;
-  async function refresh() {
+  const showToolbarProgress = logins.isRefetching && !pullRefreshing;
+  async function refresh(source: "toolbar" | "pull" = "toolbar") {
     if (liveRefreshDisabled.current) return;
-    const result = await logins.refetch();
-    if (!write.current()) return;
-    if (!result.isSuccess || result.error)
-      setRefreshError(
-        result.error
-          ? machineError(result.error)
-          : "Saved-login metadata could not be verified. Refresh again before editing.",
-      );
-    else {
-      write.reviewed();
-      setDeleting(undefined);
-      setRefreshError(undefined);
-      setNeedsReview(false);
-      if (inventory?.userId) savedLoginReviewed(inventory.userId);
+    if (source === "pull") setPullRefreshing(true);
+    try {
+      const result = await logins.refetch();
+      if (!write.current()) return;
+      if (!result.isSuccess || result.error)
+        setRefreshError(
+          result.error
+            ? machineError(result.error)
+            : "Saved-login metadata could not be verified. Refresh again before editing.",
+        );
+      else {
+        write.reviewed();
+        setDeleting(undefined);
+        setRefreshError(undefined);
+        setNeedsReview(false);
+        if (inventory?.userId) savedLoginReviewed(inventory.userId);
+      }
+    } finally {
+      if (source === "pull") setPullRefreshing(false);
     }
   }
   return (
@@ -117,8 +124,8 @@ export function SavedLogins({
       }
       title="Saved logins"
       showHeading={false}
-      refreshing={logins.isRefetching}
-      onRefresh={() => void refresh()}
+      refreshing={pullRefreshing}
+      onRefresh={() => void refresh("pull")}
       contentStyle={styles.content}
       header={
         <View style={[styles.header, { borderBottomColor: colors.border }]}>
@@ -177,7 +184,7 @@ export function SavedLogins({
                 styles.icon,
                 {
                   opacity:
-                    refreshDisabled && !logins.isRefetching
+                    refreshDisabled && !showToolbarProgress
                       ? 0.4
                       : pressed
                         ? 0.65
@@ -185,7 +192,7 @@ export function SavedLogins({
                 },
               ]}
             >
-              {logins.isRefetching ? (
+              {showToolbarProgress ? (
                 <ActivityIndicator size="small" color={colors.primary} />
               ) : (
                 <RefreshCw size={19} color={colors.textSecondary} />
@@ -319,9 +326,11 @@ export function SavedLogins({
           </Card>
         ))
       )}
-      {!logins.isPending && !logins.error && !logins.data?.length && (
-        <Label muted>No saved logins available.</Label>
-      )}
+      {!editing &&
+        !deleting &&
+        !logins.isPending &&
+        !logins.error &&
+        !logins.data?.length && <Label muted>No saved logins available.</Label>}
     </WorkspacePage>
   );
 }
