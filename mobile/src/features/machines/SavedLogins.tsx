@@ -26,7 +26,10 @@ import {
 } from "./MachineUI";
 import { machineStyles, machineTabs } from "./MachinePresentation";
 import { SavedLoginEditor } from "./SavedLoginEditor";
-import { savedLoginReviewed, savedLoginReviewRequired } from "./savedLoginEditorTransport";
+import {
+  savedLoginReviewed,
+  savedLoginReviewRequired,
+} from "./savedLoginEditorTransport";
 
 export function SavedLogins({
   inventory,
@@ -48,7 +51,9 @@ export function SavedLogins({
   const [needsReview, setNeedsReview] = useState(false);
   const [saving, setSaving] = useState(false);
   const busy = write.busy || saving;
-  const reviewRequired = needsReview || (!!inventory?.userId && savedLoginReviewRequired(inventory.userId));
+  const reviewRequired =
+    needsReview ||
+    (!!inventory?.userId && savedLoginReviewRequired(inventory.userId));
   const logins = useQuery({
     queryKey: [...machineKeys(write.epoch), "logins"],
     queryFn: ({ signal }) => machinesApi.logins(signal),
@@ -58,13 +63,19 @@ export function SavedLogins({
   useWorkspaceBack({
     active: !!deleting || !!editing || busy,
     disabled: busy,
-    onBack: () => { setDeleting(undefined); setEditing(undefined); },
-    discardOnClose: deleting || editing
-      ? {
-          title: "Close saved-login review?",
-          message: editing ? "Unsaved credentials will be cleared." : "The login will not be deleted.",
-        }
-      : undefined,
+    onBack: () => {
+      setDeleting(undefined);
+      setEditing(undefined);
+    },
+    discardOnClose:
+      deleting || editing
+        ? {
+            title: "Close saved-login review?",
+            message: editing
+              ? "Unsaved credentials will be cleared."
+              : "The login will not be deleted.",
+          }
+        : undefined,
   });
   const ownerLabel = (login: SavedLogin) =>
     login.owner_id === inventory?.userId
@@ -72,11 +83,20 @@ export function SavedLogins({
       : (inventory?.nodes.find((node) => node.owner.id === login.owner_id)
           ?.owner.display_name ?? `Organization ${login.owner_id}`);
   const blocked =
-    busy || write.uncertain || reviewRequired || !write.active || !!logins.error;
+    busy ||
+    write.uncertain ||
+    reviewRequired ||
+    !write.active ||
+    !!logins.error;
   async function refresh() {
     const result = await logins.refetch();
     if (!write.current()) return;
-    if (!result.isSuccess || result.error) setRefreshError(result.error ? machineError(result.error) : "Saved-login metadata could not be verified. Refresh again before editing.");
+    if (!result.isSuccess || result.error)
+      setRefreshError(
+        result.error
+          ? machineError(result.error)
+          : "Saved-login metadata could not be verified. Refresh again before editing.",
+      );
     else {
       write.reviewed();
       setDeleting(undefined);
@@ -104,7 +124,8 @@ export function SavedLogins({
       />
       <Label muted style={machineStyles.metadata}>
         Metadata only. Passwords and TOTP secrets are never returned or stored
-        by this screen. Create or fully replace credentials using the secure form.
+        by this screen. Create or fully replace credentials using the secure
+        form.
       </Label>
       {handoffError && <Notice tone="error" message={handoffError} />}
       {logins.isPending && <Label muted>Loading saved logins…</Label>}
@@ -114,16 +135,30 @@ export function SavedLogins({
       {write.error && <Notice tone="error" message={write.error} />}
       {refreshError && <Notice tone="error" message={refreshError} />}
       {notice && <Notice message={notice} />}
-      {reviewRequired && <Notice message="A save may have reached the server. Refresh and review the metadata before editing again." />}
-      {editing && inventory?.userId ? <SavedLoginEditor
-        key={editing === "new" ? "new" : editing.id}
-        userId={inventory.userId}
-        login={editing === "new" ? undefined : editing}
-        onClose={() => setEditing(undefined)}
-        onUncertain={() => setNeedsReview(true)}
-        onBusy={setSaving}
-        onSaved={() => { setNotice("Saved login updated. Credentials are not returned by the server."); void client.invalidateQueries({ queryKey: machineKeys(write.epoch) }); void client.invalidateQueries({ queryKey: ["workspace", "agents"] }); }}
-      /> : deleting ? (
+      {reviewRequired && (
+        <Notice message="A save may have reached the server. Refresh and review the metadata before editing again." />
+      )}
+      {editing && inventory?.userId ? (
+        <SavedLoginEditor
+          key={editing === "new" ? "new" : editing.id}
+          userId={inventory.userId}
+          login={editing === "new" ? undefined : editing}
+          onClose={() => setEditing(undefined)}
+          onUncertain={() => setNeedsReview(true)}
+          onBusy={setSaving}
+          onSaved={() => {
+            setNotice(
+              "Saved login updated. Credentials are not returned by the server.",
+            );
+            void client.invalidateQueries({
+              queryKey: machineKeys(write.epoch),
+            });
+            void client.invalidateQueries({
+              queryKey: ["workspace", "agents"],
+            });
+          }}
+        />
+      ) : deleting ? (
         <Card>
           <Label>
             Delete {deleting.label} from {ownerLabel(deleting)}?

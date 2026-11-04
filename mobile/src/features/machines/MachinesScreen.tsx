@@ -69,7 +69,8 @@ export function MachinesScreen({
   });
   const node = inventory.data?.nodes.find((row) => row.id === selected);
   useEffect(() => {
-    if (runtime.active) void client.invalidateQueries({ queryKey: machineKeys(runtime.epoch) });
+    if (runtime.active)
+      void client.invalidateQueries({ queryKey: machineKeys(runtime.epoch) });
     else void client.cancelQueries({ queryKey: machineKeys(runtime.epoch) });
   }, [runtime.active, runtime.epoch, client]);
   const update = inventory.data?.updates.find(
@@ -94,7 +95,10 @@ export function MachinesScreen({
   async function handoff(path: string) {
     try {
       await openMachineWeb(path);
-      if (runtime.current()) await client.invalidateQueries({ queryKey: machineKeys(runtime.epoch) });
+      if (runtime.current())
+        await client.invalidateQueries({
+          queryKey: machineKeys(runtime.epoch),
+        });
     } catch (cause) {
       if (runtime.current()) setHandoffError(machineError(cause));
     }
@@ -206,7 +210,15 @@ export function MachinesScreen({
             variant="secondary"
             onPress={() => void handoff("/assistant/machines/new")}
           />
-          <HostedMachines canCreate={!inventory.isError && !!inventory.data?.features.includes("experimental:remote-machines")} onWeb={(path) => void handoff(path)} />
+          <HostedMachines
+            canCreate={
+              !inventory.isError &&
+              !!inventory.data?.features.includes(
+                "experimental:remote-machines",
+              )
+            }
+            onWeb={(path) => void handoff(path)}
+          />
         </>
       )}
       {selected && !inventory.isPending && !inventory.error && !node && (
