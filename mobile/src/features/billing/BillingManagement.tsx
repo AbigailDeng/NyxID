@@ -271,20 +271,28 @@ export function BillingManagementContents({
     ]);
   }
   async function review() {
-    const [billResult, invoiceResult, orgResult, topupResult, paymentResult] =
-      await Promise.all([
-        mayReadBills && authorized
-          ? bill.refetch()
-          : Promise.resolve(undefined),
-        mayReadBills && authorized
-          ? invoices.refetch()
-          : Promise.resolve(undefined),
-        orgs.refetch(),
-        !ownerId && hasWallet ? topups.refetch() : Promise.resolve(undefined),
-        !ownerId && hasWallet
-          ? paymentReview.refetch()
-          : Promise.resolve(undefined),
-      ]);
+    setNotice(undefined);
+    const [
+      billResult,
+      invoiceResult,
+      orgResult,
+      topupResult,
+      paymentResult,
+      grantResult,
+      allowanceResult,
+    ] = await Promise.all([
+      mayReadBills && authorized ? bill.refetch() : Promise.resolve(undefined),
+      mayReadBills && authorized
+        ? invoices.refetch()
+        : Promise.resolve(undefined),
+      orgs.refetch(),
+      !ownerId && hasWallet ? topups.refetch() : Promise.resolve(undefined),
+      !ownerId && hasWallet
+        ? paymentReview.refetch()
+        : Promise.resolve(undefined),
+      ownerId && authorized ? grants.refetch() : Promise.resolve(undefined),
+      ownerId && authorized ? allowances.refetch() : Promise.resolve(undefined),
+    ]);
     if (!write.current()) return;
     if (
       canReviewBilling([
@@ -293,10 +301,14 @@ export function BillingManagementContents({
         orgResult,
         ...(topupResult ? [topupResult] : []),
         ...(paymentResult ? [paymentResult] : []),
+        ...(grantResult ? [grantResult] : []),
+        ...(allowanceResult ? [allowanceResult] : []),
       ]) &&
       (!ownerId ||
         (orgResult.data?.kind === "ready" &&
-          orgResult.data.data.some((org) => org.id === ownerId)))
+          orgResult.data.data.some((org) => org.id === ownerId) &&
+          grantResult?.data?.kind === "ready" &&
+          allowanceResult?.data?.kind === "ready"))
     ) {
       write.reviewed();
       setBrowserError(undefined);

@@ -254,7 +254,15 @@ function setup(initialOwnerId?: string, actualRuntime = false) {
           isFetching: queryFlags.isFetching ?? false,
           refetch: async () => {
             refetches.push(key);
-            return { data, isSuccess: !refreshFails, isError: refreshFails };
+            const isError =
+              refreshFails ||
+              (key === "organizations" && membershipError) ||
+              queryFlags.isError === true;
+            return {
+              data,
+              isSuccess: !isError && queryFlags.isSuccess !== false,
+              isError,
+            };
           },
         };
       },
@@ -660,6 +668,54 @@ test("organization members retain benefits without requesting admin-only bills",
     .join(" ");
   assert.match(text, /bills and receipts require an organization admin/);
 });
+
+test("organization member refresh rereads both benefits without requesting admin-only bills", async (t) => {
+  const screen = setup(ORG);
+  t.after(screen.harness.unmount);
+  screen.role("member");
+  screen.button("Refresh server billing status").props.onPress();
+  await screen.harness.settle();
+  assert.deepEqual(screen.refetches.sort(), [
+    "allowances",
+    "grants",
+    "organizations",
+  ]);
+  assert.equal(screen.reviewed(), 1);
+  assert.ok(
+    all(screen.harness.value()).some(
+      (element) =>
+        element.type === "Notice" &&
+        element.props.message.startsWith("Server billing records refreshed."),
+    ),
+  );
+});
+
+for (const benefit of ["grants", "allowances"] as const) {
+  test(`organization member ${benefit} refresh failure cannot claim successful billing review`, async (t) => {
+    const screen = setup(ORG);
+    t.after(screen.harness.unmount);
+    screen.role("member");
+    screen.button("Refresh server billing status").props.onPress();
+    await screen.harness.settle();
+    assert.equal(screen.reviewed(), 1);
+    screen.flags(benefit, { isError: true });
+    screen.refetches.length = 0;
+    screen.button("Refresh server billing status").props.onPress();
+    await screen.harness.settle();
+    assert.deepEqual(screen.refetches.sort(), [
+      "allowances",
+      "grants",
+      "organizations",
+    ]);
+    assert.equal(screen.reviewed(), 1);
+    const notices = all(screen.harness.value())
+      .filter((element) => element.type === "Notice")
+      .map((element) => element.props.message)
+      .join(" ");
+    assert.match(notices, /Some billing records could not be verified/);
+    assert.doesNotMatch(notices, /Server billing records refreshed/);
+  });
+}
 
 for (const lifecycle of [
   "inactive and active without render",
