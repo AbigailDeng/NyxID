@@ -291,6 +291,25 @@ function AgentSkillsManager({
   const [notice, setNotice] = useState<string>();
   const lock = useRef(false);
   const authEpoch = useRef(getAuthEpoch());
+  const activationOperation = useRef<symbol | null>(null);
+  const managerMounted = useRef(false);
+  useEffect(() => {
+    managerMounted.current = true;
+    return () => {
+      managerMounted.current = false;
+      activationOperation.current = null;
+    };
+  }, []);
+  function activationBusy(value: boolean, operation: symbol) {
+    if (!managerMounted.current || authEpoch.current !== getAuthEpoch()) return;
+    if (value) {
+      activationOperation.current = operation;
+      setBusy(true);
+    } else if (activationOperation.current === operation) {
+      activationOperation.current = null;
+      setBusy(false);
+    }
+  }
   const currentKey = [...ROOT, agent.id] as const;
   const current = useQuery({
     queryKey: currentKey,
@@ -366,7 +385,10 @@ function AgentSkillsManager({
   }
   async function refresh() {
     await Promise.all([
-      client.invalidateQueries({ queryKey: currentKey }, { throwOnError: true }),
+      client.invalidateQueries(
+        { queryKey: currentKey },
+        { throwOnError: true },
+      ),
       client.invalidateQueries(
         { queryKey: [...ROOT, "history", agent.id] },
         { throwOnError: true },
@@ -617,7 +639,7 @@ function AgentSkillsManager({
                   current={current.data}
                   disabled={busy || !currentReady || current.isFetching}
                   onRefresh={refresh}
-                  onBusy={setBusy}
+                  onBusy={activationBusy}
                   onDirty={setActivationDirty}
                 />
               )}
@@ -628,7 +650,12 @@ function AgentSkillsManager({
                 <ActionButton
                   label={`Use latest (v${latestVersion.version})`}
                   variant="secondary"
-                  disabled={busy || activationDirty || !currentReady || Boolean(pin?.disabled)}
+                  disabled={
+                    busy ||
+                    activationDirty ||
+                    !currentReady ||
+                    Boolean(pin?.disabled)
+                  }
                   onPress={() => {
                     openView("versions", latestVersion.version);
                   }}

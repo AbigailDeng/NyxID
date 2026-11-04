@@ -37,7 +37,7 @@ export function SkillActivationControls({
   current: AgentSkills;
   disabled: boolean;
   onRefresh: () => Promise<void>;
-  onBusy: (value: boolean) => void;
+  onBusy: (value: boolean, operation: symbol) => void;
   onDirty: (value: boolean) => void;
 }) {
   const runtime = useAutomationRuntime();
@@ -81,7 +81,8 @@ export function SkillActivationControls({
     if (blocked || lock.current || (mode === "preload" && invalid)) return;
     lock.current = true;
     setBusy(true);
-    onBusy(true);
+    const operation = Symbol("skill activation write");
+    onBusy(true, operation);
     setError(undefined);
     setNotice(undefined);
     let sent = false;
@@ -148,8 +149,10 @@ export function SkillActivationControls({
       }
     } finally {
       lock.current = false;
+      // Refreshing the selection changes this editor's revision key. Release
+      // the manager's lock even when that successful refresh unmounted us.
+      onBusy(false, operation);
       if (writeScope.isMounted()) {
-        onBusy(false);
         if (epoch === getAuthEpoch()) setBusy(false);
       }
     }

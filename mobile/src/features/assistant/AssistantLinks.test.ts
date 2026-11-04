@@ -435,7 +435,9 @@ test("real link host routes account panels, preserves channel URL, retains the t
     props: { draft: "Keep this draft" },
   };
   const h = hookHarness<E>({
-    "@tanstack/react-query": { useQueryClient: () => ({ invalidateQueries: async () => {} }) },
+    "@tanstack/react-query": {
+      useQueryClient: () => ({ invalidateQueries: async () => {} }),
+    },
     "react/jsx-runtime": {
       jsx: (type: any, props: any) => ({ type, props }),
       jsxs: (type: any, props: any) => ({ type, props }),

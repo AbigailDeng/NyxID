@@ -29,9 +29,36 @@ test("an ordinary automation link can open the list or an agent filter", () => {
 });
 
 test("native management links preserve an exact automation and reject ambiguous controls", () => {
-  assert.deepEqual(parseAutomationLink(`${frontend}/assistant/automations?automation=${setup}&agent=researcher`, frontend), { kind: "automation", params: { agentId: "researcher", automationId: setup } });
-  assert.deepEqual(parseAutomationLink(`${frontend}/assistant/automations?create=true`, frontend), { kind: "automation", params: { create: true } });
-  for (const query of ["automation=wrong", `automation=${setup}&automation=${setup}`, "create=true&create=true", "create=no"]) assert.equal(parseAutomationLink(`${frontend}/assistant/automations?${query}`, frontend)?.kind, "invalid");
+  assert.deepEqual(
+    parseAutomationLink(
+      `${frontend}/assistant/automations?automation=${setup}&agent=researcher`,
+      frontend,
+    ),
+    {
+      kind: "automation",
+      params: { agentId: "researcher", automationId: setup },
+    },
+  );
+  assert.deepEqual(
+    parseAutomationLink(
+      `${frontend}/assistant/automations?create=true`,
+      frontend,
+    ),
+    { kind: "automation", params: { create: true } },
+  );
+  for (const query of [
+    "automation=wrong",
+    `automation=${setup}&automation=${setup}`,
+    "create=true&create=true",
+    "create=no",
+  ])
+    assert.equal(
+      parseAutomationLink(
+        `${frontend}/assistant/automations?${query}`,
+        frontend,
+      )?.kind,
+      "invalid",
+    );
 });
 
 test("origin matching rejects external, lookalike, credential and protocol destinations", () => {
