@@ -602,8 +602,9 @@ account pages and QR/terminal quick actions use the retained pull-up surface. Se
 - Native Automations keeps configured tasks, source/schedule, target,
   confirmation policy, read-only status and paged run history with exact thread
   links. Its transport issues GET requests only. Creation, changes and execution
-  use Ask NyxBot or contextual Web management links, retaining the selected agent,
-  automation or setup. Returning from Web refreshes authoritative server state;
+  use Ask NyxBot or the existing Web manager, retaining its existing agent filter
+  or setup context. The App does not add exact-task or create-form URL behavior.
+  Returning from Web refreshes authoritative server state;
   browser dismissal never confirms a mutation. There is no native automation
   editor, toggle, invoke, delete or webhook setup.
 - Reply activity/receipts and prose have a 16pt gap. Ordinary Markdown blocks have

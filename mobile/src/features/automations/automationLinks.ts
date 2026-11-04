@@ -1,8 +1,6 @@
 export type AutomationLinkParams = {
   agentId?: string;
   setupId?: string;
-  automationId?: string;
-  create?: boolean;
 };
 
 export type AutomationLink =
@@ -35,8 +33,6 @@ export function parseAutomationLink(
     const params: AutomationLinkParams = {};
     const setup = link.searchParams.getAll("setup");
     const agent = link.searchParams.getAll("agent");
-    const automation = link.searchParams.getAll("automation");
-    const create = link.searchParams.getAll("create");
     if (setup.length > 1 || (setup.length && !setupId.test(setup[0]!)))
       return {
         kind: "invalid",
@@ -56,20 +52,7 @@ export function parseAutomationLink(
           "This automation link has an invalid agent. Ask NyxBot for a new link.",
       };
     if (agent.length) params.agentId = agent[0]!;
-    if (
-      automation.length > 1 ||
-      (automation.length && !setupId.test(automation[0]!)) ||
-      create.length > 1 ||
-      (create.length && create[0] !== "true")
-    )
-      return {
-        kind: "invalid",
-        message:
-          "This automation management link is invalid. Ask NyxBot for a new link.",
-      };
     if (setup.length) params.setupId = setup[0]!;
-    if (automation.length) params.automationId = automation[0]!;
-    if (create.length) params.create = true;
     // Only bounded identifiers cross. Authoring stays on web; preserve its
     // setup context without copying instructions, credentials or return URLs.
     return { kind: "automation", params };

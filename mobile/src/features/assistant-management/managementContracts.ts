@@ -130,8 +130,6 @@ export type ManagementTarget =
   | {
       kind: "automations";
       agentId?: string;
-      automationId?: string;
-      create?: boolean;
       setupId?: string;
     }
   | { kind: "skills"; agentId: string }
@@ -168,11 +166,8 @@ export function managementUrl(
   if (target.kind === "automations") {
     if (target.agentId)
       url.searchParams.set("agent", reference.max(64).parse(target.agentId));
-    if (target.automationId)
-      url.searchParams.set("automation", z.uuid().parse(target.automationId));
     if (target.setupId)
       url.searchParams.set("setup", z.uuid().parse(target.setupId));
-    else if (target.create) url.searchParams.set("create", "true");
   } else if (target.kind === "skills") {
     url.searchParams.set("agent", reference.parse(target.agentId));
     url.searchParams.set("details", "skills");

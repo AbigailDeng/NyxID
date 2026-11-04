@@ -5,6 +5,7 @@ import { hookHarness } from "../assistant/assistantHookTestHarness";
 import * as presentation from "./automationPresentation";
 import * as time from "./automationTime";
 import { automationSchema } from "./automationContracts";
+import { managementUrl } from "../assistant-management/managementContracts";
 
 const id = "12345678-1234-4123-8123-123456789abc";
 const at = "2026-10-27T01:00:00Z";
@@ -82,7 +83,9 @@ function setup(
     ),
     "../../lib/api/agentsApi": { agentsApi: {} },
     "../../lib/api/automationsApi": { automationsApi: {} },
-    "../assistant-management/ManagementHandoff": { ManagementHandoff: "ManagementHandoff" },
+    "../assistant-management/ManagementHandoff": {
+      ManagementHandoff: "ManagementHandoff",
+    },
     "./automationPresentation": presentation,
     "./automationTime": time,
     "./AutomationUI": {
@@ -182,6 +185,18 @@ function setup(
 test("read-only list keeps agent/status/search filters and opens details with no authoring controls", () => {
   const env = setup("AutomationsScreen");
   try {
+    assert.equal(
+      env.all().filter((item) => item.type === "ManagementHandoff").length,
+      1,
+      "the list has one Web management entry",
+    );
+    assert.equal(
+      managementUrl(
+        "https://nyx.example",
+        env.control("Manage automations on web").props.target,
+      ),
+      "https://nyx.example/assistant/automations",
+    );
     env.control("Open Morning release check").props.onPress();
     assert.equal(env.routes[0].name, "AutomationDetail");
     env.control("Status").props.onChange("disabled");
@@ -192,6 +207,13 @@ test("read-only list keeps agent/status/search filters and opens details with no
     env.control("Agent").props.onChange("researcher");
     env.harness.flush();
     assert.throws(() => env.control("Open Webhook reminder"));
+    assert.equal(
+      managementUrl(
+        "https://nyx.example",
+        env.control("Manage automations on web").props.target,
+      ),
+      "https://nyx.example/assistant/automations?agent=researcher",
+    );
     env.control("Search automations").props.onChangeText("not found");
     env.harness.flush();
     assert.match(env.text(), /No matching automations/);
@@ -209,6 +231,14 @@ test("read-only list keeps agent/status/search filters and opens details with no
 test("read-only details show task, target and confirmation policy and retain history navigation", () => {
   const env = setup("AutomationDetailScreen");
   try {
+    assert.equal(
+      managementUrl(
+        "https://nyx.example",
+        env.control("Manage automations on web").props.target,
+      ),
+      "https://nyx.example/assistant/automations?agent=researcher",
+      "details open the existing filtered manager rather than an exact-task editor",
+    );
     const card = env
       .all()
       .find((item) => item.type.name === "AutomationDeliveryCard")!;
@@ -247,7 +277,8 @@ test("automation next, latest and history times use the owner timezone with one 
     const text = env.text();
     assert.equal(text.split(`Times shown in ${zone}`).length - 1, 1);
     assert.ok(text.includes(time.formatAutomationTime(at, zone)));
-    if (page === "AutomationsScreen") assert.ok(text.includes(`Next: ${time.formatAutomationTime(at, zone)}`));
+    if (page === "AutomationsScreen")
+      assert.ok(text.includes(`Next: ${time.formatAutomationTime(at, zone)}`));
     if (page !== "AutomationRunsScreen")
       assert.match(text, /Weekdays at 8:00 AM \(UTC\)/);
     env.harness.unmount();

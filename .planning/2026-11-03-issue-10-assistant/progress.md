@@ -62,3 +62,13 @@ Final result: 10/10 passed, including background-return during preflight, blur-r
 ## Delivery
 
 Personal PR: https://github.com/AbigailDeng/NyxID/pull/16. Branch `codex/native-10-assistant-management`; base `AbigailDeng/NyxID:codex/mobile-ios-integration`. Source commits: `6ef14aa0a` and `d65903b06`. PR artifact attached to the parent chat. No merge, feature branch deletion, issue closure or CI babysitting. One read-only metadata command requested the unsupported gh JSON field `baseRepository`; verification switched to the REST pull endpoint to inspect actual base/head repository identity.
+
+## 2026-11-04: remove optional Web automation expansion
+
+The user explicitly requested removing the exact-task/create-form handoff feature. Earlier Web implementation and Web test entries above are historical and superseded by this scope reduction. Restoring all four frontend files to baseline; removing Native automationId/create state, filters, URL fields and duplicate create/manage controls; keeping existing agent/setup routes, generic manager entry and browser-return refresh. Native Settings/Skills and acceptance repairs remain in scope. Focused verification and delivery pending.
+
+Native code and current design/acceptance docs now remove automationId/create. Expanded existing list/detail tests to verify their rendered Web entry produces the existing manager URL and preserves the current agent filter; no extra Web control. The first file-scoped Prettier attempt from mobile failed because that package does not expose the formatter binary. Use the already-installed frontend formatter with explicit mobile file paths, as in the earlier acceptance pass.
+
+Scope-reduction checks passed:45/45 tests in seven explicitly selected Native files;13/13 existing Web page tests with the earlier genuine temporary motion14 overlay; file-scoped frontend ESLint and six-file mobile Prettier; syntax transpilation for28 changed TS/TSX files; whitespace check. `git diff dc46415065fac9e80200d0711b729db7f8c7d2c8 --exit-code -- frontend` passes: final frontend content exactly matches the original PR base. Analyzer before commit still unions the old committed frontend additions with their uncommitted reversals; regenerate after commit to reflect final PR scope. No full local validation, native build or CI routing changes.
+
+Independent read-only final review passed: no residual removed route/copy dependency, frontend baseline diff empty, existing agent/setup and security checks retained, and no unrelated Settings/Skills/channel/refresh/navigation regression fix changed. Scoped changes and current PR description prepared for delivery to the existing personal PR16.

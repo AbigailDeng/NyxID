@@ -77,7 +77,6 @@ export function AutomationsScreen({
   const rows = (list.data?.triggers ?? []).filter(
     (row) =>
       (status === "all" || row.status === status) &&
-      (!route.params?.automationId || row.id === route.params.automationId) &&
       (!agentId ||
         (row.delivery.type === "assistant" &&
           row.delivery.agent_id === agentId)) &&
@@ -122,21 +121,13 @@ export function AutomationsScreen({
         label={
           route.params?.setupId
             ? "Continue this automation setup on web"
-            : route.params?.automationId
-              ? "Manage this automation on web"
-              : "Create automation on web"
+            : "Manage automations on web"
         }
         target={{
           kind: "automations",
           agentId: agentId || undefined,
           setupId: route.params?.setupId,
-          automationId: route.params?.automationId,
-          create: !route.params?.automationId,
         }}
-      />
-      <ManagementHandoff
-        label="Manage automations on web"
-        target={{ kind: "automations", agentId: agentId || undefined }}
       />
       <Field
         label="Search automations"
@@ -371,10 +362,9 @@ export function AutomationDetailScreen({
           />
           <AutomationGuidance />
           <ManagementHandoff
-            label="Edit, run, pause or delete on web"
+            label="Manage automations on web"
             target={{
               kind: "automations",
-              automationId: row.id,
               agentId:
                 row.delivery.type === "assistant"
                   ? row.delivery.agent_id

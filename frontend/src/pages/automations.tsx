@@ -97,25 +97,17 @@ export function AutomationsPage() {
   const update = useUpdateTrigger();
   const run = useRunAutomation();
   const [editing, setEditing] = useState<TriggerResponse | "new" | null>(() =>
-    search.setup || search.create ? "new" : null,
+    search.setup ? "new" : null,
   );
-  const editorIntent = search.setup ?? (search.create ? "create" : "");
-  const [previousEditorIntent, setPreviousEditorIntent] =
-    useState(editorIntent);
-  if (previousEditorIntent !== editorIntent) {
-    setPreviousEditorIntent(editorIntent);
-    setEditing(editorIntent ? "new" : null);
-  }
   const [history, setHistory] = useState<TriggerResponse | null>(null);
   const [deleting, setDeleting] = useState<TriggerResponse | null>(null);
   const [secrets, setSecrets] = useState<readonly OneTimeSecretValue[]>([]);
   const filterAgent = search.agent;
   const rows = (triggers.data?.triggers ?? []).filter(
     (row) =>
-      (!search.automation || row.id === search.automation) &&
-      (!filterAgent ||
-        (row.delivery.type === "assistant" &&
-          row.delivery.agent_id === filterAgent)),
+      !filterAgent ||
+      (row.delivery.type === "assistant" &&
+        row.delivery.agent_id === filterAgent),
   );
   const target = (row: TriggerResponse) => {
     const delivery = row.delivery;
@@ -298,9 +290,6 @@ export function AutomationsPage() {
         </Link>
       </p>
       {setup.error && <ErrorBanner message={setup.error.message} />}
-      {search.automation && triggers.data && !rows.length && (
-        <ErrorBanner message="This automation is unavailable for this account or agent. Return to the App and reload its current state." />
-      )}
       {search.setup && setup.isPending && (
         <Skeleton className="h-24 w-full" aria-label="Loading setup" />
       )}

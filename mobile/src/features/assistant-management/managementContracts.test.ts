@@ -7,7 +7,6 @@ import {
   settingsPatch,
 } from "./managementContracts";
 import { createAssistantManagementApi } from "../../lib/api/assistantManagementTransport";
-import { parseAutomationSearch } from "../../../../frontend/src/lib/automation-search";
 
 const settings = assistantSettingsSchema.parse({
   max_live_subagents: 3,
@@ -64,23 +63,28 @@ test("dirty settings patch preserves unrelated voice/access settings and respect
   );
 });
 
-test("Web handoffs retain exact automation, setup, agent and real bot identity without secrets", () => {
+test("Web handoffs reuse the existing manager, agent, setup and real bot routes without secrets", () => {
   const id = "a91c328b-0acd-4d91-9c99-b45e7f328e8c";
   assert.equal(
     managementUrl("https://nyx.example/base?token=secret", {
       kind: "automations",
-      agentId: "agent-a",
-      automationId: id,
     }),
-    `https://nyx.example/assistant/automations?agent=agent-a&automation=${id}`,
+    "https://nyx.example/assistant/automations",
+  );
+  assert.equal(
+    managementUrl("https://nyx.example/base?token=secret", {
+      kind: "automations",
+      agentId: "agent-a",
+    }),
+    "https://nyx.example/assistant/automations?agent=agent-a",
   );
   assert.equal(
     managementUrl("https://nyx.example", {
       kind: "automations",
+      agentId: "agent-a",
       setupId: id,
-      create: true,
     }),
-    `https://nyx.example/assistant/automations?setup=${id}`,
+    `https://nyx.example/assistant/automations?agent=agent-a&setup=${id}`,
   );
   assert.equal(
     managementUrl("https://nyx.example", {
@@ -106,29 +110,8 @@ test("Web handoffs retain exact automation, setup, agent and real bot identity w
   assert.throws(() =>
     managementUrl("https://nyx.example", {
       kind: "automations",
-      automationId: "wrong",
+      setupId: "wrong",
     }),
-  );
-});
-
-test("native handoff round-trips through the actual Web route search parser", () => {
-  const id = "a91c328b-0acd-4d91-9c99-b45e7f328e8c";
-  const href = managementUrl("https://nyx.example", {
-    kind: "automations",
-    automationId: id,
-    agentId: "agent-a",
-  });
-  assert.deepEqual(
-    parseAutomationSearch(Object.fromEntries(new URL(href).searchParams)),
-    { automation: id, agent: "agent-a" },
-  );
-  assert.deepEqual(
-    parseAutomationSearch({
-      create: "true",
-      automation: "wrong",
-      token: "secret",
-    }),
-    { create: true },
   );
 });
 
