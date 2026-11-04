@@ -12,7 +12,8 @@ import {
   deferred,
   hookHarness,
 } from "../../features/assistant/assistantHookTestHarness";
-import { groupSchema } from "../../features/groups/groupContracts";
+import { groupSchema, type Group } from "../../features/groups/groupContracts";
+import { livePollInterval } from "../../lib/api/assistantLiveTransport";
 import { formatRelativeTimeFromMs } from "../../lib/time";
 import { lightColors } from "../../theme/mobileTheme";
 import { sidebarSectionTitle } from "./workspaceSidebarStyles";
@@ -119,7 +120,13 @@ type SetupOptions = {
   online?: boolean;
   chats?: ReturnType<typeof chatsFor>;
   agentError?: boolean;
+  agentState?: "loaded" | "empty" | "pending" | "error";
+  groupState?: "loaded" | "empty" | "pending" | "error";
+  groupError?: boolean;
+  agentFetching?: boolean;
+  groupFetching?: boolean;
   refetchAgents?: () => Promise<unknown>;
+  refetchGroups?: () => Promise<unknown>;
   live?: boolean;
 };
 
@@ -128,7 +135,9 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
   const creations: string[] = [];
   const historyQueries: QueryOptions[] = [];
   const agentQueries: QueryOptions[] = [];
+  const groupQueries: QueryOptions[] = [];
   const agentRefreshes: unknown[] = [];
+  const groupRefreshes: unknown[] = [];
   let epoch = 17;
   let online = options.online !== false;
   let onAppState: ((state: string) => void) | undefined;
@@ -144,6 +153,7 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     },
   };
   const liveAgents = agents.map((agent) => ({ ...agent }));
+  let liveGroups = groups.map((group) => ({ ...group }));
   const targetAgentId = current?.kind === "agent" ? current.agentId : undefined;
   if (targetAgentId && options.agent) {
     Object.assign(
@@ -203,17 +213,35 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     "@tanstack/react-query": {
       useQuery: (query: QueryOptions) => {
         const { queryKey } = query;
-        if (queryKey.includes("agents")) agentQueries.push(query);
+        const isAgents = queryKey.includes("agents");
+        (isAgents ? agentQueries : groupQueries).push(query);
+        const state =
+          (isAgents ? options.agentState : options.groupState) ?? "loaded";
+        const isError =
+          state === "error" ||
+          !!(isAgents ? options.agentError : options.groupError);
         return {
-          data: queryKey.includes("agents") ? { agents: liveAgents } : groups,
-          isSuccess: !queryKey.includes("agents") || !options.agentError,
-          isPending: false,
-          isFetching: false,
-          isError: queryKey.includes("agents") && !!options.agentError,
+          data:
+            state === "pending" || state === "error"
+              ? undefined
+              : isAgents
+                ? { agents: state === "empty" ? [] : liveAgents }
+                : state === "empty"
+                  ? []
+                  : liveGroups,
+          isSuccess: state !== "pending" && !isError,
+          isPending: state === "pending",
+          isFetching: !!(isAgents
+            ? options.agentFetching
+            : options.groupFetching),
+          isError,
           refetch: async (args: unknown) => {
-            if (queryKey.includes("agents")) {
+            if (isAgents) {
               agentRefreshes.push(args);
               await options.refetchAgents?.();
+            } else {
+              groupRefreshes.push(args);
+              await options.refetchGroups?.();
             }
           },
         };
@@ -254,7 +282,7 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
       useGroupsLive: () => options.live ?? false,
     },
     "../../lib/api/assistantLiveTransport": {
-      livePollInterval: (value: number) => value,
+      livePollInterval,
     },
     "../../hooks/useNetworkStatus": {
       useNetworkStatus: () => ({ isConnected: online }),
@@ -343,6 +371,7 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     selections,
     creations,
     agentRefreshes,
+    groupRefreshes,
     all,
     label,
     press,
@@ -355,6 +384,14 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     agentQuery: () => {
       harness.flush();
       return agentQueries.at(-1)!;
+    },
+    groupQuery: () => {
+      harness.flush();
+      return groupQueries.at(-1)!;
+    },
+    updateQueries: (patch: Partial<SetupOptions>) => {
+      Object.assign(options, patch);
+      harness.render();
     },
     pressBrowserItem,
     scroll: () => one((row) => row.type === "ScrollView"),
@@ -378,6 +415,16 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
       const index = liveAgents.findIndex((row) => row.id === id);
       assert.ok(index >= 0);
       liveAgents[index] = { ...liveAgents[index]!, ...patch };
+      harness.render();
+    },
+    patchGroup: (id: string, patch: Partial<Group>) => {
+      const index = liveGroups.findIndex((row) => row.id === id);
+      assert.ok(index >= 0);
+      liveGroups[index] = { ...liveGroups[index]!, ...patch };
+      harness.render();
+    },
+    setGroups: (rows: Group[]) => {
+      liveGroups = rows.map((row) => ({ ...row }));
       harness.render();
     },
   };
@@ -441,6 +488,7 @@ test("agents can be refreshed from the section, pull gesture, and full browser w
   const env = setup(undefined, { refetchAgents: () => pending.promise });
   const displayed = env.agentRows().map((row) => row.props.accessibilityLabel);
   env.press("Refresh agents");
+  assert.equal(env.scroll().props.refreshControl.props.refreshing, false);
   env.scroll().props.refreshControl.props.onRefresh();
   assert.equal(env.agentRefreshes.length, 1);
   assert.deepEqual(plain(env.agentRefreshes[0]), { cancelRefetch: false });
@@ -477,7 +525,9 @@ test("refresh errors retain agents and expose retry in the full agent browser", 
   assert.equal(env.browser().items.length, 9);
   const footer = elements(env.browser().footer);
   assert.ok(
-    footer.some((row) => content(row).includes("Couldn’t refresh agents.")),
+    footer.some((row) =>
+      content(row).includes("Couldn’t refresh agents. Showing saved list."),
+    ),
   );
   options.refetchAgents = async () => {
     options.agentError = false;
@@ -494,24 +544,426 @@ test("refresh errors retain agents and expose retry in the full agent browser", 
   env.harness.unmount();
 });
 
-test("saved refresh callbacks cannot request agents while hidden, offline, backgrounded, after account change, or unmounted", () => {
-  for (const transition of [
-    "hidden",
-    "offline",
-    "background",
-    "account",
-    "unmount",
-  ]) {
-    const env = setup();
-    const refresh = env.label("Refresh agents").props.onPress;
-    if (transition === "hidden") env.setVisible(false);
-    if (transition === "offline") env.setOnline(false);
-    if (transition === "background") env.setAppState("background");
-    if (transition === "account") env.changeAccount();
-    if (transition === "unmount") env.harness.unmount();
-    refresh();
-    assert.equal(env.agentRefreshes.length, 0, transition);
+test("saved section, browser and pull refresh callbacks stop while inactive or after account change", () => {
+  for (const resource of ["agents", "crews"] as const) {
+    for (const transition of [
+      "hidden",
+      "offline",
+      "background",
+      "account",
+      "unmount",
+    ]) {
+      const env = setup();
+      if (resource === "crews") env.press("Expand crews");
+      const refresh = env.label(`Refresh ${resource}`).props.onPress;
+      const pull = env.scroll().props.refreshControl.props.onRefresh;
+      env.more(`View all ${resource} (${resource === "agents" ? 9 : 8})`);
+      const browserRefresh = env.browser().onRefresh;
+      if (transition === "hidden") env.setVisible(false);
+      if (transition === "offline") env.setOnline(false);
+      if (transition === "background") env.setAppState("background");
+      if (transition === "account") env.changeAccount();
+      if (transition === "unmount") env.harness.unmount();
+      refresh();
+      browserRefresh();
+      pull();
+      assert.equal(env.agentRefreshes.length, 0, `${resource}: ${transition}`);
+      assert.equal(env.groupRefreshes.length, 0, `${resource}: ${transition}`);
+      env.harness.unmount();
+    }
+  }
+});
+
+test("agents and crews refresh independently, coalesce repeated actions, and leave the pull indicator idle", async () => {
+  const agentsPending = deferred<void>();
+  const crewsPending = deferred<void>();
+  const env = setup(undefined, {
+    refetchAgents: () => agentsPending.promise,
+    refetchGroups: () => crewsPending.promise,
+  });
+  env.press("Expand crews");
+  const agentPreview = env
+    .agentRows()
+    .map((row) => row.props.accessibilityLabel);
+  const crewPreview = env
+    .groupRows()
+    .map((row) => row.props.accessibilityLabel);
+  const refreshAgents = env.label("Refresh agents").props.onPress;
+  const refreshCrews = env.label("Refresh crews").props.onPress;
+  refreshAgents();
+  refreshAgents();
+  assert.equal(env.agentRefreshes.length, 1);
+  assert.equal(env.groupRefreshes.length, 0);
+  assert.equal(env.label("Refresh agents").props.accessibilityState.busy, true);
+  assert.equal(env.label("Refresh crews").props.accessibilityState.busy, false);
+  refreshCrews();
+  refreshCrews();
+  assert.equal(env.groupRefreshes.length, 1);
+  assert.deepEqual(plain(env.agentRefreshes[0]), { cancelRefetch: false });
+  assert.deepEqual(plain(env.groupRefreshes[0]), { cancelRefetch: false });
+  assert.equal(env.label("Refresh crews").props.accessibilityState.busy, true);
+  assert.equal(env.scroll().props.refreshControl.props.refreshing, false);
+  assert.deepEqual(
+    env.agentRows().map((row) => row.props.accessibilityLabel),
+    agentPreview,
+  );
+  assert.deepEqual(
+    env.groupRows().map((row) => row.props.accessibilityLabel),
+    crewPreview,
+  );
+  assert.equal(content(env.label("Collapse agents")), "Agents9 total");
+  assert.equal(content(env.label("Collapse crews")), "Crews8 total");
+
+  agentsPending.resolve();
+  await env.harness.settle();
+  assert.equal(
+    env.label("Refresh agents").props.accessibilityState.busy,
+    false,
+  );
+  assert.equal(env.label("Refresh crews").props.accessibilityState.busy, true);
+  crewsPending.resolve();
+  await env.harness.settle();
+  assert.equal(env.label("Refresh crews").props.accessibilityState.busy, false);
+  assert.equal(env.scroll().props.refreshControl.props.refreshing, false);
+  env.harness.unmount();
+});
+
+test("automatic list fetches keep manual refresh buttons and the pull indicator idle", () => {
+  const env = setup(undefined, { agentFetching: true, groupFetching: true });
+  for (const resource of ["agents", "crews"]) {
+    assert.equal(
+      env.label(`Refresh ${resource}`).props.accessibilityState.busy,
+      false,
+    );
+    assert.equal(env.label(`Refresh ${resource}`).props.disabled, false);
+  }
+  assert.equal(env.scroll().props.refreshControl.props.refreshing, false);
+  env.more("View all agents (9)");
+  assert.equal(env.browser().refreshing, false);
+  assert.equal(env.agentRefreshes.length, 0);
+  assert.equal(env.groupRefreshes.length, 0);
+  env.harness.unmount();
+});
+
+test("drawer pull refresh waits for both lists and repeated pull callbacks share the requests", async () => {
+  const agentsPending = deferred<void>();
+  const crewsPending = deferred<void>();
+  const env = setup(undefined, {
+    refetchAgents: () => agentsPending.promise,
+    refetchGroups: () => crewsPending.promise,
+  });
+  const pull = env.scroll().props.refreshControl.props.onRefresh;
+  pull();
+  pull();
+  assert.equal(env.agentRefreshes.length, 1);
+  assert.equal(env.groupRefreshes.length, 1);
+  assert.equal(env.scroll().props.refreshControl.props.refreshing, true);
+  assert.equal(env.label("Refresh agents").props.accessibilityState.busy, true);
+  assert.equal(env.label("Refresh crews").props.accessibilityState.busy, true);
+  agentsPending.resolve();
+  await env.harness.settle();
+  assert.equal(env.scroll().props.refreshControl.props.refreshing, true);
+  assert.equal(
+    env.label("Refresh agents").props.accessibilityState.busy,
+    false,
+  );
+  assert.equal(env.label("Refresh crews").props.accessibilityState.busy, true);
+  crewsPending.resolve();
+  await env.harness.settle();
+  assert.equal(env.scroll().props.refreshControl.props.refreshing, false);
+  env.harness.unmount();
+});
+
+test("pull refresh joins an in-flight section refresh and waits for it after the other list finishes", async () => {
+  for (const alreadyRefreshing of ["agents", "crews"] as const) {
+    const agentsPending = deferred<void>();
+    const crewsPending = deferred<void>();
+    const env = setup(undefined, {
+      refetchAgents: () => agentsPending.promise,
+      refetchGroups: () => crewsPending.promise,
+    });
+    env.press(`Refresh ${alreadyRefreshing}`);
+    assert.equal(env.scroll().props.refreshControl.props.refreshing, false);
+    env.scroll().props.refreshControl.props.onRefresh();
+    assert.equal(env.agentRefreshes.length, 1);
+    assert.equal(env.groupRefreshes.length, 1);
+    (alreadyRefreshing === "agents" ? crewsPending : agentsPending).resolve();
+    await env.harness.settle();
+    assert.equal(env.scroll().props.refreshControl.props.refreshing, true);
+    (alreadyRefreshing === "agents" ? agentsPending : crewsPending).resolve();
+    await env.harness.settle();
+    assert.equal(env.scroll().props.refreshControl.props.refreshing, false);
     env.harness.unmount();
+  }
+});
+
+test("picker pull refresh requests only agents", async () => {
+  const pending = deferred<void>();
+  const env = setup(undefined, {
+    mode: "picker",
+    refetchAgents: () => pending.promise,
+  });
+  env.scroll().props.refreshControl.props.onRefresh();
+  assert.equal(env.agentRefreshes.length, 1);
+  assert.equal(env.groupRefreshes.length, 0);
+  assert.equal(env.groupQuery().enabled, false);
+  assert.equal(env.scroll().props.refreshControl.props.refreshing, true);
+  pending.resolve();
+  await env.harness.settle();
+  assert.equal(env.scroll().props.refreshControl.props.refreshing, false);
+  env.harness.unmount();
+});
+
+test("unknown list counts stay distinct from successful empty rosters", () => {
+  const env = setup(undefined, {
+    agentState: "pending",
+    groupState: "pending",
+  });
+  env.press("Expand crews");
+  const unknownCounts = () => {
+    assert.equal(content(env.label("Collapse agents")), "Agents—");
+    assert.equal(content(env.label("Collapse crews")), "Crews—");
+    assert.equal(env.agentRows().length, 0);
+    assert.equal(env.groupRows().length, 0);
+    assert.equal(
+      env.all().some((row) => content(row) === "No agents yet."),
+      false,
+    );
+    assert.equal(
+      env.all().some((row) => content(row) === "No crews yet."),
+      false,
+    );
+  };
+  unknownCounts();
+  env.updateQueries({ agentState: "error", groupState: "error" });
+  unknownCounts();
+  assert.ok(
+    env.all().some((row) => content(row).includes("Couldn’t load agents.")),
+  );
+  assert.ok(
+    env.all().some((row) => content(row).includes("Couldn’t load crews.")),
+  );
+  env.updateQueries({ agentState: "empty", groupState: "empty" });
+  assert.equal(content(env.label("Collapse agents")), "Agents0 total");
+  assert.equal(content(env.label("Collapse crews")), "Crews0 total");
+  assert.ok(env.all().some((row) => content(row) === "No agents yet."));
+  assert.ok(env.all().some((row) => content(row) === "No crews yet."));
+  env.harness.unmount();
+});
+
+test("resource browsers distinguish loading and initial errors from successful empty results", async () => {
+  for (const resource of ["agents", "crews"] as const) {
+    const options: SetupOptions = {};
+    const env = setup(undefined, options);
+    if (resource === "crews") env.press("Expand crews");
+    env.more(`View all ${resource} (${resource === "agents" ? 9 : 8})`);
+    assert.equal(env.browser().refreshLabel, `Refresh ${resource}`);
+    const stateKey = resource === "agents" ? "agentState" : "groupState";
+    env.updateQueries({ [stateKey]: "pending" });
+    assert.equal(env.browser().items.length, 0);
+    assert.match(
+      env.browser().emptyText,
+      new RegExp(`Loading ${resource}`, "i"),
+    );
+    env.updateQueries({ [stateKey]: "error" });
+    assert.equal(env.browser().items.length, 0);
+    assert.match(
+      env.browser().emptyText,
+      new RegExp(`Couldn’t load ${resource}`, "i"),
+    );
+    const footer = elements(env.browser().footer);
+    assert.ok(
+      footer.some((row) => content(row).includes(`Couldn’t load ${resource}.`)),
+    );
+    const refetch = async () => {
+      options[stateKey] = "empty";
+    };
+    if (resource === "agents") options.refetchAgents = refetch;
+    else options.refetchGroups = refetch;
+    footer.find((row) => row.type === "Pressable")!.props.onPress();
+    await env.harness.settle();
+    assert.match(env.browser().emptyText, new RegExp(`No ${resource}`, "i"));
+    assert.equal(env.browser().footer, undefined);
+    env.harness.unmount();
+  }
+});
+
+test("cached crew refresh failure retains the saved count, rows and browser, then retry adopts the new snapshot", async () => {
+  const options: SetupOptions = {};
+  const env = setup(undefined, options);
+  env.press("Expand crews");
+  const originalRows = env
+    .groupRows()
+    .map((row) => row.props.accessibilityLabel);
+  env.more("View all crews (8)");
+  options.refetchGroups = async () => {
+    options.groupError = true;
+  };
+  env.browser().onRefresh();
+  await env.harness.settle();
+  assert.equal(content(env.label("Collapse crews")), "Crews8 total");
+  assert.deepEqual(
+    env.groupRows().map((row) => row.props.accessibilityLabel),
+    originalRows,
+  );
+  assert.equal(env.browser().items.length, 8);
+  assert.equal(env.browser().refreshLabel, "Refresh crews");
+  const footer = elements(env.browser().footer);
+  assert.ok(
+    footer.some((row) =>
+      content(row).includes("Couldn’t refresh crews. Showing saved list."),
+    ),
+  );
+  assert.ok(
+    env
+      .all()
+      .some(
+        (row) =>
+          row.type === "Text" &&
+          content(row) === "Couldn’t refresh crews. Showing saved list.",
+      ),
+  );
+  assert.equal(env.agentRefreshes.length, 0);
+  options.refetchGroups = async () => {
+    options.groupError = false;
+    env.patchGroup(groups[0]!.id, { name: "Freshly renamed crew" });
+  };
+  footer.find((row) => row.type === "Pressable")!.props.onPress();
+  await env.harness.settle();
+  assert.equal(env.groupRefreshes.length, 2);
+  assert.equal(
+    env.browser().items.find((row: { id: string }) => row.id === groups[0]!.id)
+      .group.name,
+    "Freshly renamed crew",
+  );
+  assert.equal(env.browser().footer, undefined);
+  assert.equal(content(env.label("Collapse agents")), "Agents9 total");
+  env.harness.unmount();
+});
+
+test("collapsed sections keep refresh errors and retry available without opening their lists", async () => {
+  for (const resource of ["agents", "crews"] as const) {
+    const options: SetupOptions = {};
+    const env = setup(undefined, options);
+    if (resource === "agents") env.press("Collapse agents");
+    const errorKey = resource === "agents" ? "agentError" : "groupError";
+    const fail = async () => {
+      options[errorKey] = true;
+    };
+    if (resource === "agents") options.refetchAgents = fail;
+    else options.refetchGroups = fail;
+    env.press(`Refresh ${resource}`);
+    await env.harness.settle();
+    const message = `Couldn’t refresh ${resource}. Showing saved list.`;
+    assert.equal(
+      env.label(`Expand ${resource}`).props.accessibilityState.expanded,
+      false,
+    );
+    assert.equal(
+      resource === "agents" ? env.agentRows().length : env.groupRows().length,
+      0,
+    );
+    const retry = env.label(`Retry: ${message}`);
+    assert.equal(retry.props.disabled, false);
+    const recover = async () => {
+      options[errorKey] = false;
+    };
+    if (resource === "agents") options.refetchAgents = recover;
+    else options.refetchGroups = recover;
+    retry.props.onPress();
+    await env.harness.settle();
+    assert.equal(
+      env.label(`Expand ${resource}`).props.accessibilityState.expanded,
+      false,
+    );
+    assert.equal(
+      env
+        .all()
+        .some((row) => row.props.accessibilityLabel === `Retry: ${message}`),
+      false,
+    );
+    assert.equal(
+      resource === "agents"
+        ? env.agentRefreshes.length
+        : env.groupRefreshes.length,
+      2,
+    );
+    env.harness.unmount();
+  }
+});
+
+test("crew total, bounded preview and full browser switch snapshots together while working and message details stay live", async () => {
+  const pending = deferred<void>();
+  const updated = groups.slice(0, 4).map((group, index) => ({
+    ...group,
+    ...(index === 0
+      ? {
+          name: "Updated crew",
+          working_agent_ids: ["nyxbot"],
+          message_count: 99,
+          last_message_at: "2026-11-03T00:00:00Z",
+        }
+      : {}),
+  }));
+  const options: SetupOptions = {};
+  const env = setup({ kind: "group", groupId: groups[0]!.id }, options);
+  env.more("View all crews (8)");
+  options.refetchGroups = async () => {
+    await pending.promise;
+    env.setGroups(updated);
+  };
+  env.browser().onRefresh();
+  assert.equal(env.browser().refreshing, true);
+  assert.equal(env.scroll().props.refreshControl.props.refreshing, false);
+  assert.equal(content(env.label("Collapse crews")), "Crews8 total");
+  assert.equal(env.groupRows().length, 5);
+  assert.equal(env.browser().items.length, 8);
+  pending.resolve();
+  await env.harness.settle();
+  assert.equal(content(env.label("Collapse crews")), "Crews4 total");
+  assert.equal(env.groupRows().length, 4);
+  assert.equal(env.browser().items.length, 4);
+  assert.deepEqual(
+    plain(env.browser().items.map((row: { id: string }) => row.id)),
+    [groups[0]!.id, groups[3]!.id, groups[2]!.id, groups[1]!.id],
+  );
+  assert.ok(
+    content(env.label("Open crew Updated crew")).includes("Agents working…"),
+  );
+  env.patchGroup(groups[0]!.id, { working_agent_ids: [], message_count: 100 });
+  assert.ok(
+    content(env.label("Open crew Updated crew")).includes("100 messages"),
+  );
+  assert.equal(env.browser().items[0].group.message_count, 100);
+  assert.equal(content(env.label("Collapse crews")), "Crews4 total");
+  assert.equal(env.agentRefreshes.length, 0);
+  env.harness.unmount();
+});
+
+test("crew polling keeps its existing live fallback and stays disabled outside the drawer", () => {
+  for (const live of [false, true]) {
+    const env = setup(undefined, { live });
+    const query = env.groupQuery();
+    assert.equal(query.enabled, true);
+    assert.equal(query.refetchInterval, live ? 30_000 : 5000);
+    assert.deepEqual(plain(query.queryKey), [
+      "workspace",
+      "groups",
+      17,
+      "list",
+    ]);
+    env.setVisible(false);
+    assert.equal(env.groupQuery().enabled, false);
+    env.setVisible(true);
+    env.setAppState("background");
+    assert.equal(env.groupQuery().enabled, false);
+    env.setAppState("active");
+    env.setOnline(false);
+    assert.equal(env.groupQuery().enabled, false);
+    env.harness.unmount();
+    const picker = setup(undefined, { mode: "picker", live });
+    assert.equal(picker.groupQuery().enabled, false);
+    picker.harness.unmount();
   }
 });
 
@@ -534,7 +986,23 @@ test("offline drawer creation buttons are disabled while saved previews remain a
     assert.equal(button.props.disabled, true);
     assert.equal(button.props.accessibilityState.disabled, true);
   }
+  env.press("Expand crews");
+  for (const resource of ["agents", "crews"]) {
+    assert.equal(env.label(`Refresh ${resource}`).props.disabled, true);
+    assert.equal(
+      env.label(`Refresh ${resource}`).props.accessibilityState.busy,
+      false,
+    );
+  }
+  assert.equal(
+    env
+      .all()
+      .filter((row) => row.type === "Text" && /^Offline ·/.test(content(row)))
+      .length,
+    2,
+  );
   assert.equal(env.agentRows().length, 5);
+  assert.equal(env.groupRows().length, 5);
   env.harness.unmount();
 });
 
