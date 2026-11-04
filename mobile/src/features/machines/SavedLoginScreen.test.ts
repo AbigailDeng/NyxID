@@ -3,6 +3,7 @@ import test from "node:test";
 import { URL, fileURLToPath } from "node:url";
 import { deferred, hookHarness } from "../assistant/assistantHookTestHarness";
 import * as transport from "./savedLoginEditorTransport";
+import type { SavedLogin } from "./machineContracts";
 
 const USER = "10000000-0000-4000-8000-000000000001";
 const ORG = "20000000-0000-4000-8000-000000000001";
@@ -25,14 +26,18 @@ const ui = Object.fromEntries(
     (name) => [name, name],
   ),
 );
-function editor() {
+function editor(login?: SavedLogin) {
   const gate = deferred<void>();
   const busy: boolean[] = [];
+  let userId = USER;
+  const appListeners = new Set<(state: string) => void>();
+  const navigation = { addListener: () => () => {} };
   const runtime = {
     epoch: 1,
     active: true,
     busy: false,
     uncertain: false,
+    interactive: () => runtime.active,
     run: async (action: any) => {
       runtime.busy = true;
       try {
@@ -47,8 +52,17 @@ function editor() {
     "react-native": {
       Platform: { OS: "ios" },
       Switch: "Switch",
-      AppState: { addEventListener: () => ({ remove() {} }) },
+      AppState: {
+        addEventListener: (
+          _event: string,
+          listener: (state: string) => void,
+        ) => {
+          appListeners.add(listener);
+          return { remove: () => appListeners.delete(listener) };
+        },
+      },
     },
+    "@react-navigation/native": { useNavigation: () => navigation },
     "expo-screen-capture": {
       preventScreenCaptureAsync: async () => {},
       allowScreenCaptureAsync: async () => {},
@@ -81,7 +95,8 @@ function editor() {
   ) as { SavedLoginEditor: (props: any) => Element };
   harness.mount(() =>
     module.SavedLoginEditor({
-      userId: USER,
+      userId,
+      login,
       onBusy: (value: boolean) => busy.push(value),
       onClose() {},
       onSaved() {},
@@ -99,9 +114,25 @@ function editor() {
     find("Field", label).props.onChangeText(value);
     harness.flush();
   };
-  return { harness, gate, busy, runtime, find, change };
+  return {
+    harness,
+    gate,
+    busy,
+    runtime,
+    find,
+    change,
+    appState: (state: string) => {
+      runtime.active = state === "active";
+      for (const listener of appListeners) listener(state);
+    },
+    account: (id: string) => {
+      userId = id;
+      runtime.epoch++;
+      harness.render();
+    },
+  };
 }
-test("switching credential owner and leaving foreground both erase credential fields", async (t) => {
+test("switching credential owner erases every credential field", async (t) => {
   const screen = editor();
   t.after(screen.harness.unmount);
   await screen.harness.settle();
@@ -117,10 +148,113 @@ test("switching credential owner and leaving foreground both erase credential fi
       .value,
     "",
   );
-  screen.change("Password (optional)", "new-secret");
+});
+test("loss of interactivity pauses editing without deleting the draft", async (t) => {
+  const screen = editor();
+  t.after(screen.harness.unmount);
+  await screen.harness.settle();
+  screen.change("Username", "alice");
+  screen.change("Password (optional)", "secret");
   screen.runtime.active = false;
   screen.harness.render();
+  assert.equal(screen.find("Field", "Username").props.value, "alice");
+  assert.equal(
+    screen.find("Field", "Password (optional)").props.value,
+    "secret",
+  );
+  assert.equal(
+    screen.find("Field", "Password (optional)").props.editable,
+    false,
+  );
+});
+test("switching accounts clears credentials and selects the new personal owner", async (t) => {
+  const screen = editor();
+  t.after(screen.harness.unmount);
+  await screen.harness.settle();
+  screen.change("Username", "alice");
+  screen.change("Password (optional)", "secret");
+  screen.change("Authenticator secret or otpauth URL (optional)", "totp");
+  screen.account(ORG);
+  for (const label of [
+    "Username",
+    "Password (optional)",
+    "Authenticator secret or otpauth URL (optional)",
+  ])
+    assert.equal(screen.find("Field", label).props.value, "", label);
+  assert.ok(
+    all(screen.harness.value()).some(
+      (element) =>
+        element.type === "Label" &&
+        JSON.stringify(element.props.children).includes(
+          "Your personal account",
+        ),
+    ),
+  );
+});
+test("backgrounding a replacement requires renewed acknowledgement before blank secrets can replace stored values", async (t) => {
+  const screen = editor({
+    id: "login-1",
+    owner_id: USER,
+    label: "GitHub",
+    allowed_origins: ["https://github.com"],
+    has_password: true,
+    has_totp: true,
+    confirm_each_sign_in: true,
+    created_at: "2026-11-04T00:00:00Z",
+    updated_at: "2026-11-04T00:00:00Z",
+  });
+  t.after(screen.harness.unmount);
+  await screen.harness.settle();
+  screen.change("Username", "alice");
+  screen.change("Password (optional)", "replacement-password");
+  screen.change(
+    "Authenticator secret or otpauth URL (optional)",
+    "replacement-totp",
+  );
+  const acknowledgement = () =>
+    all(screen.harness.value()).find(
+      (element) =>
+        element.type === "Switch" &&
+        element.props.accessibilityLabel ===
+          "Acknowledge full credential replacement",
+    )!;
+  acknowledgement().props.onValueChange(true);
+  screen.harness.flush();
+  assert.equal(
+    screen.find("ActionButton", "Replace all saved-login values").props
+      .disabled,
+    false,
+  );
+  screen.appState("background");
+  screen.appState("active");
+  screen.harness.flush();
+  assert.equal(screen.find("Field", "Username").props.value, "alice");
   assert.equal(screen.find("Field", "Password (optional)").props.value, "");
+  assert.equal(
+    screen.find("Field", "Authenticator secret or otpauth URL (optional)").props
+      .value,
+    "",
+  );
+  assert.equal(acknowledgement().props.value, false);
+  assert.equal(
+    screen.find("ActionButton", "Replace all saved-login values").props
+      .disabled,
+    true,
+  );
+  assert.ok(
+    all(screen.harness.value()).some(
+      (element) =>
+        element.type === "Notice" &&
+        element.props.message.includes("Re-enter any secrets you want to save"),
+    ),
+  );
+  acknowledgement().props.onValueChange(true);
+  screen.harness.flush();
+  assert.equal(
+    screen.find("ActionButton", "Replace all saved-login values").props
+      .disabled,
+    false,
+  );
 });
 test("save synchronously locks parent navigation until request completion", async (t) => {
   const screen = editor();
@@ -217,6 +351,8 @@ async function realEditor() {
   let saves = 0;
   let back: any;
   const appListeners = new Set<(state: string) => void>();
+  const blurListeners = new Set<() => void>();
+  let focused = true;
   const native = {
     Platform: { OS: "ios" },
     Switch: "Switch",
@@ -230,13 +366,18 @@ async function realEditor() {
       },
     },
   };
-  const navigation = { addListener: () => () => {} };
+  const navigation = {
+    addListener: (_event: string, listener: () => void) => {
+      blurListeners.add(listener);
+      return () => blurListeners.delete(listener);
+    },
+  };
   const machineUI: Record<string, unknown> = {};
   const harness = hookHarness<Element>({
     "react/jsx-runtime": { jsx, jsxs: jsx, Fragment: "Fragment" },
     "react-native": native,
     "@react-navigation/native": {
-      useIsFocused: () => true,
+      useIsFocused: () => focused,
       useNavigation: () => navigation,
     },
     "../../hooks/useNetworkStatus": {
@@ -329,6 +470,13 @@ async function realEditor() {
     saves: () => saves,
     back: () => back,
     appListeners,
+    blur: () => {
+      focused = false;
+      for (const listener of blurListeners) listener();
+    },
+    focus: () => {
+      focused = true;
+    },
     appState: (value: string) => {
       native.AppState.currentState = value;
       for (const listener of appListeners) listener(value);
@@ -384,7 +532,7 @@ test("queued submissions keep the real parent and editor write locks until the a
   );
 });
 
-test("a native inactive and active cycle clears every credential even when React never renders the inactive state", async (t) => {
+test("a temporary native interruption preserves the draft while pausing submission", async (t) => {
   const screen = await realEditor();
   t.after(screen.harness.unmount);
   for (const [label, value] of [
@@ -398,15 +546,27 @@ test("a native inactive and active cycle clears every credential even when React
     screen.harness.flush();
   }
   assert.equal(screen.find("Field", "Username").props.editable, true);
+  const queuedSubmit = screen.find(
+    "ActionButton",
+    "Save login for selected owner",
+  ).props.onPress;
   screen.appState("inactive");
+  // An already-queued callback must not erase the draft or dispatch a write.
+  await queuedSubmit();
+  screen.harness.flush();
+  assert.equal(
+    screen.find("ActionButton", "Save login for selected owner").props.disabled,
+    true,
+  );
+  assert.equal(screen.find("Field", "Username").props.editable, false);
   screen.appState("active");
   screen.harness.flush();
-  for (const label of [
-    "Username",
-    "Password (optional)",
-    "Authenticator secret or otpauth URL (optional)",
-  ])
-    assert.equal(screen.find("Field", label).props.value, "", label);
+  for (const [label, expected] of [
+    ["Username", "alice"],
+    ["Password (optional)", "test-password"],
+    ["Authenticator secret or otpauth URL (optional)", "test-authenticator"],
+  ] as const)
+    assert.equal(screen.find("Field", label).props.value, expected, label);
   assert.equal(screen.find("Field", "Label").props.value, "GitHub");
   assert.equal(
     screen.find("Field", "Allowed HTTPS origins (one per line)").props.value,
@@ -414,9 +574,55 @@ test("a native inactive and active cycle clears every credential even when React
   );
   assert.equal(
     screen.find("ActionButton", "Save login for selected owner").props.disabled,
-    true,
+    false,
   );
   assert.equal(screen.saves(), 0);
   screen.harness.unmount();
   assert.equal(screen.appListeners.size, 0);
 });
+
+for (const transition of ["background", "navigation blur"] as const) {
+  test(`${transition} clears the intended fields even without an intermediate render`, async (t) => {
+    const screen = await realEditor();
+    t.after(screen.harness.unmount);
+    for (const [label, value] of [
+      ["Label", "GitHub"],
+      ["Allowed HTTPS origins (one per line)", "https://github.com"],
+      ["Username", "alice"],
+      ["Password (optional)", "test-password"],
+      ["Authenticator secret or otpauth URL (optional)", "test-authenticator"],
+    ] as const) {
+      screen.find("Field", label).props.onChangeText(value);
+      screen.harness.flush();
+    }
+    const queuedSubmit = screen.find(
+      "ActionButton",
+      "Save login for selected owner",
+    ).props.onPress;
+    if (transition === "background") {
+      screen.appState("background");
+      screen.appState("active");
+    } else {
+      screen.blur();
+      screen.focus();
+    }
+    await queuedSubmit();
+    screen.harness.flush();
+    assert.equal(
+      screen.find("Field", "Username").props.value,
+      transition === "background" ? "alice" : "",
+    );
+    assert.equal(screen.find("Field", "Password (optional)").props.value, "");
+    assert.equal(
+      screen.find("Field", "Authenticator secret or otpauth URL (optional)")
+        .props.value,
+      "",
+    );
+    assert.equal(screen.find("Field", "Label").props.value, "GitHub");
+    assert.equal(
+      screen.find("Field", "Allowed HTTPS origins (one per line)").props.value,
+      "https://github.com",
+    );
+    assert.equal(screen.saves(), 0);
+  });
+}

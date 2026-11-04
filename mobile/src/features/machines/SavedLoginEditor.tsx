@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Platform, Switch } from "react-native";
+import { useNavigation } from "@react-navigation/native";
 import { useQuery } from "@tanstack/react-query";
 import {
   ActionButton,
@@ -33,7 +34,9 @@ export function SavedLoginEditor({
   onUncertain: () => void;
   onBusy: (busy: boolean) => void;
 }) {
+  const navigation = useNavigation();
   const write = useMachineWrite();
+  const replacing = !!login;
   const [ownerId, setOwnerId] = useState(login?.owner_id ?? userId);
   const [label, setLabel] = useState(login?.label ?? "");
   const [origins, setOrigins] = useState(
@@ -47,7 +50,10 @@ export function SavedLoginEditor({
   const [acknowledged, setAcknowledged] = useState(!login);
   const [privacyReady, setPrivacyReady] = useState(false);
   const [privacyError, setPrivacyError] = useState(false);
+  const [backgroundCleared, setBackgroundCleared] = useState(false);
   const submitting = useRef(false);
+  const draftGeneration = useRef(0);
+  const renderedDraftGeneration = draftGeneration.current;
   useEffect(() => {
     let mounted = true;
     let privacy: DesktopPrivacy | undefined;
@@ -76,26 +82,42 @@ export function SavedLoginEditor({
     enabled: write.active,
     retry: false,
   });
-  function clear() {
-    setUsername("");
+  const clearSecrets = useCallback(() => {
+    draftGeneration.current++;
     setPassword("");
     setTotp("");
-  }
+  }, []);
+  const clear = useCallback(() => {
+    setUsername("");
+    clearSecrets();
+    setBackgroundCleared(false);
+    setAcknowledged(!replacing);
+  }, [clearSecrets, replacing]);
   function selectOwner(id: string) {
     clear();
     setOwnerId(id);
   }
   useEffect(() => {
-    if (!write.active) clear();
-  }, [write.active]);
+    clear();
+    setOwnerId(login?.owner_id ?? userId);
+  }, [userId, write.epoch, login?.owner_id, clear]);
   useEffect(() => {
-    // Native lifecycle events can be batched into one active render. Clear on
-    // the event itself so returning cannot retain the pre-background secrets.
+    // An interruption may only become inactive. Keep its draft protected by
+    // the native privacy overlay; actual background events erase secrets even
+    // when React batches background and foreground into one render.
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state !== "active") clear();
+      if (state === "background") {
+        clearSecrets();
+        setBackgroundCleared(true);
+        setAcknowledged(!replacing);
+      }
     });
-    return () => subscription.remove();
-  }, []);
+    const unsubscribeBlur = navigation.addListener("blur", clear);
+    return () => {
+      subscription.remove();
+      unsubscribeBlur();
+    };
+  }, [navigation, clear, clearSecrets, replacing]);
   useEffect(() => {
     if (write.uncertain) onUncertain();
   }, [write.uncertain]);
@@ -109,7 +131,14 @@ export function SavedLoginEditor({
   const enabled =
     privacyReady && write.active && !!owner && !write.busy && !write.uncertain;
   async function submit() {
-    if (submitting.current || !enabled || !acknowledged) return;
+    if (
+      submitting.current ||
+      renderedDraftGeneration !== draftGeneration.current ||
+      !enabled ||
+      !acknowledged ||
+      !write.interactive()
+    )
+      return;
     const parsed = savedLoginInputSchema.safeParse({
       label,
       allowed_origins: origins
@@ -153,9 +182,13 @@ export function SavedLoginEditor({
     <Card>
       <Label>{login ? `Replace ${login.label}` : "Add saved login"}</Label>
       <Label muted>
-        Secrets are write-only. Enter them here, never in chat. Switching away
-        clears the username, password and authenticator secret.
+        Secrets are write-only. Enter them here, never in chat. Entering the
+        background clears the password and authenticator secret, but keeps the
+        username. Leaving this editor clears all credential fields.
       </Label>
+      {backgroundCleared && (
+        <Notice message="Password and authenticator fields were cleared when the app entered the background. Re-enter any secrets you want to save." />
+      )}
       <Label>Owner: {owner ?? "Organization access unavailable"}</Label>
       {!privacyReady && (
         <Notice
