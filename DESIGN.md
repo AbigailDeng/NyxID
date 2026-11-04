@@ -87,6 +87,31 @@ Use the `text-{px}` tokens (`text-9` … `text-36`, defined as rem in `app.css`)
 
 Mobile Activity cards lead with the service name at 15px; the action and URL use secondary text at 12px. Service names may wrap to two lines.
 
+## Control necessity
+
+Before choosing or restyling a component, establish why users need it. Existing
+code and previous platform limitations do not justify a permanent UI entry.
+
+- Name the concrete user task and distinct outcome each button, menu item or
+  explanation supports. Remove it when that outcome is already covered and it
+  adds no useful shortcut or recovery path.
+- Reassess temporary fallbacks when native capabilities catch up. Retain a Web
+  handoff for a documented capability gap or distinct user task, and label the
+  task it enables.
+- Decide what to remove before polishing layout. Moving a redundant action into
+  an overflow menu preserves the unnecessary choice; remove the action and its
+  menu when no useful items remain.
+- Keep frequent page actions reachable as lists grow. Separate global actions
+  from scrolling records and reserve prominence for the main task.
+- Remove obsolete handlers, props, imports, tests and instructions with the
+  control. Preserve safeguards and handoffs needed by remaining workflows.
+
+Lesson from Saved logins: native add, replace and delete already covered the
+workflow, so `Open on web` and its otherwise empty `…` menu added no capability.
+Remove both. Hosted machine lifecycle management still requires Web and retains
+its handoff. In review, ask: **What necessary user task becomes harder or
+impossible if this element disappears?** If none, omit it.
+
 ## Components
 
 ### Service pool and routing icons
