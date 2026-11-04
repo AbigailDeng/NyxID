@@ -117,8 +117,6 @@ export function MachinesScreen({
       <SavedLogins
         key={runtime.epoch}
         inventory={inventory.data}
-        handoffError={handoffError}
-        onWeb={(path) => void handoff(path)}
         onMachines={() => navigation.setParams({ tab: undefined })}
       />
     );

@@ -684,6 +684,7 @@ docker compose up -d                    # MongoDB (27018) + Mailpit (8025)
 ## Design System
 
 Always read DESIGN.md before making any visual or UI decisions.
+Apply [Control necessity](DESIGN.md#control-necessity) before adding or rearranging UI controls.
 All font choices, colors, spacing, and aesthetic direction are defined there.
 Do not deviate without explicit user approval.
 In QA mode, flag any code that doesn't match DESIGN.md.

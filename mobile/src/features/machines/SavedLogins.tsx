@@ -1,12 +1,6 @@
 import { useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  StyleSheet,
-  View,
-} from "react-native";
-import { MoreHorizontal, Plus, RefreshCw } from "lucide-react-native";
+import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
+import { Plus, RefreshCw } from "lucide-react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceBack } from "../../app/WorkspaceHeader";
 import { SegmentControl } from "../../components/SegmentControl";
@@ -22,11 +16,7 @@ import {
 import { machinesApi } from "../../lib/api/machinesApi";
 import { useTheme } from "../../theme/ThemeContext";
 import { radius, TOUCH_TARGET } from "../../theme/designTokens";
-import {
-  machineWebPath,
-  type MachineInventory,
-  type SavedLogin,
-} from "./machineContracts";
+import type { MachineInventory, SavedLogin } from "./machineContracts";
 import {
   confirmDiscard,
   machineError,
@@ -42,13 +32,9 @@ import {
 
 export function SavedLogins({
   inventory,
-  handoffError,
-  onWeb,
   onMachines,
 }: {
   inventory?: MachineInventory;
-  handoffError?: string;
-  onWeb: (path: string) => void;
   onMachines: () => void;
 }) {
   const { colors } = useTheme();
@@ -100,25 +86,10 @@ export function SavedLogins({
     !!logins.error;
   const refreshDisabled =
     busy || !write.active || !!editing || logins.isFetching;
-  const webDisabled = busy || !write.active || !!editing || !!deleting;
-  const liveToolbar = useRef({ webDisabled, refreshDisabled });
-  liveToolbar.current = { webDisabled, refreshDisabled };
-  function showOptions() {
-    if (liveToolbar.current.webDisabled) return;
-    const current = write.captureWriteGuard();
-    Alert.alert("Saved login options", undefined, [
-      {
-        text: "Open on web",
-        onPress: () => {
-          if (current() && !liveToolbar.current.webDisabled)
-            onWeb(machineWebPath(undefined, "logins"));
-        },
-      },
-      { text: "Cancel", style: "cancel" },
-    ]);
-  }
+  const liveRefreshDisabled = useRef(refreshDisabled);
+  liveRefreshDisabled.current = refreshDisabled;
   async function refresh() {
-    if (liveToolbar.current.refreshDisabled) return;
+    if (liveRefreshDisabled.current) return;
     const result = await logins.refetch();
     if (!write.current()) return;
     if (!result.isSuccess || result.error)
@@ -220,20 +191,6 @@ export function SavedLogins({
                 <RefreshCw size={19} color={colors.textSecondary} />
               )}
             </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Saved login options"
-              accessibilityHint="Open saved logins on web"
-              accessibilityState={{ disabled: webDisabled }}
-              disabled={webDisabled}
-              onPress={showOptions}
-              style={({ pressed }) => [
-                styles.icon,
-                { opacity: webDisabled ? 0.4 : pressed ? 0.65 : 1 },
-              ]}
-            >
-              <MoreHorizontal size={22} color={colors.textSecondary} />
-            </Pressable>
           </View>
         </View>
       }
@@ -241,7 +198,6 @@ export function SavedLogins({
       <Label muted style={machineStyles.metadata}>
         Use saved logins to sign in on your machines.
       </Label>
-      {handoffError && <Notice tone="error" message={handoffError} />}
       {logins.isPending && <Label muted>Loading saved logins…</Label>}
       {logins.error && (
         <Notice tone="error" message={machineError(logins.error)} />

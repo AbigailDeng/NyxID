@@ -36,7 +36,6 @@ const toolbarModules = {
   "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
   "../../theme/designTokens": { radius: { md: 8 }, TOUCH_TARGET: 44 },
   "lucide-react-native": {
-    MoreHorizontal: "MoreHorizontal",
     Plus: "Plus",
     RefreshCw: "RefreshCw",
   },
@@ -289,12 +288,9 @@ test("save synchronously locks parent navigation until request completion", asyn
   await screen.harness.settle();
   assert.deepEqual(screen.busy, [true, false]);
 });
-test("parent rejects stale Web callbacks and refresh during editing, then locks navigation while saving", () => {
+test("parent rejects refresh during editing, then locks navigation while saving", () => {
   let back: any;
-  let generation = 0;
   let refreshes = 0;
-  const webPaths: string[] = [];
-  const optionCallbacks: Array<() => void> = [];
   const runtime = {
     epoch: 1,
     active: true,
@@ -302,24 +298,11 @@ test("parent rejects stale Web callbacks and refresh during editing, then locks 
     uncertain: false,
     current: () => true,
     reviewed() {},
-    captureWriteGuard: () => {
-      const admittedGeneration = generation;
-      return () => admittedGeneration === generation;
-    },
   };
   const harness = hookHarness<Element>({
     ...toolbarModules,
     "react/jsx-runtime": { jsx, jsxs: jsx, Fragment: "Fragment" },
-    "react-native": {
-      ...toolbarNative,
-      Alert: {
-        alert: (_title: string, _message: unknown, options: any[]) => {
-          optionCallbacks.push(
-            options.find((option) => option.text === "Open on web").onPress,
-          );
-        },
-      },
-    },
+    "react-native": toolbarNative,
     "../../app/WorkspaceHeader": {
       useWorkspaceBack: (options: any) => {
         back = options;
@@ -330,9 +313,6 @@ test("parent rejects stale Web callbacks and refresh during editing, then locks 
     "../../components/StatusBadge": { StatusBadge: "StatusBadge" },
     "../../components/SectionBadge": { SectionBadge: "SectionBadge" },
     "../../lib/api/machinesApi": { machinesApi: {} },
-    "./machineContracts": {
-      machineWebPath: () => "/assistant/machines?tab=logins",
-    },
     "./MachineUI": {
       useMachineWrite: () => runtime,
       machineKeys: () => [],
@@ -359,30 +339,13 @@ test("parent rejects stale Web callbacks and refresh during editing, then locks 
   harness.mount(() =>
     module.SavedLogins({
       inventory: { userId: USER, nodes: [] },
-      onWeb: (path: string) => webPaths.push(path),
       onMachines() {},
     }),
   );
-  const openOptions = () =>
-    all(harness.value())
-      .find((item) => item.props.accessibilityLabel === "Saved login options")!
-      .props.onPress();
-  openOptions();
-  optionCallbacks.shift()!();
-  assert.deepEqual(webPaths, ["/assistant/machines?tab=logins"]);
-  openOptions();
-  // A native options callback may arrive after an interruption invalidates
-  // its admitted action, even before React has rendered the new state.
-  generation++;
-  optionCallbacks.shift()!();
-  assert.equal(webPaths.length, 1);
-  openOptions();
   all(harness.value())
     .find((item) => item.props.accessibilityLabel === "Add saved login")!
     .props.onPress();
   harness.flush();
-  optionCallbacks.shift()!();
-  assert.equal(webPaths.length, 1);
   all(harness.value())
     .find((item) => item.type === "WorkspacePage")!
     .props.onRefresh();
@@ -395,12 +358,6 @@ test("parent rejects stale Web callbacks and refresh during editing, then locks 
   assert.equal(
     all(harness.value()).find((item) => item.type === "SegmentControl")!.props
       .disabled,
-    true,
-  );
-  assert.equal(
-    all(harness.value()).find(
-      (item) => item.props.accessibilityLabel === "Saved login options",
-    )!.props.disabled,
     true,
   );
   assert.equal(
@@ -489,7 +446,7 @@ async function realEditor() {
     },
     "@tanstack/react-query": {
       useQueryClient: () => ({ invalidateQueries: async () => {} }),
-      useQuery: () => ({ data: [], isSuccess: true }),
+      useQuery: () => ({ data: [], isSuccess: true, isFetching: false }),
     },
   });
   Object.assign(
@@ -505,7 +462,6 @@ async function realEditor() {
   harness.mount(() => {
     const parent = SavedLogins({
       inventory: { userId: USER, nodes: [] },
-      onWeb() {},
       onMachines() {},
     });
     const child = all(parent).find((item) => item.type === "SavedLoginEditor");
@@ -589,7 +545,6 @@ test("queued submissions keep the real parent and editor write locks until the a
     true,
   );
   for (const label of [
-    "Saved login options",
     "Refresh saved login metadata",
     "Cancel and clear credentials",
   ])
@@ -605,7 +560,10 @@ test("queued submissions keep the real parent and editor write locks until the a
   await harness.settle();
   assert.deepEqual(busy, [true, false]);
   assert.equal(screen.back().disabled, false);
-  assert.equal(find("Pressable", "Saved login options").props.disabled, false);
+  assert.equal(
+    find("Pressable", "Refresh saved login metadata").props.disabled,
+    false,
+  );
 });
 
 test("a temporary native interruption preserves the draft while pausing submission", async (t) => {

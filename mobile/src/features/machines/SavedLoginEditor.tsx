@@ -194,7 +194,7 @@ export function SavedLoginEditor({
         <Notice
           message={
             privacyError
-              ? "Credential privacy protection is unavailable in this build. Cancel and use Saved logins on web, or update the app."
+              ? "Credential privacy protection is unavailable in this build. Update the app and try again."
               : "Protecting credential entry…"
           }
         />
