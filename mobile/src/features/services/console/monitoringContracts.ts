@@ -148,7 +148,7 @@ export function displayedMonitoringStatus(
   check: MonitoringCheckResult | null,
   now = Date.now(),
 ): MonitoringCheckResult["status"] {
-  if (!check) return "not_configured";
+  if (!check) return "unknown";
   if (check.status === "not_configured") return "not_configured";
   const at = check.checked_at ? Date.parse(check.checked_at) : NaN;
   const staleAt = check.stale_at ? Date.parse(check.stale_at) : NaN;

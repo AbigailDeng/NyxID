@@ -47,7 +47,36 @@ test("status expires locally; stale, invalid, missing and future evidence stay u
       "unknown",
     );
   }
-  assert.equal(displayedMonitoringStatus(null, now), "not_configured");
+});
+
+test("missing readiness stays unknown; only explicit server evidence means not configured", () => {
+  assert.equal(displayedMonitoringStatus(null, now), "unknown");
+  assert.equal(
+    displayedMonitoringStatus(
+      {
+        ...check,
+        status: "unknown",
+        checked_at: null,
+        stale_at: null,
+        freshness: "unknown",
+      },
+      now,
+    ),
+    "unknown",
+  );
+  assert.equal(
+    displayedMonitoringStatus(
+      {
+        ...check,
+        status: "not_configured",
+        checked_at: null,
+        stale_at: null,
+        freshness: "unknown",
+      },
+      now,
+    ),
+    "not_configured",
+  );
 });
 
 test("monitoring paths cannot become URLs, traversals or operations through encoding", () => {

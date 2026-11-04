@@ -2,11 +2,13 @@
 
 Tracking: [personal issue #12](https://github.com/AbigailDeng/NyxID/issues/12). Baseline: `dc46415065fac9e80200d0711b729db7f8c7d2c8`. This change provides native monitoring and deliberate resource-specific Web handoffs; it does not implement an entire mobile admin console.
 
+Ordinary app entry: **Plugins → Connectors → Service & developer console → Show developer console**. This opens the existing Services root; no external deep link is required. Selected connection management remains available from the connector list.
+
 ## Delivery decisions
 
 | Capability | Delivery and entry | Authority / behavior |
 | --- | --- | --- |
-| Health/readiness observations | Native: Services → an HTTP connection → Overview | Requires live `services:monitoring` on `/users/me`; restricted org connections have no card. Reads and Refresh only observe. Backend `monitoring_not_configured` hides the card. Failed/missing/stale/future/expired evidence never shows healthy. |
+| Health/readiness observations | Native: Services → an HTTP connection → Overview | Requires live `services:monitoring` on `/users/me`; restricted org connections have no card. Reads and Refresh only observe. Backend `monitoring_not_configured` hides the card. Failed/missing/stale/future/expired evidence never shows healthy. Null readiness is Unknown; only an explicit server result means Not configured. |
 | Check now | Native, explicit action in the monitoring card | Re-reads identity, flag and exact-service `can_probe` immediately before execution. May invoke ordinary approvals or bill a priced service; the UI says so. No polling. |
 | Monitoring configure/test/save/clear | Native, current `can_manage`; Test also requires `can_probe` | Safe relative GET paths, 1–8 unique HTTP status codes, 1,024-byte UTF-8 body expectations. Save/clear preserve reviewed revision and refuse drift; HTTP 409 requires reload/review. Clear removes owner overrides and allows built-in fallback. Draft tests never save. |
 | Endpoint/OpenAPI; routing/credential Node; headers/User-Agent; WS injection; skills; ownership/permissions | Web: individual entries in the selected connection’s Advanced tab | Every link preserves connection ID. Ordinary read-only connections retain the read-only Web Advanced view; auto/platform-managed connections go to their valid Overview. Re-reads the connection before opening. SSH shows only applicable SSH/routing/ownership entries. |
@@ -33,6 +35,8 @@ Web URLs come from fixed local routes plus encoded resource IDs under the config
 ## Verification and remaining acceptance
 
 Focused model/transport/screen tests cover status expiry, encoded unsafe paths, byte/status bounds, missing feature/backend setup, identity/service mismatches, permission revocation, revision drift, uncertain failures, duplicate actions, parent locks, synchronous AppState transitions, browser return refresh and account changes.
+
+The [2026-11-04 review and acceptance record](MOBILE_SERVICE_CONSOLE_ACCEPTANCE.md) records the two repaired defects, 72 passing related tests, and the simulator walkthrough. Runtime evidence includes real monitoring reads, local invalid-path rejection, draft guards, ordinary console navigation, and opening the first-party Web sign-in page. Web return refresh is covered by component tests but was not confirmed in this simulator session because its browser dismissal control was unavailable to the UI automation tool.
 
 Pending device/backend acceptance (not claimed complete):
 

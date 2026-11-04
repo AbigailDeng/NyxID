@@ -200,6 +200,40 @@ test("feature off and missing backend configuration hide monitoring; read failur
   x.harness.unmount();
 });
 
+test("readiness renders Unknown for absent evidence and Not configured only for an explicit result", () => {
+  const x = setup();
+  const readinessText = () => {
+    const summary = x.nodes().find((node) => node.props.title === "Readiness");
+    assert(summary && typeof summary.type === "function");
+    const rendered = (summary.type as (props: unknown) => Element)(
+      summary.props,
+    );
+    return elements(rendered)
+      .filter((node) => node.type === "Label")
+      .map((node) => [node.props.children].flat(Infinity).join(""))
+      .join(" ");
+  };
+  assert.match(readinessText(), /Readiness: Unknown/);
+  assert.doesNotMatch(readinessText(), /Not configured/);
+  x.query.data.response.configuration.owner_config.readiness = {
+    path: "readyz",
+    expect_status: [200],
+  };
+  x.harness.render();
+  assert.match(readinessText(), /Readiness: Unknown/);
+  x.query.data.response.can_manage = false;
+  x.query.data.response.configuration = null;
+  x.harness.render();
+  assert.match(readinessText(), /Readiness: Unknown/);
+  x.query.data.response.status.readiness = {
+    ...check,
+    status: "not_configured",
+  };
+  x.harness.render();
+  assert.match(readinessText(), /Readiness: Not configured/);
+  x.harness.unmount();
+});
+
 test("synchronous AppState loss fences a late result without relying on a render", async () => {
   const x = setup();
   const pending = deferred<any>();
@@ -314,7 +348,7 @@ test("clear confirmation preserves its reviewed revision when a newer observatio
   x.harness.unmount();
 });
 
-test("duplicate execution is locked; foreground and account loss fence late results", async () => {
+test("duplicate execution is locked; focus loss fences late results", async () => {
   const x = setup();
   const pending = deferred<any>();
   x.operation(() => pending.promise);

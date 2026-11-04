@@ -250,6 +250,16 @@ export function PluginsScreen({
               )}
             </Pressable>
           </View>
+          <ActionButton
+            label="Service & developer console"
+            accessibilityHint="Manage Agent Keys, Pools, credential Nodes and developer integrations."
+            variant="secondary"
+            disabled={!focused || !foreground}
+            onPress={() => {
+              Keyboard.dismiss();
+              navigation.navigate("Services");
+            }}
+          />
           <View
             style={[
               styles.list,

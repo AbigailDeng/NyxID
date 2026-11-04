@@ -164,6 +164,7 @@ function setup({
     catalog: response(catalog, "catalog"),
   };
   const navigation = {
+    navigate: record("navigate"),
     push: record("push"),
     setOptions: record("setOptions"),
   };
@@ -285,6 +286,54 @@ function setup({
   };
 }
 
+test("Connectors exposes the service console through an exact navigation-only entry", () => {
+  const env = setup();
+  try {
+    const entry = env.control("Service & developer console");
+    assert.equal(entry.type, "ActionButton");
+    assert.equal(entry.props.variant, "secondary");
+    assert.match(entry.props.accessibilityHint, /Agent Keys/);
+    assert.match(entry.props.accessibilityHint, /Pools/);
+    assert.match(entry.props.accessibilityHint, /Nodes/);
+    assert.match(entry.props.accessibilityHint, /developer integrations/);
+    const beforeOpen = env.calls.length;
+    entry.props.onPress();
+    assert.deepEqual(env.calls.slice(beforeOpen), [
+      { method: "dismissKeyboard", args: [] },
+      { method: "navigate", args: ["Services"] },
+    ]);
+    env.control("Discover connectors, 1").props.onPress();
+    assert.equal(
+      env
+        .all()
+        .filter((node) => node.props.label === "Service & developer console")
+        .length,
+      1,
+    );
+  } finally {
+    env.unmount();
+  }
+});
+
+test("service console entry stays out of Skills and the connection picker", () => {
+  const env = setup();
+  const hasEntry = () =>
+    env
+      .all()
+      .some((node) => node.props.label === "Service & developer console");
+  try {
+    assert.equal(hasEntry(), true);
+    env.tab("Skills").props.onPress();
+    assert.equal(hasEntry(), false);
+    env.tab("Connectors").props.onPress();
+    assert.equal(hasEntry(), true);
+    env.connector("service:api-cloudflare");
+    assert.equal(hasEntry(), false);
+  } finally {
+    env.unmount();
+  }
+});
+
 test("automatic credentials cannot enter the mobile management picker or counts", () => {
   const env = setup({
     connections: [
@@ -296,14 +345,25 @@ test("automatic credentials cannot enter the mobile management picker or counts"
   try {
     assert.equal(env.list().data.length, 1);
     env.control("Added connectors, 1");
-    assert.deepEqual(Array.from(env.list().data[0].manageKeyIds), [dnsPersonal.id]);
+    assert.deepEqual(Array.from(env.list().data[0].manageKeyIds), [
+      dnsPersonal.id,
+    ]);
     assert.equal(env.list().data[0].disabled, true);
     env.connector("service:api-cloudflare");
     assert.ok(env.control("Manage Personal Cloudflare"));
-    assert.ok(!env.all().some((node) => node.props.accessibilityLabel === "Manage Work Cloudflare"));
+    assert.ok(
+      !env
+        .all()
+        .some(
+          (node) => node.props.accessibilityLabel === "Manage Work Cloudflare",
+        ),
+    );
     env.connector();
     env.control("Discover connectors, 1").props.onPress();
-    assert.deepEqual(Array.from(env.list().data, (item: { name: string }) => item.name), ["Slack"]);
+    assert.deepEqual(
+      Array.from(env.list().data, (item: { name: string }) => item.name),
+      ["Slack"],
+    );
   } finally {
     env.unmount();
   }
