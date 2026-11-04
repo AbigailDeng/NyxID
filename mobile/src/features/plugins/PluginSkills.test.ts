@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
-import { hookHarness } from "../assistant/assistantHookTestHarness";
+import { deferred, hookHarness } from "../assistant/assistantHookTestHarness";
 import * as skillTypes from "./pluginSkillsTypes";
 import type { AssistantAgent } from "../agents/agentContracts";
 import type { AssistantParams } from "../../app/navigationTypes";
@@ -161,6 +161,12 @@ function setup({
   state.set("history", response({ items: [] }));
   const client = { invalidateQueries: record("invalidate") };
   const harness = hookHarness<Element>({
+    "./SkillActivationControls": {
+      SkillActivationControls: "SkillActivationControls",
+    },
+    "../assistant-management/ManagementHandoff": {
+      ManagementHandoff: "ManagementHandoff",
+    },
     "../../components/AgentAvatar": {
       AgentAvatar: "AgentAvatar",
       AgentAvatarStack: "AgentAvatarStack",
@@ -308,6 +314,7 @@ function setup({
         (item) => item.type === "WorkspaceSelectionSheet",
       ),
     library: () => find((item) => item.type === "SkillLibrary"),
+    activation: () => find((item) => item.type === "SkillActivationControls"),
     hasModal: () =>
       elements(harness.flush()).some((item) => item.type === "Modal"),
     control: (label: string) =>
@@ -881,6 +888,144 @@ test("the latest pinned version is badged and does not offer a redundant latest 
         ),
     );
     assert.equal(env.calls.filter((call) => call.method === "write").length, 0);
+  } finally {
+    env.unmount();
+  }
+});
+
+test("successful activation and preload release the manager after the refreshed revision remounts their editor", async () => {
+  for (const mode of ["activation", "preload"] as const) {
+    const env = setup();
+    env.navigation("SkillDetail", {
+      agentId: first.id,
+      skillId: "pin-original",
+      name: "dns-helper",
+    });
+    const pendingRefresh = deferred<void>();
+    const mountActivation = (element: Element) => {
+      const mocks: Record<string, unknown> = {
+        "react/jsx-runtime": {
+          jsx: (type: unknown, props: unknown) => ({ type, props }),
+          jsxs: (type: unknown, props: unknown) => ({ type, props }),
+          Fragment: "Fragment",
+        },
+        "react-native": {
+          AppState: { addEventListener: () => ({ remove() {} }) },
+        },
+        "../../components/workspace/WorkspaceUI": Object.fromEntries(
+          ["ActionButton", "Card", "Field", "Label", "Notice"].map((name) => [
+            name,
+            name,
+          ]),
+        ),
+        "../../lib/auth/authEpoch": { getAuthEpoch: () => 1 },
+        "../../lib/api/pluginSkillsApi": {
+          pluginSkillsApi: {
+            current: async () => env.state.get(first.id).data,
+            write: async () => {},
+            preload: async () => {},
+          },
+        },
+        "../../lib/api/agentsApi": {
+          agentsApi: { detail: async () => ({ agent: first }) },
+        },
+        "../automations/AutomationUI": {
+          automationError: (cause: Error) => cause.message,
+          automationStyles: {},
+          useAutomationRuntime: () => ({ active: true, online: true }),
+        },
+        "./pluginSkillsTypes": skillTypes,
+      };
+      const child = hookHarness<Element>(mocks);
+      mocks["../assistant-management/useManagementWriteScope"] = child.load(
+        fileURLToPath(
+          new URL(
+            "../assistant-management/useManagementWriteScope.ts",
+            import.meta.url,
+          ),
+        ),
+      );
+      const Component = child.load(
+        fileURLToPath(
+          new URL("./SkillActivationControls.tsx", import.meta.url),
+        ),
+      ).SkillActivationControls as (props: unknown) => Element;
+      child.mount(() =>
+        Component({
+          ...element.props,
+          onRefresh: async () => {
+            await element.props.onRefresh();
+            // Another enabled query (for example the package preview) may still
+            // be fetching after the current selection has already refreshed.
+            await pendingRefresh.promise;
+          },
+        }),
+      );
+      const control = (label: string) =>
+        elements(child.flush()).find((item) => item.props.label === label)!;
+      return { child, control };
+    };
+    const original = env.activation();
+    const oldEditor = mountActivation(original);
+    let newEditor: ReturnType<typeof mountActivation> | undefined;
+    try {
+      if (mode === "preload") {
+        oldEditor.control("Preload file paths").props.onChangeText("SKILL.md");
+        oldEditor.child.flush();
+      }
+      oldEditor
+        .control(mode === "activation" ? "Disable skill" : "Save preload")
+        .props.onPress();
+      await oldEditor.child.settle();
+      assert.equal(env.activation().props.disabled, true);
+      const selection = env.state.get(first.id).data;
+      env.state.get(first.id).data = {
+        ...selection,
+        revision: selection.revision + 1,
+      };
+      env.harness.render();
+      const refreshed = env.activation();
+      assert.notEqual(refreshed.key, original.key);
+      oldEditor.child.unmount();
+      newEditor = mountActivation(refreshed);
+      pendingRefresh.resolve();
+      await oldEditor.child.settle();
+      assert.equal(
+        env.activation().props.disabled,
+        false,
+        `${mode}: manager must unlock after a revision refresh`,
+      );
+      assert.equal(env.control("Choose exact version").props.disabled, false);
+    } finally {
+      oldEditor.child.unmount();
+      newEditor?.child.unmount();
+      env.unmount();
+    }
+  }
+});
+
+test("late activation cleanup cannot unlock a newer operation or a different account's manager", () => {
+  const env = setup();
+  env.navigation("SkillDetail", {
+    agentId: first.id,
+    skillId: "pin-original",
+    name: "dns-helper",
+  });
+  try {
+    const original = env.activation().props.onBusy;
+    const previous = Symbol("previous write");
+    const next = Symbol("next write");
+    original(true, previous);
+    original(false, previous);
+    env.activation().props.onBusy(true, next);
+    original(false, previous);
+    assert.equal(env.activation().props.disabled, true);
+    env.activation().props.onBusy(false, next);
+    assert.equal(env.activation().props.disabled, false);
+    env.activation().props.onBusy(true, next);
+    env.epoch(2);
+    original(false, next);
+    assert.equal(env.activation().props.disabled, true);
   } finally {
     env.unmount();
   }

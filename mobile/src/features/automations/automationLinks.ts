@@ -1,5 +1,6 @@
 export type AutomationLinkParams = {
   agentId?: string;
+  setupId?: string;
 };
 
 export type AutomationLink =
@@ -51,8 +52,9 @@ export function parseAutomationLink(
           "This automation link has an invalid agent. Ask NyxBot for a new link.",
       };
     if (agent.length) params.agentId = agent[0]!;
-    // Setup authoring is not native. Only the read-only agent filter crosses.
-    // Instructions, secrets, and arbitrary return URLs never enter route state.
+    if (setup.length) params.setupId = setup[0]!;
+    // Only bounded identifiers cross. Authoring stays on web; preserve its
+    // setup context without copying instructions, credentials or return URLs.
     return { kind: "automation", params };
   } catch {
     return null;

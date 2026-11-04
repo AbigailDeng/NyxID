@@ -5,14 +5,14 @@ import { parseAutomationLink } from "./automationLinks";
 const frontend = "https://nyx.example";
 const setup = "4b47953b-92cc-482f-8443-e0bcc30ade21";
 
-test("trusted setup links open read-only Automations and preserve only the agent filter", () => {
+test("trusted setup links open read-only Automations and preserve bounded context for Web authoring", () => {
   for (const path of ["/assistant/automations", "/automations"]) {
     assert.deepEqual(
       parseAutomationLink(
         `${frontend}${path}?setup=${setup}&agent=researcher&instruction=private&token=secret&return_to=https://other.example#review`,
         frontend,
       ),
-      { kind: "automation", params: { agentId: "researcher" } },
+      { kind: "automation", params: { agentId: "researcher", setupId: setup } },
     );
   }
 });

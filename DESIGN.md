@@ -624,19 +624,39 @@ account pages and QR/terminal quick actions use the retained pull-up surface. Se
 - Native permissions controls contain Full access, Auto and Ask every time only,
   with the effective agent override shown read-only. Chat and agent settings use
   the server default without a native selector or per-turn override. Voice automatically uses an available server default, without a source selector. This is the user's deliberate native scope (2026-10-28).
-- Native Automations is display-only: configured tasks, source/schedule, target,
+- Native Automations keeps configured tasks, source/schedule, target,
   confirmation policy, read-only status and paged run history with exact thread
-  links. It issues GET requests only. Creation, changes and execution belong to
-  NyxBot; no native editor, preferences, toggle, invoke, delete or webhook setup.
+  links. Its transport issues GET requests only. Creation, changes and execution
+  use Ask NyxBot or the existing Web manager, retaining its existing agent filter
+  or setup context. The App does not add exact-task or create-form URL behavior.
+  Returning from Web refreshes authoritative server state;
+  browser dismissal never confirms a mutation. There is no native automation
+  editor, toggle, invoke, delete or webhook setup.
+  Detail background reads update cached content silently in the existing scroll
+  container. Initial loading is shown only before data is available; later reads
+  retain content and scroll position. Only a user pull gesture drives the refresh
+  indicator. Background failures keep existing content without inserting a banner;
+  a failed manual refresh reports an alert and stops its indicator.
 - Reply activity/receipts and prose have a 16pt gap. Ordinary Markdown blocks have
   12pt sibling spacing; headings have 20pt (h1) or 16pt above and 8pt below, without
   start/end margins. Horizontally scrolling tables include the transcript's 12pt
   trailing inset. Private, live and crew replies share the same layout.
-- Native skills are read-only except explicit version pinning and “Remove from
-  agent”. “Use latest (version)” resolves the newest supported package and pins
-  its exact version/hash; no floating latest contract exists. Editing belongs to
-  NyxBot (“To change this skill, ask NyxBot.”). Owner publication decision cards
-  retain their reviewed files and guarded approve/decline actions, without an editor.
+- Native skills support explicit version pinning, enable/disable, revision-fenced
+  preload paths and “Remove from agent”. Preload permits up to eight package-relative
+  text files including SKILL.md; the server enforces file availability and the
+  agent-wide 64 KiB budget. “Use latest (version)” resolves the newest supported
+  package and pins its exact version/hash; no floating latest contract exists.
+  Skill files stay read-only. Editing belongs to NyxBot (“To change this skill,
+  ask NyxBot.”) or the exact agent's Web Skills panel, which also contains learning
+  settings, organization consent, runs and proposals. Owner publication decision
+  cards retain their reviewed files and guarded approve/decline actions, without
+  a native editor.
+- Settings → NyxBot management provides global continuation, specialist and
+  group handoff limits plus automation timezone and rate preferences. Writes
+  validate fresh server ceilings and send only dirty fields. A concurrent edit
+  requires reload; an unconfirmed write cannot be repeated until server reload.
+  Channel readiness, actual bot management, onboarding setups and personal chat
+  binding management use contextual Web destinations with refresh on return.
 - Settings → Display stores chat layout on this device with AsyncStorage. Column
   maximum defaults to 758pt, clamps to actual space, and is adjustable only on
   windows at least 600pt wide (360–1200pt range). Composer maximum defaults to the

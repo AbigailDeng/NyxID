@@ -13,6 +13,8 @@ import {
   View,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
+import { useQueryClient } from "@tanstack/react-query";
+import { managementRefreshKeys } from "../assistant-management/managementRefresh";
 import * as WebBrowser from "expo-web-browser";
 import { X } from "lucide-react-native";
 import { getAuthEpoch } from "../../lib/auth/authEpoch";
@@ -59,6 +61,7 @@ export function ScopedAssistantLinkHost({
   children: ReactNode;
 }) {
   const navigation = useNavigation();
+  const client = useQueryClient();
   const availability = useGroupAvailability();
   const { colors } = useTheme();
   const [opened, setOpened] = useState<{
@@ -74,6 +77,7 @@ export function ScopedAssistantLinkHost({
   const trigger = useRef<number | undefined>(undefined);
   const mounted = useRef(true);
   const available = useRef(availability.available);
+  const webHandoff = useRef<{ epoch: number; scope: string } | null>(null);
   available.current = availability.available;
   useEffect(() => {
     mounted.current = true;
@@ -87,7 +91,9 @@ export function ScopedAssistantLinkHost({
       if (!value) return false;
       if (!available.current()) return true;
       trigger.current = source;
-      if (value.kind === "account" && value.panel !== "nyxbot") {
+      if (value.kind === "account" && value.panel === "nyxbot") {
+        navigation.dispatch(openWorkspaceSheetAction("AssistantManagement"));
+      } else if (value.kind === "account") {
         if (value.panel === "billing")
           navigation.dispatch(
             openWorkspaceSheetAction("UsageCredits", { period: value.period }),
@@ -116,7 +122,21 @@ export function ScopedAssistantLinkHost({
     setOpened(undefined);
     setBusy(false);
     trigger.current = undefined;
+    webHandoff.current = null;
   }, [scope]);
+  useEffect(() => {
+    const pending = webHandoff.current;
+    if (
+      availability.active &&
+      pending?.scope === scope &&
+      pending.epoch === getAuthEpoch()
+    )
+      void Promise.all(
+        managementRefreshKeys.map((queryKey) =>
+          client.invalidateQueries({ queryKey }),
+        ),
+      );
+  }, [availability.active, scope, client]);
   function close() {
     if (busy) return;
     setOpened(undefined);
@@ -242,10 +262,24 @@ export function ScopedAssistantLinkHost({
                   <ActionButton
                     label="Continue on the web"
                     onPress={() => {
-                      if (available.current())
-                        void WebBrowser.openBrowserAsync(target.href).catch(
-                          () => undefined,
-                        );
+                      if (!available.current()) return;
+                      const epoch = getAuthEpoch();
+                      webHandoff.current = { epoch, scope };
+                      void WebBrowser.openBrowserAsync(target.href)
+                        .then(async () => {
+                          if (
+                            mounted.current &&
+                            available.current() &&
+                            epoch === getAuthEpoch() &&
+                            webHandoff.current?.scope === scope
+                          )
+                            await Promise.all(
+                              managementRefreshKeys.map((queryKey) =>
+                                client.invalidateQueries({ queryKey }),
+                              ),
+                            );
+                        })
+                        .catch(() => undefined);
                     }}
                   />
                 </Card>

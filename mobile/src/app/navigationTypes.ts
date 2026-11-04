@@ -9,6 +9,7 @@ import type {
 } from "@react-navigation/native-stack";
 import type { UsageCreditsRouteParams } from "../features/billing/UsageCreditsScreen";
 import type { MachineDesktopRouteParams } from "../features/machines/desktopEntry";
+import type { AutomationLinkParams } from "../features/automations/automationLinks";
 
 export type AssistantParams = {
   home?: boolean;
@@ -23,7 +24,7 @@ export type AssistantParams = {
 
 export type WorkspaceParamList = {
   Assistant: AssistantParams | undefined;
-  Automations: { agentId?: string } | undefined;
+  Automations: AutomationLinkParams | undefined;
   Machines: { machine?: string; tab?: "logins" } | undefined;
   Services: undefined;
   Plugins: { tab?: "connectors" | "skills"; agentId?: string } | undefined;
@@ -93,6 +94,7 @@ export type WorkspaceContentParamList = Omit<
 export type WorkspaceSheetParamList = SharedEntryParamList & {
   AccountSettings: WorkspaceParamList["AccountSettings"];
   AccountSecurity: undefined;
+  AssistantManagement: undefined;
   UsageCredits: UsageCreditsRouteParams | undefined;
 };
 
@@ -164,6 +166,7 @@ export const workspaceContentRouteNames: (keyof WorkspaceContentParamList)[] = [
 export const workspaceSettingsRouteNames: (keyof WorkspaceSheetParamList)[] = [
   "AccountSettings",
   "AccountSecurity",
+  "AssistantManagement",
   "UsageCredits",
   "DeviceLogin",
   "AgentKeyLogin",

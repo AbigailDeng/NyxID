@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { AgentAvatar } from "../../components/AgentAvatar";
-import { useEffect, useState } from "react";
-import { Pressable, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Alert, Pressable, View } from "react-native";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { ChevronRight, Clock3 } from "lucide-react-native";
@@ -11,6 +11,7 @@ import type {
 } from "../../app/navigationTypes";
 import { useOpenWorkspaceChat } from "../../app/WorkspaceHeader";
 import { newAssistantChatParams } from "../../app/assistantChatParams";
+import { ManagementHandoff } from "../assistant-management/ManagementHandoff";
 import {
   ActionButton,
   Card,
@@ -98,7 +99,12 @@ export function AutomationsScreen({
       leading: undefined,
     });
   return (
-    <WorkspacePage title="Automations" showHeading={false}>
+    <WorkspacePage
+      title="Automations"
+      showHeading={false}
+      refreshing={list.isFetching}
+      onRefresh={() => void list.refetch()}
+    >
       <View style={s.spread}>
         <View style={s.flex}>
           <Label style={s.section}>Tasks that run for you</Label>
@@ -111,6 +117,18 @@ export function AutomationsScreen({
         Times shown in {zone}
       </Label>
       <AutomationGuidance />
+      <ManagementHandoff
+        label={
+          route.params?.setupId
+            ? "Continue this automation setup on web"
+            : "Manage automations on web"
+        }
+        target={{
+          kind: "automations",
+          agentId: agentId || undefined,
+          setupId: route.params?.setupId,
+        }}
+      />
       <Field
         label="Search automations"
         placeholder="Search by name or agent"
@@ -243,10 +261,46 @@ export function AutomationDetailScreen({
   });
   const row = detail.data;
   const zone = settings.data?.timezone ?? deviceTimezone();
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const refreshOwner = useRef<symbol | null>(null);
+  useEffect(() => {
+    setPullRefreshing(false);
+    return () => {
+      refreshOwner.current = null;
+    };
+  }, [route.params.id, runtime.active, runtime.online]);
+  async function refreshDetail() {
+    if (
+      !runtime.active ||
+      !runtime.online ||
+      refreshOwner.current ||
+      (!row && detail.isPending)
+    )
+      return;
+    const owner = Symbol("automation-pull-refresh");
+    refreshOwner.current = owner;
+    setPullRefreshing(true);
+    try {
+      await detail.refetch({ cancelRefetch: false, throwOnError: true });
+    } catch (error) {
+      if (refreshOwner.current === owner)
+        Alert.alert("Could not refresh automation", automationError(error));
+    } finally {
+      if (refreshOwner.current === owner) {
+        refreshOwner.current = null;
+        setPullRefreshing(false);
+      }
+    }
+  }
   return (
-    <WorkspacePage title="Automation" showHeading={false}>
-      {detail.isPending && <AutomationLoading />}
-      {detail.error && (
+    <WorkspacePage
+      title="Automation"
+      showHeading={false}
+      refreshing={pullRefreshing}
+      onRefresh={refreshDetail}
+    >
+      {!row && detail.isPending && <AutomationLoading />}
+      {!row && detail.error && (
         <>
           <Notice tone="error" message={automationError(detail.error)} />
           <ActionButton
@@ -338,6 +392,16 @@ export function AutomationDetailScreen({
             onPress={() => navigation.push("AutomationRuns", { id: row.id })}
           />
           <AutomationGuidance />
+          <ManagementHandoff
+            label="Manage automations on web"
+            target={{
+              kind: "automations",
+              agentId:
+                row.delivery.type === "assistant"
+                  ? row.delivery.agent_id
+                  : undefined,
+            }}
+          />
           {row.delivery.type === "assistant" && (
             <Label muted style={s.small}>
               Normal agent usage and billing apply. This automation uses

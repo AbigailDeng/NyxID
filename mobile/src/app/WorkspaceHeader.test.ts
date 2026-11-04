@@ -643,6 +643,35 @@ test("dirty dismissal protection is independent of having a local detail view", 
   assert.equal(env.counts().localBacks, 0);
 });
 
+test("a dirty Settings leaf confirms inner-stack Back once instead of invoking its native goBack again", () => {
+  for (const type of ["GO_BACK", "POP"]) {
+    const env = setup({
+      inSheet: true,
+      active: false,
+      defaultRole: "back",
+      discardOnClose: {
+        title: "Discard NyxBot changes?",
+        message: "Unsaved limits",
+      },
+    });
+    const action = {
+      type,
+      target: "sheet-inner-stack",
+      source: "editor-route",
+    };
+    env.attempt(action);
+    assert.equal(env.alerts.length, 1);
+    assert.equal(env.counts().localBacks, 0);
+    env.choose("Keep editing");
+    assert.equal(env.dispatched.length, 0);
+    env.attempt(action);
+    env.choose("Discard");
+    assert.equal(env.dispatched.at(-1), action);
+    assert.equal(env.counts().localBacks, 0);
+    env.unmount();
+  }
+});
+
 test("pending discard callbacks lose authority after focus loss or unmount", () => {
   for (const boundary of ["blur", "unmount"]) {
     const env = setup({

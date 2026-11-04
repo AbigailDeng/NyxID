@@ -375,11 +375,16 @@ export function useWorkspaceBack({
       ((focused && (active || disabled)) || Boolean(discardOnClose)) &&
       (!allowedRemoval || disabled),
     ({ data }) => {
-      const outerDismiss = sheet
-        ? data.action.target === sheet.rootKey ||
-          data.action.source === sheet.sheetKey
-        : !active ||
-          ["RESET", "NAVIGATE", "REPLACE", "POP_TO"].includes(data.action.type);
+      // A native leaf has no local view to pop. Its inner Settings-stack Back
+      // must pass through discard confirmation, just like leaving the sheet.
+      const outerDismiss =
+        !active ||
+        (sheet
+          ? data.action.target === sheet.rootKey ||
+            data.action.source === sheet.sheetKey
+          : ["RESET", "NAVIGATE", "REPLACE", "POP_TO"].includes(
+              data.action.type,
+            ));
       if (!outerDismiss) {
         localBack();
         return;

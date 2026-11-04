@@ -29,6 +29,8 @@ import {
 } from "../../app/WorkspaceHeader";
 import { newAssistantChatParams } from "../../app/assistantChatParams";
 import { SkillLibrary, type SkillLibraryTab } from "./SkillLibrary";
+import { SkillActivationControls } from "./SkillActivationControls";
+import { ManagementHandoff } from "../assistant-management/ManagementHandoff";
 import {
   assertSkillRevision,
   buildSkillSelection,
@@ -230,10 +232,12 @@ export function PluginSkillPage({
 function SkillPageGuard({
   busy,
   confirmDetach,
+  dirty,
   onBack,
 }: {
   busy: boolean;
   confirmDetach: boolean;
+  dirty: boolean;
   onBack: () => void;
 }) {
   useWorkspaceBack({
@@ -241,6 +245,12 @@ function SkillPageGuard({
     onBack,
     defaultRole: "back",
     disabled: busy,
+    discardOnClose: dirty
+      ? {
+          title: "Discard preload changes?",
+          message: "Your unsaved preload paths will be lost.",
+        }
+      : undefined,
   });
   return null;
 }
@@ -275,11 +285,31 @@ function AgentSkillsManager({
   const [selectedVersion, setSelectedVersion] = useState<SkillVersion>();
   const [testing, setTesting] = useState(false);
   const [confirmDetach, setConfirmDetach] = useState(false);
+  const [activationDirty, setActivationDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const lock = useRef(false);
   const authEpoch = useRef(getAuthEpoch());
+  const activationOperation = useRef<symbol | null>(null);
+  const managerMounted = useRef(false);
+  useEffect(() => {
+    managerMounted.current = true;
+    return () => {
+      managerMounted.current = false;
+      activationOperation.current = null;
+    };
+  }, []);
+  function activationBusy(value: boolean, operation: symbol) {
+    if (!managerMounted.current || authEpoch.current !== getAuthEpoch()) return;
+    if (value) {
+      activationOperation.current = operation;
+      setBusy(true);
+    } else if (activationOperation.current === operation) {
+      activationOperation.current = null;
+      setBusy(false);
+    }
+  }
   const currentKey = [...ROOT, agent.id] as const;
   const current = useQuery({
     queryKey: currentKey,
@@ -355,9 +385,18 @@ function AgentSkillsManager({
   }
   async function refresh() {
     await Promise.all([
-      client.invalidateQueries({ queryKey: currentKey }),
-      client.invalidateQueries({ queryKey: [...ROOT, "history", agent.id] }),
-      client.invalidateQueries({ queryKey: [...ROOT, "test", agent.id] }),
+      client.invalidateQueries(
+        { queryKey: currentKey },
+        { throwOnError: true },
+      ),
+      client.invalidateQueries(
+        { queryKey: [...ROOT, "history", agent.id] },
+        { throwOnError: true },
+      ),
+      client.invalidateQueries(
+        { queryKey: [...ROOT, "test", agent.id] },
+        { throwOnError: true },
+      ),
     ]);
   }
   async function run(action: () => Promise<void>) {
@@ -480,6 +519,7 @@ function AgentSkillsManager({
           <SkillPageGuard
             busy={busy}
             confirmDetach={confirmDetach}
+            dirty={activationDirty}
             onBack={() =>
               confirmDetach ? setConfirmDetach(false) : navigation.goBack()
             }
@@ -568,7 +608,7 @@ function AgentSkillsManager({
                 <ActionButton
                   label="Ask NyxBot"
                   variant="secondary"
-                  disabled={busy || !focused}
+                  disabled={busy || !focused || activationDirty}
                   onPress={() => {
                     if (
                       !lock.current &&
@@ -579,14 +619,43 @@ function AgentSkillsManager({
                   }}
                 />
               </Card>
+              <Card>
+                <Label muted>
+                  Draft file editing, learning settings, organization consent,
+                  learning runs and proposals are available in this agent’s
+                  Skills panel on web. Native file previews stay read-only.
+                </Label>
+                <ManagementHandoff
+                  label="Open this agent’s Skills & learning on web"
+                  target={{ kind: "skills", agentId: agent.id }}
+                  disabled={busy || activationDirty}
+                />
+              </Card>
+              {pin && current.data && (
+                <SkillActivationControls
+                  key={`${pin.skill_id}:${current.data.revision}`}
+                  agentId={agent.id}
+                  pin={pin}
+                  current={current.data}
+                  disabled={busy || !currentReady || current.isFetching}
+                  onRefresh={refresh}
+                  onBusy={activationBusy}
+                  onDirty={setActivationDirty}
+                />
+              )}
               {pin?.disabled && (
-                <Notice message="This skill is disabled. Ask NyxBot to enable it before changing its version." />
+                <Notice message="This skill is disabled. Enable it above before changing its version." />
               )}
               {latestVersion && !pinnedLatest && (
                 <ActionButton
                   label={`Use latest (v${latestVersion.version})`}
                   variant="secondary"
-                  disabled={busy || !currentReady || Boolean(pin?.disabled)}
+                  disabled={
+                    busy ||
+                    activationDirty ||
+                    !currentReady ||
+                    Boolean(pin?.disabled)
+                  }
                   onPress={() => {
                     openView("versions", latestVersion.version);
                   }}
@@ -595,7 +664,7 @@ function AgentSkillsManager({
               <ActionButton
                 label={pin ? "Choose exact version" : "Attach exact version"}
                 variant="secondary"
-                disabled={busy || !currentReady}
+                disabled={busy || activationDirty || !currentReady}
                 onPress={() => {
                   openView("versions");
                   setVersionPage(1);
@@ -691,7 +760,7 @@ function AgentSkillsManager({
                     <ActionButton
                       label="Remove from agent"
                       variant="danger"
-                      disabled={busy || !currentReady}
+                      disabled={busy || activationDirty || !currentReady}
                       onPress={() => setConfirmDetach(true)}
                     />
                   )}
@@ -838,7 +907,7 @@ function AgentSkillsManager({
                 }}
               />
               {pin?.disabled && (
-                <Notice message="Ask NyxBot to enable this skill before updating its exact version." />
+                <Notice message="Enable this skill on its details page before updating its exact version." />
               )}
               {!pin && pins.length >= 16 && (
                 <Notice message="This agent already has 16 skills. Remove one from this agent before attaching another." />

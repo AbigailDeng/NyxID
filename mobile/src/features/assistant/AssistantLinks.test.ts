@@ -435,6 +435,9 @@ test("real link host routes account panels, preserves channel URL, retains the t
     props: { draft: "Keep this draft" },
   };
   const h = hookHarness<E>({
+    "@tanstack/react-query": {
+      useQueryClient: () => ({ invalidateQueries: async () => {} }),
+    },
     "react/jsx-runtime": {
       jsx: (type: any, props: any) => ({ type, props }),
       jsxs: (type: any, props: any) => ({ type, props }),
@@ -489,6 +492,8 @@ test("real link host routes account panels, preserves channel URL, retains the t
   assert.equal(actions.at(-1).payload.params.screen, "AccountSecurity");
   open(`${origin}/assistant?panel=settings&panelTab=display`);
   assert.equal(actions.at(-1).payload.params.params.section, "display");
+  open(`${origin}/assistant?panel=nyxbot`);
+  assert.equal(actions.at(-1).payload.params.screen, "AssistantManagement");
   const channel = `${origin}/channel-bots/connect/telegram?label=Release%20crew&target_org_id=org&x=kept`;
   open(channel);
   nodes(h.value())
@@ -539,7 +544,7 @@ test("real link host routes account panels, preserves channel URL, retains the t
   h.render();
   availability.active = false;
   open(`${origin}/assistant?panel=billing`);
-  assert.equal(actions.length, 3, "inactive account/thread does not navigate");
+  assert.equal(actions.length, 4, "inactive account/thread does not navigate");
   h.unmount();
 });
 

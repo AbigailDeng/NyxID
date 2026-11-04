@@ -1,0 +1,12 @@
+# Findings
+
+- Settings PUT `/assistant/nyxagent/settings` accepts a dirty partial patch. Native validates against fresh runtime ceilings, checks concurrent edits to dirty fields, preserves unrelated voice/access settings, and never replays mutations after authentication failure.
+- Skills whole-selection writes require `expected_revision`; preserve additive exact package metadata and sibling pins. Preload PUT `/agents/{agentId}/skills/{skillId}/preload` takes `expected_revision` and `paths`. Native validates up to eight relative `.md`/`.txt` paths including `SKILL.md`; the backend enforces file existence and the total 64 KiB agent budget. Explicit clearing turns preload off.
+- Automations remains GET-only in native. Reuse the existing Web manager and its existing agent/setup parameters; no exact-task or create-form URL intent, no new Web search contract and no automatic mutation. The user explicitly removed those additions on 2026-11-04.
+- The actual bot management route is `/channel-bots/{channel_bot_id}`; channel agent `id` is a different resource. Global channel management and personal binding list/revoke are at `/assistant?panel=nyxbot`; `/nyxbot/link` requires one-time state and is unsuitable for a manager link.
+- Agent learning review is rendered adjacent to Skills under `/assistant?agent=...&details=skills`. Templates and setup lifecycle use `/onboarding` and `/onboarding/setups`.
+- Actual refresh owners are workspace automations, agents/channel badges, plugins/skills, assistant-management and `drawer-chats` (channel chat tree), not a guessed channels query.
+- Matching mobile manifests/locks allow reusing integration worktree `node_modules` via ignored symlink. Existing frontend package.json/lock importer mismatch prevents a frozen install; the reusable Web runtime lacks `motion/react`, and global Vitest setup fails before collection. This is a baseline dependency limitation; manifests, locks and CI remain unchanged.
+- Final PR source scope is mobile only: the entire frontend tree matches the original PR baseline after removing optional automation/create URL support. No repository-native affected semantic typecheck exists. Full frontend suite/build/typecheck stays with GitHub CI under user policy.
+
+- Follow-up scope audit confirms all four frontend diffs only served the removed automation/create support. Native list/detail copy must name the management page rather than promise an exact-task editor. The list needs one Web entry, preserving setup continuation only when an existing setup ID is present.

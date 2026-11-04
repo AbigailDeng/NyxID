@@ -25,10 +25,56 @@ export const agentSkillsSchema = z.object({
     z.object({
       description: z.string(),
       size_bytes: z.number(),
+      preload_paths: z.array(z.string()).default([]),
+      preload_bytes: z.number().int().nonnegative().default(0),
     }),
   ),
 });
 export type AgentSkills = z.infer<typeof agentSkillsSchema>;
+
+export function skillEnabledSelection(
+  current: AgentSkills,
+  skillId: string,
+  enabled: boolean,
+) {
+  if (!current.skills.some((pin) => pin.skill_id === skillId))
+    throw new Error(
+      "This skill is no longer attached. Reload the agent’s skills.",
+    );
+  return {
+    expected_revision: current.revision,
+    skills: current.skills.map((pin) =>
+      pin.skill_id === skillId ? { ...pin, disabled: !enabled } : pin,
+    ),
+  };
+}
+
+export function skillPreloadPaths(value: string): string[] {
+  const paths = value
+    .split("\n")
+    .map((path) => path.trim())
+    .filter(Boolean);
+  if (paths.length > 8)
+    throw new Error("Preload at most 8 text files per skill.");
+  if (paths.length && !paths.includes("SKILL.md"))
+    throw new Error("Include SKILL.md when preloading this skill.");
+  if (
+    new Set(paths).size !== paths.length ||
+    paths.some(
+      (path) =>
+        path.startsWith("/") ||
+        /[\\\u0000-\u001f\u007f]/.test(path) ||
+        path
+          .split("/")
+          .some((part) => !part || part === "." || part === "..") ||
+        !/\.(md|txt)$/.test(path),
+    )
+  )
+    throw new Error(
+      "Use unique package-relative .md or .txt paths, without parent directories.",
+    );
+  return paths;
+}
 export const skillSearchSchema = z.object({
   items: z.array(
     z.object({ id: z.string(), name: z.string(), description: z.string() }),
