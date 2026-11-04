@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { URL, fileURLToPath } from "node:url";
-import { hookHarness } from "../assistant/assistantHookTestHarness";
+import { deferred, hookHarness } from "../assistant/assistantHookTestHarness";
 import * as presentation from "./automationPresentation";
 import * as time from "./automationTime";
 import { automationSchema } from "./automationContracts";
@@ -51,10 +51,22 @@ function elements(root: Element): Element[] {
 function setup(
   page: "AutomationsScreen" | "AutomationDetailScreen" | "AutomationRunsScreen",
   zone = "UTC",
+  detailState: Record<string, any> = {},
 ) {
   const routes: any[] = [];
   const chats: any[] = [];
   const queries: any[] = [];
+  const alerts: any[][] = [];
+  const runtime = { active: true, online: true };
+  const route = { params: { id } };
+  const detail: Record<string, any> = {
+    data: trigger,
+    isPending: false,
+    isFetching: false,
+    error: null,
+    refetch: async (_options?: unknown) => {},
+    ...detailState,
+  };
   let nextPages = 0;
   const cursor = { before: at, before_id: id };
   const response = (data: unknown) => ({
@@ -69,7 +81,11 @@ function setup(
       jsxs: (type: any, props: any) => ({ type, props }),
       Fragment: "Fragment",
     },
-    "react-native": { Pressable: "Pressable", View: "View" },
+    "react-native": {
+      Pressable: "Pressable",
+      View: "View",
+      Alert: { alert: (...args: any[]) => alerts.push(args) },
+    },
     "../../components/AgentAvatar": { AgentAvatar: "AgentAvatar" },
     "lucide-react-native": { ChevronRight: "ChevronRight", Clock3: "Clock3" },
     "../../theme/ThemeContext": { useTheme: () => ({ colors: {} }) },
@@ -96,11 +112,12 @@ function setup(
       ChoiceField: "ChoiceField",
       automationError: (error: any) => String(error),
       automationStyles: {},
-      useAutomationRuntime: () => ({ active: true, online: true }),
+      useAutomationRuntime: () => runtime,
     },
     "@tanstack/react-query": {
       useQuery: (options: any) => {
         queries.push(options);
+        if (options.queryKey.includes("detail")) return detail;
         return response(
           options.queryKey.includes("agents")
             ? {
@@ -148,7 +165,7 @@ function setup(
   );
   harness.mount(() =>
     (source[page] as any)({
-      route: { params: { id } },
+      route,
       navigation: {
         push: (name: any, params: any) => routes.push({ name, params }),
       },
@@ -177,6 +194,10 @@ function setup(
     routes,
     chats,
     queries,
+    alerts,
+    runtime,
+    route,
+    detail,
     cursor,
     nextPages: () => nextPages,
   };
@@ -261,6 +282,152 @@ test("read-only details show task, target and confirmation policy and retain his
       "Delete automation",
     ])
       assert.throws(() => env.control(label));
+  } finally {
+    env.harness.unmount();
+  }
+});
+
+test("detail loads once and background fetches retain content without pull animation or inserted errors", () => {
+  const env = setup("AutomationDetailScreen", "UTC", {
+    data: undefined,
+    isPending: true,
+    isFetching: true,
+  });
+  try {
+    const page = () => env.harness.value();
+    const loading = () =>
+      env.all().some((item) => item.type === "AutomationLoading");
+    assert.equal(page().props.refreshing, false);
+    assert.equal(loading(), true);
+    env.detail.data = trigger;
+    env.detail.isPending = false;
+    env.detail.isFetching = false;
+    env.harness.render();
+    assert.equal(loading(), false);
+    assert.match(env.text(), /Morning release check/);
+
+    for (let poll = 0; poll < 2; poll++) {
+      env.detail.isFetching = true;
+      env.harness.render();
+      assert.equal(page().props.refreshing, false);
+      assert.equal(loading(), false);
+      assert.match(env.text(), /Morning release check/);
+      env.detail.isFetching = false;
+      env.harness.render();
+    }
+    env.detail.data = { ...trigger, label: "Updated release check" };
+    env.harness.render();
+    assert.match(env.text(), /Updated release check/);
+    env.detail.error = new Error("Background network failure");
+    env.harness.render();
+    assert.match(env.text(), /Updated release check/);
+    assert.equal(page().props.refreshing, false);
+    assert.equal(loading(), false);
+    assert.equal(
+      env.all().some((item) => item.type === "Notice"),
+      false,
+    );
+    assert.equal(env.alerts.length, 0);
+  } finally {
+    env.harness.unmount();
+  }
+});
+
+test("a pull during an in-flight poll animates until completion and duplicate pulls join the same fetch", async () => {
+  const pending = deferred<void>();
+  const calls: unknown[] = [];
+  const env = setup("AutomationDetailScreen", "UTC", {
+    isFetching: true,
+    refetch: (options: unknown) => {
+      calls.push(options);
+      return pending.promise;
+    },
+  });
+  try {
+    const page = () => env.harness.value();
+    assert.equal(page().props.refreshing, false);
+    const refresh = page().props.onRefresh();
+    env.harness.flush();
+    assert.equal(page().props.refreshing, true);
+    assert.match(env.text(), /Morning release check/);
+    void page().props.onRefresh();
+    assert.equal(calls.length, 1);
+    assert.equal((calls[0] as any).cancelRefetch, false);
+    assert.equal((calls[0] as any).throwOnError, true);
+    pending.resolve();
+    await refresh;
+    await env.harness.settle();
+    assert.equal(page().props.refreshing, false);
+    assert.equal(env.alerts.length, 0);
+    assert.match(env.text(), /Morning release check/);
+  } finally {
+    env.harness.unmount();
+  }
+});
+
+test("manual refresh failure stops animation, retains content and reports the failure without moving the page", async () => {
+  const pending = deferred<void>();
+  const env = setup("AutomationDetailScreen", "UTC", {
+    refetch: () => pending.promise,
+  });
+  try {
+    const refresh = env.harness.value().props.onRefresh();
+    env.harness.flush();
+    pending.reject(new Error("Could not reach the server"));
+    await refresh;
+    await env.harness.settle();
+    assert.equal(env.harness.value().props.refreshing, false);
+    assert.match(env.text(), /Morning release check/);
+    assert.equal(env.alerts.length, 1);
+    assert.match(env.alerts[0][1], /Could not reach the server/);
+    assert.equal(
+      env.all().some((item) => item.type === "Notice"),
+      false,
+    );
+  } finally {
+    env.harness.unmount();
+  }
+});
+
+test("first-load errors retain Retry while inactive/offline or obsolete pull requests cannot change the current page", async () => {
+  const first = deferred<void>();
+  const second = deferred<void>();
+  let calls = 0;
+  const env = setup("AutomationDetailScreen", "UTC", {
+    data: undefined,
+    error: new Error("Initial request failed"),
+    refetch: () => (++calls === 1 ? first.promise : second.promise),
+  });
+  try {
+    assert.ok(env.control("Retry automation"));
+    env.detail.data = trigger;
+    env.detail.error = null;
+    env.harness.render();
+    const oldRefresh = env.harness.value().props.onRefresh();
+    env.harness.flush();
+    env.route.params.id = "87654321-1234-4123-8123-123456789abc";
+    env.harness.render();
+    assert.equal(env.harness.value().props.refreshing, false);
+    const newRefresh = env.harness.value().props.onRefresh();
+    env.harness.flush();
+    first.resolve();
+    await oldRefresh;
+    await env.harness.settle();
+    assert.equal(env.harness.value().props.refreshing, true);
+    env.runtime.active = false;
+    env.harness.render();
+    assert.equal(env.harness.value().props.refreshing, false);
+    await env.harness.value().props.onRefresh();
+    assert.equal(calls, 2);
+    env.runtime.active = true;
+    env.runtime.online = false;
+    env.harness.render();
+    await env.harness.value().props.onRefresh();
+    assert.equal(calls, 2);
+    env.harness.unmount();
+    second.reject(new Error("Stale request failed after leaving"));
+    await newRefresh;
+    assert.equal(env.alerts.length, 0);
   } finally {
     env.harness.unmount();
   }

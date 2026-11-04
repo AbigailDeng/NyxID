@@ -18,6 +18,7 @@ Personal PR: https://github.com/AbigailDeng/NyxID/pull/16. Issue: https://github
 
 1. Editing NyxBot limits and pressing Back in the nested Settings stack caused recursive `navigation.goBack` and a native-stack overflow. Native leaf route removal now passes through discard confirmation and replays the original action. The new real navigation-hook regression fails before the fix. Simulator verification after the fix confirms Keep editing retains the draft and Discard returns without writing it.
 2. Successful Skill activation or preload can advance selection revision and replace its keyed editor while sibling queries are still refreshing. Previously the old editor skipped releasing the parent busy state after unmount. Parent busy ownership is now per operation, with mount/account fences. Real parent + child regressions reproduce both success paths and verify an old completion cannot unlock a newer operation/account.
+3. Automation detail tied the native pull indicator to Query `isFetching`, so every background poll could animate refresh. It now owns only explicit pulls, joins an in-flight read without cancelling it, and retains cached content during later requests or failures. Background failures add no banner above the reading position. A failed pull stops the indicator and reports an alert; route changes, blur/offline and unmount invalidate old pull completions. The existing scroll container is retained without a scroll reset.
 
 The optional exact-task/create-form Web handoff feature and its Web tests were removed at the user's request on 2026-11-04. All four frontend files match the original PR baseline. Native now offers one existing Web manager entry, retaining only already-supported agent/setup context. It does not claim to open a specific task editor or a new form through added URL behavior. No matching Web deployment is required for this change.
 
@@ -28,6 +29,18 @@ Reused the existing NyxID RN QA simulator (iPhone 16e, iOS26.3), installed devel
 No live settings/skill PUT, credential entry, bot binding/revocation, automation execution or paid action was performed. Only local drafts were edited and discarded. Web opens through the configured first-party destination, redirects to nyxid.ai sign-in in this browser, and dismissal returns to the original native context with refresh status; dismissal is not reported as a successful mutation. Authenticated Web management is still unverified.
 
 ## Local verification
+
+Automation detail refresh follow-up: **18/18 tests pass** across four selected files. All four new refresh regressions failed against the previous behavior before the fix. They cover initial load versus repeated background reads, updated cached data, background errors, manual success/failure, duplicate pulls joining an active read, first-load Retry and obsolete requests after route/lifecycle changes. These component/hook tests verify rendering and refresh ownership; they do not prove physical native scroll position.
+
+```sh
+# mobile/
+pnpm exec tsx --test src/features/automations/AutomationsScreen.test.ts src/features/automations/automationContracts.test.ts src/features/automations/automationPresentation.test.ts src/features/automations/automationTime.test.ts
+
+# frontend/ — installed formatter, explicit changed Native files only
+pnpm exec prettier --check ../mobile/src/features/automations/AutomationsScreen.test.ts ../mobile/src/features/automations/AutomationsScreen.tsx
+```
+
+The same existing NyxID RN QA simulator opened the paused QA automation detail with retained schedule/delivery/latest-run content and no visible refresh indicator at observation. Simulator Window menu selection resolved a second simulator being frontmost. However, the computer-use tool's scroll and drag calls did not move the detail page, and subsequent menu actions returned invalid accessibility element IDs. **Physical scroll retention across polling and the pull animation remain unverified in the simulator.** No live automation was changed. Independent final review found no remaining source issue.
 
 Scope reduction verification passes: 45/45 Native tests in seven selected files and 13/13 existing Web page tests. The earlier acceptance pass on b10a4f302 verified 104 targeted Native tests, including the unchanged Settings navigation and Skill revision/busy regressions; two tests solely for the removed URL behavior have now been deleted. All four frontend files match the original PR baseline. The existing Web page tests were rerun to check that restoration.
 
@@ -55,6 +68,8 @@ Changed-file Prettier and ESLint pass; changed-source syntax transpilation passe
 ## Remaining human walkthrough
 
 Use a disposable test agent and a test automation; restore original values after successful writes.
+
+Automation detail refresh gesture check: open an existing task, scroll to Task & delivery or Latest run and wait through at least two 5-second polling intervals. Existing content and native scroll offset should remain in place without a pull indicator or initial loader. Return to the top and deliberately pull down; only this gesture should show the refresh indicator, which stops after the read finishes. Network failure during a later background request must retain content without a banner; a failed manual pull must stop its indicator and report the failure. This physical gesture check is pending because of the simulator input limitation above.
 
 1. Settings → NyxBot limits & management. Note the original Automatic task continuations value, change it by one within0–32, tap Save settings, reload and reopen to confirm persistence, then restore the original. Changing another unchanged setting must not be required. Edit again and exercise Back → Keep editing / Discard.
 2. Plugins → Skills. Select the test agent, open an already attached skill, Disable then Enable, and verify Back/Choose exact version remain usable after each refresh. Save `SKILL.md` as preload, reload/reopen to confirm, then clear all paths and save. Verify an existing sibling pin is unchanged. Server missing-file/64KiB cases require suitable test packages.

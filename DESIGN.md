@@ -607,6 +607,11 @@ account pages and QR/terminal quick actions use the retained pull-up surface. Se
   Returning from Web refreshes authoritative server state;
   browser dismissal never confirms a mutation. There is no native automation
   editor, toggle, invoke, delete or webhook setup.
+  Detail background reads update cached content silently in the existing scroll
+  container. Initial loading is shown only before data is available; later reads
+  retain content and scroll position. Only a user pull gesture drives the refresh
+  indicator. Background failures keep existing content without inserting a banner;
+  a failed manual refresh reports an alert and stops its indicator.
 - Reply activity/receipts and prose have a 16pt gap. Ordinary Markdown blocks have
   12pt sibling spacing; headings have 20pt (h1) or 16pt above and 8pt below, without
   start/end margins. Horizontally scrolling tables include the transcript's 12pt

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { AgentAvatar } from "../../components/AgentAvatar";
-import { useEffect, useState } from "react";
-import { Pressable, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Alert, Pressable, View } from "react-native";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { ChevronRight, Clock3 } from "lucide-react-native";
@@ -261,15 +261,46 @@ export function AutomationDetailScreen({
   });
   const row = detail.data;
   const zone = settings.data?.timezone ?? deviceTimezone();
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const refreshOwner = useRef<symbol | null>(null);
+  useEffect(() => {
+    setPullRefreshing(false);
+    return () => {
+      refreshOwner.current = null;
+    };
+  }, [route.params.id, runtime.active, runtime.online]);
+  async function refreshDetail() {
+    if (
+      !runtime.active ||
+      !runtime.online ||
+      refreshOwner.current ||
+      (!row && detail.isPending)
+    )
+      return;
+    const owner = Symbol("automation-pull-refresh");
+    refreshOwner.current = owner;
+    setPullRefreshing(true);
+    try {
+      await detail.refetch({ cancelRefetch: false, throwOnError: true });
+    } catch (error) {
+      if (refreshOwner.current === owner)
+        Alert.alert("Could not refresh automation", automationError(error));
+    } finally {
+      if (refreshOwner.current === owner) {
+        refreshOwner.current = null;
+        setPullRefreshing(false);
+      }
+    }
+  }
   return (
     <WorkspacePage
       title="Automation"
       showHeading={false}
-      refreshing={detail.isFetching}
-      onRefresh={() => void detail.refetch()}
+      refreshing={pullRefreshing}
+      onRefresh={refreshDetail}
     >
-      {detail.isPending && <AutomationLoading />}
-      {detail.error && (
+      {!row && detail.isPending && <AutomationLoading />}
+      {!row && detail.error && (
         <>
           <Notice tone="error" message={automationError(detail.error)} />
           <ActionButton
