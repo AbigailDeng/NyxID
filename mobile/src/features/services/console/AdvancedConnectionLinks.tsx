@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
-import { useQuery } from "@tanstack/react-query";
 import * as WebBrowser from "expo-web-browser";
 import {
   ActionButton,
@@ -12,15 +11,13 @@ import { getAuthEpoch } from "../../../lib/auth/authEpoch";
 import { NYXID_FRONTEND_URL } from "../../../lib/env";
 import { servicesApi } from "../../../lib/api/servicesApi";
 import { canEditConnection, type ServiceConnection } from "../serviceContracts";
-import { consoleApi } from "./consoleApi";
 import {
   advancedConnectionDestinations,
-  consoleDestinations,
   consoleWebUrl,
-  type ConsoleDestination,
-} from "./consoleDestinations";
+} from "./advancedConnectionDestinations";
 import { createConsoleActivation } from "./consoleActivation";
 
+/** Shared browser handoff guard for contextual Web actions. */
 function useConsoleAction(active: boolean, onReturned: () => Promise<void>) {
   const [epoch] = useState(getAuthEpoch);
   const live = useRef(active);
@@ -80,7 +77,7 @@ function useConsoleAction(active: boolean, onReturned: () => Promise<void>) {
   }, [active]);
   const guard = activation.current.capture();
   async function open(
-    destination: ConsoleDestination,
+    destination: { path: string },
     authorize: (guard: () => void) => Promise<void>,
   ) {
     if (lock.current || pendingReturn.current) return;
@@ -95,8 +92,6 @@ function useConsoleAction(active: boolean, onReturned: () => Promise<void>) {
       await WebBrowser.openBrowserAsync(
         consoleWebUrl(NYXID_FRONTEND_URL, destination.path),
       );
-      // Browser handoff may background this app. Only preflight uses the old
-      // activation generation; returning uses the same account and current view.
       if (!mounted.current || getAuthEpoch() !== epoch) return;
       pendingReturn.current = { epoch, refresh: onReturned };
       await completeReturn();
@@ -114,99 +109,7 @@ function useConsoleAction(active: boolean, onReturned: () => Promise<void>) {
       if (mounted.current) setBusy(false);
     }
   }
-  return { open, guard, epoch, busy, message, failed };
-}
-
-export function ConsoleManagement({
-  active,
-  onReturned,
-}: {
-  active: boolean;
-  onReturned: () => Promise<void>;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const action = useConsoleAction(active, onReturned);
-  const query = useQuery({
-    queryKey: ["workspace", "services", "console-access", action.epoch],
-    enabled: active && expanded,
-    retry: false,
-    gcTime: 0,
-    queryFn: async ({ signal }) => {
-      const user = await consoleApi.identity(signal, action.guard);
-      const orgs = await consoleApi.organizations(signal, action.guard);
-      return { user, orgs };
-    },
-  });
-  const destinations =
-    !query.isError && !query.isFetching && query.data
-      ? consoleDestinations(query.data.user, query.data.orgs)
-      : [];
-  return (
-    <Card>
-      <Label accessibilityRole="header">Developer console</Label>
-      <Label muted>
-        Manage keys, pools, credential Nodes and developer integrations in NyxID
-        Web. Your Web session applies its own current permissions.
-      </Label>
-      <ActionButton
-        label={expanded ? "Hide developer console" : "Show developer console"}
-        variant="secondary"
-        disabled={action.busy}
-        onPress={() => setExpanded((value) => !value)}
-      />
-      {expanded && (
-        <>
-          <Label muted>
-            Terminal in the app creates CLI login codes. For SSH, open an SSH
-            connection’s Advanced tab and choose SSH terminal.
-          </Label>
-          {query.isPending && <Label muted>Loading your console access…</Label>}
-          {query.isError && (
-            <Notice
-              tone="error"
-              message="Could not verify console access. Refresh to try again."
-            />
-          )}
-          <ActionButton
-            label="Refresh console access"
-            variant="secondary"
-            disabled={action.busy || query.isFetching || !active}
-            onPress={() => void query.refetch()}
-          />
-          {destinations.map((destination) => (
-            <ActionButton
-              key={destination.path}
-              label={`${destination.label} · Web`}
-              accessibilityHint={destination.description}
-              variant="secondary"
-              disabled={action.busy || !active}
-              onPress={() =>
-                void action.open(destination, async (guard) => {
-                  const user = await consoleApi.identity(undefined, guard);
-                  const orgs = await consoleApi.organizations(undefined, guard);
-                  if (
-                    user.id !== query.data?.user.id ||
-                    !consoleDestinations(user, orgs).some(
-                      (item) => item.path === destination.path,
-                    )
-                  )
-                    throw new Error(
-                      "Your access changed. Refresh console access before continuing.",
-                    );
-                })
-              }
-            />
-          ))}
-        </>
-      )}
-      {action.message && (
-        <Notice
-          tone={action.failed ? "error" : undefined}
-          message={action.message}
-        />
-      )}
-    </Card>
-  );
+  return { open, guard, busy, message, failed };
 }
 
 export function AdvancedConnectionLinks({
@@ -233,7 +136,7 @@ export function AdvancedConnectionLinks({
         (destination) => (
           <ActionButton
             key={destination.label}
-            label={`${destination.label} · Web`}
+            label={destination.label}
             accessibilityHint={destination.description}
             variant="secondary"
             disabled={action.busy || !active}

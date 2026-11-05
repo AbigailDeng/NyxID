@@ -215,9 +215,8 @@ function setup({
     "./console/ServiceMonitoringCard": {
       ServiceMonitoringCard: "ServiceMonitoringCard",
     },
-    "./console/ConsoleManagement": {
+    "./console/AdvancedConnectionLinks": {
       AdvancedConnectionLinks: "AdvancedConnectionLinks",
-      ConsoleManagement: "ConsoleManagement",
     },
     "../plugins/PluginConnectionHistory": {
       PluginConnectionHistory: "PluginConnectionHistory",

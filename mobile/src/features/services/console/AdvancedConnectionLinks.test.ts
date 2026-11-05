@@ -5,7 +5,7 @@ import {
   hookHarness,
   deferred,
 } from "../../assistant/assistantHookTestHarness";
-import * as destinations from "./consoleDestinations";
+import { advancedConnectionDestinations } from "./advancedConnectionDestinations";
 import { createConsoleActivation } from "./consoleActivation";
 import { canEditConnection } from "../serviceContracts";
 
@@ -48,20 +48,24 @@ function setup() {
       jsx: (type: unknown, props: unknown) => ({ type, props }),
       jsxs: (type: unknown, props: unknown) => ({ type, props }),
     },
-    "@tanstack/react-query": { useQuery: () => query },
     "../../../components/workspace/WorkspaceUI": Object.fromEntries(
       ["ActionButton", "Card", "Label", "Notice"].map((name) => [name, name]),
     ),
     "../../../lib/auth/authEpoch": { getAuthEpoch: () => epoch },
     "react-native": { AppState: app },
     "../../../lib/env": { NYXID_FRONTEND_URL: "https://nyxid.example" },
-    "../../../lib/api/servicesApi": { servicesApi: {} },
+    "../../../lib/api/servicesApi": {
+      servicesApi: {
+        connection: async () => ({
+          id: "connection",
+          service_type: "http",
+          is_active: true,
+          can_edit_configuration: true,
+        }),
+      },
+    },
     "../serviceContracts": { canEditConnection },
     "./consoleActivation": { createConsoleActivation },
-    "./consoleDestinations": destinations,
-    "./consoleApi": {
-      consoleApi: { identity: () => identity(), organizations: async () => [] },
-    },
     "expo-web-browser": {
       openBrowserAsync: async (url: string) => {
         browsers.push(url);
@@ -69,13 +73,20 @@ function setup() {
       },
     },
   });
-  const { ConsoleManagement } = harness.load(
-    fileURLToPath(new URL("./ConsoleManagement.tsx", import.meta.url)),
-  ) as { ConsoleManagement: (props: unknown) => Element };
+  const { AdvancedConnectionLinks } = harness.load(
+    fileURLToPath(new URL("./AdvancedConnectionLinks.tsx", import.meta.url)),
+  ) as { AdvancedConnectionLinks: (props: unknown) => Element };
   const onReturned = async () => {
     returned++;
   };
-  harness.mount(() => ConsoleManagement({ active, onReturned }));
+  harness.mount(() =>
+    AdvancedConnectionLinks({
+      active,
+      onReturned,
+      editable: true,
+      connection: { id: "connection", service_type: "http", is_active: true },
+    }),
+  );
   const button = (label: string) => {
     const node = elements(harness.value()).find(
       (node) => node.props.label === label,
@@ -83,7 +94,6 @@ function setup() {
     assert(node, `Missing ${label}`);
     return node;
   };
-  button("Show developer console").props.onPress();
   harness.flush();
   return {
     harness,
@@ -114,11 +124,13 @@ function setup() {
   };
 }
 
-test("console opens its exact destination and requests refresh on return without claiming success", async () => {
+test("advanced entry opens its single contextual destination and requests refresh on return", async () => {
   const x = setup();
-  x.button("Service Pools · Web").props.onPress();
+  x.button("Edit advanced settings · Web").props.onPress();
   await x.harness.settle();
-  assert.deepEqual(x.browsers, ["https://nyxid.example/keys?tab=pools"]);
+  assert.deepEqual(x.browsers, [
+    "https://nyxid.example/keys/connection?tab=advanced",
+  ]);
   assert.equal(x.returned(), 1);
   assert(
     x
@@ -129,45 +141,37 @@ test("console opens its exact destination and requests refresh on return without
           node.props.message.includes("Refresh was requested"),
       ),
   );
-  assert(
-    !x.nodes().some((node) => node.props.message?.includes("changes saved")),
-  );
   x.harness.unmount();
 });
 
-test("revoked console role stops a stale privileged destination before browser opens", async () => {
-  const x = setup();
-  x.user({ id: "person", is_admin: false });
-  x.button("Catalog authoring · Web").props.onPress();
-  await x.harness.settle();
-  assert.equal(x.browsers.length, 0);
-  assert.equal(x.returned(), 0);
-  assert(
-    x
-      .nodes()
-      .some((node) => node.type === "Notice" && node.props.tone === "error"),
+test("advanced destinations keep SSH terminal as the only second action", () => {
+  assert.equal(
+    advancedConnectionDestinations(
+      { id: "connection", service_type: "http", is_active: true },
+      true,
+    ).length,
+    1,
   );
-  x.harness.unmount();
-});
-
-test("leaving and returning during access preflight cannot open the stale browser action", async () => {
-  const x = setup();
-  const pending = deferred<{ id: string; is_admin: boolean }>();
-  x.identity(() => pending.promise);
-  x.button("Agent Keys · Web").props.onPress();
-  x.active(false);
-  x.active(true);
-  pending.resolve({ id: "person", is_admin: true });
-  await x.harness.settle();
-  assert.equal(x.browsers.length, 0);
-  x.harness.unmount();
+  assert.equal(
+    advancedConnectionDestinations(
+      {
+        id: "connection",
+        service_type: "ssh",
+        catalog_service_id: "catalog",
+        ssh_ca_public_key: "key",
+        is_active: true,
+      },
+      true,
+    ).length,
+    2,
+  );
 });
 
 test("browser background handoff refreshes exactly once after returning to the same account", async () => {
   const x = setup();
   const pending = deferred<void>();
   x.browser(() => pending.promise);
-  x.button("Service Pools · Web").props.onPress();
+  x.button("Edit advanced settings · Web").props.onPress();
   await x.harness.settle();
   assert.equal(x.browsers.length, 1);
   x.appState("background");
@@ -200,7 +204,7 @@ test("synchronous AppState transitions invalidate preflight even without an inte
   const x = setup();
   const pending = deferred<{ id: string; is_admin: boolean }>();
   x.identity(() => pending.promise);
-  x.button("Agent Keys · Web").props.onPress();
+  x.button("Edit advanced settings · Web").props.onPress();
   x.appState("inactive");
   x.appState("active");
   pending.resolve({ id: "person", is_admin: true });
@@ -213,7 +217,7 @@ test("browser return cannot refresh the replacement account", async () => {
   const x = setup();
   const pending = deferred<void>();
   x.browser(() => pending.promise);
-  x.button("Agent Keys · Web").props.onPress();
+  x.button("Edit advanced settings · Web").props.onPress();
   await x.harness.settle();
   x.epoch();
   pending.resolve();

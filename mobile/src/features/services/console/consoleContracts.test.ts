@@ -2,9 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   advancedConnectionDestinations,
-  consoleDestinations,
   consoleWebUrl,
-} from "./consoleDestinations";
+} from "./advancedConnectionDestinations";
 import {
   checksFromDraft,
   displayedMonitoringStatus,
@@ -12,7 +11,6 @@ import {
   safeMonitoringPath,
   type MonitoringCheckResult,
 } from "./monitoringContracts";
-import { consoleOrgSchema } from "./consoleTransport";
 
 const now = Date.parse("2026-11-03T12:00:00Z");
 export const check: MonitoringCheckResult = {
@@ -146,57 +144,6 @@ test("configuration enforces status cardinality and UTF-8 body limits; disabling
   );
 });
 
-test("console links honor live roles, manager capabilities and exact organization administration", () => {
-  const orgs = [
-    { id: "a/b", display_name: "Admin Org", your_role: "admin" },
-    { id: "member", display_name: "Member Org", your_role: "member" },
-  ];
-  const basic = consoleDestinations({ id: "u", is_admin: false }, orgs);
-  assert(basic.some((x) => x.path === "/keys?tab=pools"));
-  assert(basic.some((x) => x.path === "/orgs/a%2Fb?tab=service-accounts"));
-  assert(!basic.some((x) => x.path.startsWith("/orgs/member")));
-  assert(
-    !basic.some((x) => x.path.startsWith("/admin") || x.path === "/providers"),
-  );
-  const manager = consoleDestinations(
-    {
-      id: "u",
-      is_admin: false,
-      capabilities: {
-        manage_catalog: true,
-        manage_tools: true,
-        read_admin_usage: true,
-      },
-    },
-    [],
-  );
-  assert(manager.some((x) => x.path === "/providers"));
-  assert(manager.some((x) => x.path === "/admin/tools"));
-  assert(manager.some((x) => x.path === "/admin/usage"));
-  assert(!manager.some((x) => x.path === "/admin/users"));
-  const operator = consoleDestinations(
-    { id: "u", is_admin: false, is_operator: true },
-    [],
-  );
-  assert(
-    operator.some(
-      (x) => x.path === "/admin/users" && x.description.includes("read-only"),
-    ),
-  );
-  assert(!operator.some((x) => x.path === "/providers"));
-  const unnamed = consoleOrgSchema.parse({
-    id: "org",
-    slug: "work-team",
-    display_name: null,
-    your_role: "admin",
-  });
-  assert(
-    consoleDestinations({ id: "u", is_admin: false }, [unnamed]).some(
-      (x) => x.label === "work-team · Service Accounts",
-    ),
-  );
-});
-
 test("advanced links retain exact connection ID, readonly view and SSH identity", () => {
   const connection = {
     id: "connection/id",
@@ -206,6 +153,8 @@ test("advanced links retain exact connection ID, readonly view and SSH identity"
     is_active: true,
   } as Parameters<typeof advancedConnectionDestinations>[0];
   const editable = advancedConnectionDestinations(connection, true);
+  assert.equal(editable.length, 2);
+  assert.equal(editable[0]?.label, "Edit advanced settings · Web");
   assert(editable.some((x) => x.path === "/keys/connection%2Fid?tab=advanced"));
   assert(
     editable.some(
@@ -232,7 +181,7 @@ test("advanced links retain exact connection ID, readonly view and SSH identity"
     !advancedConnectionDestinations(
       { ...connection, ssh_ca_public_key: null },
       true,
-    ).some((x) => x.label === "SSH terminal"),
+    ).some((x) => x.label.startsWith("SSH terminal")),
   );
   assert.equal(
     consoleWebUrl("https://nyxid.example/subpath", editable[0]!.path),

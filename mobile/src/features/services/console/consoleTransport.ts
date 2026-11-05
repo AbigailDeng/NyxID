@@ -23,13 +23,6 @@ export const consoleIdentitySchema = z.object({
     .optional(),
 });
 export type ConsoleIdentity = z.infer<typeof consoleIdentitySchema>;
-export const consoleOrgSchema = z.object({
-  id: z.string().min(1),
-  slug: z.string().optional(),
-  display_name: z.string().nullish(),
-  your_role: z.string(),
-});
-export type ConsoleOrganization = z.infer<typeof consoleOrgSchema>;
 type Options = {
   method?: "GET" | "PUT" | "DELETE" | "POST";
   body?: unknown;
@@ -90,14 +83,6 @@ export function createConsoleApi(request: ConsoleRequest) {
   };
   return {
     identity,
-    async organizations(signal?: AbortSignal, guard?: () => void) {
-      guard?.();
-      const orgs = z
-        .object({ orgs: z.array(consoleOrgSchema) })
-        .parse(await request("/orgs", { signal, authorityGuard: guard })).orgs;
-      guard?.();
-      return orgs;
-    },
     readMonitoring: read,
     async operate(
       id: string,

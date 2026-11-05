@@ -53,10 +53,7 @@ import {
 } from "./connectionPresentation";
 import { PluginConnectionHistory } from "../plugins/PluginConnectionHistory";
 import { ServiceMonitoringCard } from "./console/ServiceMonitoringCard";
-import {
-  AdvancedConnectionLinks,
-  ConsoleManagement,
-} from "./console/ConsoleManagement";
+import { AdvancedConnectionLinks } from "./console/AdvancedConnectionLinks";
 
 const ROOT = ["workspace", "services"] as const;
 const MANAGEMENT_TABS = ["overview", "advanced", "history"] as const;
@@ -955,7 +952,6 @@ export function ServicesScreen({
     <WorkspacePage title="Services" showHeading={false}>
       {notice && <Notice message={notice} tone="success" />}
       {error && <Notice message={error} tone="error" />}
-      <ConsoleManagement active={focused && foreground} onReturned={reload} />
       <View style={styles.search}>
         <Text style={[styles.searchLabel, { color: colors.textSecondary }]}>
           Search services

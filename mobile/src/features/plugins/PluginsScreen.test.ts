@@ -286,49 +286,22 @@ function setup({
   };
 }
 
-test("Connectors exposes the service console through an exact navigation-only entry", () => {
+test("Plugins does not expose a generic service console entry", () => {
   const env = setup();
   try {
-    const entry = env.control("Service & developer console");
-    assert.equal(entry.type, "ActionButton");
-    assert.equal(entry.props.variant, "secondary");
-    assert.match(entry.props.accessibilityHint, /Agent Keys/);
-    assert.match(entry.props.accessibilityHint, /Pools/);
-    assert.match(entry.props.accessibilityHint, /Nodes/);
-    assert.match(entry.props.accessibilityHint, /developer integrations/);
-    const beforeOpen = env.calls.length;
-    entry.props.onPress();
-    assert.deepEqual(env.calls.slice(beforeOpen), [
-      { method: "dismissKeyboard", args: [] },
-      { method: "navigate", args: ["Services"] },
-    ]);
-    env.control("Discover connectors, 1").props.onPress();
     assert.equal(
       env
         .all()
-        .filter((node) => node.props.label === "Service & developer console")
-        .length,
-      1,
+        .some((node) => node.props.label === "Service & developer console"),
+      false,
     );
-  } finally {
-    env.unmount();
-  }
-});
-
-test("service console entry stays out of Skills and the connection picker", () => {
-  const env = setup();
-  const hasEntry = () =>
-    env
-      .all()
-      .some((node) => node.props.label === "Service & developer console");
-  try {
-    assert.equal(hasEntry(), true);
     env.tab("Skills").props.onPress();
-    assert.equal(hasEntry(), false);
-    env.tab("Connectors").props.onPress();
-    assert.equal(hasEntry(), true);
-    env.connector("service:api-cloudflare");
-    assert.equal(hasEntry(), false);
+    assert.equal(
+      env
+        .all()
+        .some((node) => node.props.label === "Service & developer console"),
+      false,
+    );
   } finally {
     env.unmount();
   }
