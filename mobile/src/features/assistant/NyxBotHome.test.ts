@@ -158,7 +158,6 @@ function setup() {
   const props = {
     onChat: (...args: unknown[]) => calls.push(["chat", ...args]),
     onOpenCrew: (id: string) => calls.push(["crew", id]),
-    onNewAgent: () => calls.push(["new-agent"]),
     onNewCrew: () => calls.push(["new-crew"]),
   };
   harness.mount(() => Home(props));
@@ -228,14 +227,12 @@ test("home renders real requests, completed replies, owner sections and crews wi
   h.button("Open finished's latest work").onPress();
   h.button("Chat with organization").onPress();
   h.button("Open crew Launch crew").onPress();
-  h.button("New agent").onPress();
   h.button("New crew").onPress();
   assert.deepEqual(h.calls, [
     ["chat", "waiting", CONVERSATION, "decision-1"],
     ["chat", "finished", CONVERSATION, undefined],
     ["chat", "organization", undefined, undefined],
     ["crew", h.state.crews[0]!.id],
-    ["new-agent"],
     ["new-crew"],
   ]);
   h.harness.unmount();
@@ -324,7 +321,14 @@ test("revocation, removed requests and inactive views fence retained callbacks a
   h.state.online = false;
   h.harness.render();
   crew();
-  assert.equal(h.button("New agent").disabled, true);
+  assert.equal(
+    h.all().some(
+      (node) =>
+        node.type === "ActionButton" &&
+        (node.props.accessibilityLabel ?? node.props.label) === "New agent",
+    ),
+    false,
+  );
   assert.ok([...h.queries.values()].every((query) => query.enabled === false));
   assert.equal(h.queries.get("agents")!.refetchInterval, false);
   assert.deepEqual(h.calls, []);

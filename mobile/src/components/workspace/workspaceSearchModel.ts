@@ -80,11 +80,6 @@ const pages: WorkspaceSearchEntry[] = [
     target: { kind: "page", name: "Agents" },
   },
   {
-    key: "page:create-agent",
-    label: "Create new agent",
-    target: { kind: "page", name: "AgentCreate" },
-  },
-  {
     key: "page:recents",
     label: "All chats",
     keywords: ["recent", "history", "threads"],

@@ -83,12 +83,12 @@ test("the active hub tab exposes its creation action at the top", () => {
       (row) => row.type === (tab === "agents" ? "AgentsScreen" : "GroupsList"),
     );
     assert.ok(list);
-    list.props.onCreate();
-    assert.equal(
-      env.created.length,
-      2,
-      "the existing list action reaches the same route",
-    );
+    if (tab === "agents")
+      assert.equal(
+        "onCreate" in list.props,
+        false,
+        "the hub header is the sole Agent creation action",
+      );
   }
 });
 

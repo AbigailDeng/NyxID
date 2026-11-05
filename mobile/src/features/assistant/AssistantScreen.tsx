@@ -1057,9 +1057,6 @@ export function AssistantScreen({
             onOpenCrew={(groupId) =>
               navigation.navigate("GroupChat", { groupId })
             }
-            onNewAgent={() =>
-              navigation.dispatch(openWorkspacePageAction("AgentCreate"))
-            }
             onNewCrew={() =>
               navigation.dispatch(openWorkspacePageAction("GroupEditor"))
             }
@@ -1548,7 +1545,6 @@ export function AssistantScreen({
               agentId: currentAgent?.id ?? assistant.agentId,
               conversationId: assistant.conversationId,
             }}
-            onCreateAgent={() => {}}
             onCreateGroup={() => {}}
             scrollProps={{
               contentContainerStyle: styles.sheetContent,

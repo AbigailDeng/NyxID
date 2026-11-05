@@ -62,7 +62,6 @@ type Props = {
   visible: boolean;
   current?: WorkspaceChatTarget;
   onSelect: (target: WorkspaceChatTarget) => void;
-  onCreateAgent: () => void;
   onCreateGroup: () => void;
 };
 type BrowseRow =
@@ -81,7 +80,6 @@ export function WorkspaceChatList({
   visible,
   current,
   onSelect,
-  onCreateAgent,
   onCreateGroup,
 }: Props) {
   const { colors } = useTheme();
@@ -407,9 +405,6 @@ export function WorkspaceChatList({
         label="Agents"
         count={`${allAgents.length} total`}
         expanded={sections.agents}
-        createLabel="New agent"
-        onCreate={onCreateAgent}
-        createDisabled={!active}
         onRefresh={() => void refreshAgents()}
         refreshing={refreshingAgents}
         refreshDisabled={!active}
@@ -905,9 +900,9 @@ function SectionHeading({
   count: number | string;
   expanded: boolean;
   onPress: () => void;
-  createLabel: string;
-  onCreate: () => void;
-  createDisabled: boolean;
+  createLabel?: string;
+  onCreate?: () => void;
+  createDisabled?: boolean;
   onRefresh?: () => void;
   refreshing?: boolean;
   refreshDisabled?: boolean;
@@ -954,16 +949,18 @@ function SectionHeading({
           )}
         </Pressable>
       ) : null}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={createLabel}
-        accessibilityState={{ disabled: createDisabled }}
-        disabled={createDisabled}
-        onPress={onCreate}
-        style={[styles.createButton, { opacity: createDisabled ? 0.4 : 1 }]}
-      >
-        <Plus size={18} color={colors.textSecondary} />
-      </Pressable>
+      {onCreate && createLabel ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={createLabel}
+          accessibilityState={{ disabled: createDisabled }}
+          disabled={createDisabled}
+          onPress={onCreate}
+          style={[styles.createButton, { opacity: createDisabled ? 0.4 : 1 }]}
+        >
+          <Plus size={18} color={colors.textSecondary} />
+        </Pressable>
+      ) : null}
     </View>
   );
 }

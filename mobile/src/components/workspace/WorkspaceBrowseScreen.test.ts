@@ -281,7 +281,6 @@ test("Search destinations use their sidebar glyphs and actual agent/crew identit
     ["Machines", "Monitor"],
     ["Plugins", "Plug"],
     ["Activity", "ShieldCheck"],
-    ["Create new agent", "UserPlus"],
     ["Scan QR code", "ScanQrCode"],
     ["Terminal login code", "Terminal"],
   ]);

@@ -395,11 +395,6 @@ const choices = [
       workspaceChatNavigationAction(s, { kind: "group", groupId: "crew-1" }),
   },
   {
-    choose: (d: Element) => d.props.onCreateAgent(),
-    action: (s: NavigationState) =>
-      workspaceNavigateAction("AgentCreate", undefined, s),
-  },
-  {
     choose: (d: Element) => d.props.onCreateGroup(),
     action: (s: NavigationState) =>
       workspaceNavigateAction("GroupEditor", undefined, s),

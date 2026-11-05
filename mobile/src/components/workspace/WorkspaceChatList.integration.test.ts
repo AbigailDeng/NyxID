@@ -157,7 +157,6 @@ function setup(current?: WorkspaceChatTarget, options: SetupOptions = {}) {
     mode: options.mode,
     visible: true,
     current,
-    onCreateAgent: () => creations.push("agent"),
     onCreateGroup: () => creations.push("group"),
     onSelect: (target: WorkspaceChatTarget) => {
       selections.push(plain(target));
@@ -515,25 +514,30 @@ test("saved refresh callbacks cannot request agents while hidden, offline, backg
   }
 });
 
-test("agent and group creation buttons stay separate from section disclosure", () => {
+test("the drawer keeps agent browsing separate from crew creation", () => {
   const env = setup();
   const expandedBefore = env.agentRows().length;
-  env.press("New agent");
+  assert.equal(
+    env.all().some((row) => row.props.accessibilityLabel === "New agent"),
+    false,
+  );
   env.press("New crew");
-  assert.deepEqual(env.creations, ["agent", "group"]);
+  assert.deepEqual(env.creations, ["group"]);
   assert.deepEqual(env.selections, []);
   assert.equal(env.agentRows().length, expandedBefore);
   assert.equal(env.groupRows().length, 0);
   env.harness.unmount();
 });
 
-test("offline drawer creation buttons are disabled while saved previews remain available", () => {
+test("offline crew creation stays disabled while saved agent previews remain available", () => {
   const env = setup(undefined, { online: false });
-  for (const label of ["New agent", "New crew"]) {
-    const button = env.label(label);
-    assert.equal(button.props.disabled, true);
-    assert.equal(button.props.accessibilityState.disabled, true);
-  }
+  const button = env.label("New crew");
+  assert.equal(button.props.disabled, true);
+  assert.equal(button.props.accessibilityState.disabled, true);
+  assert.equal(
+    env.all().some((row) => row.props.accessibilityLabel === "New agent"),
+    false,
+  );
   assert.equal(env.agentRows().length, 5);
   env.harness.unmount();
 });

@@ -80,7 +80,6 @@ export function AgentsScreen({
   onClose,
   listHeader,
   initialCreate = false,
-  onCreate,
   onCreated,
 }: {
   agentId?: string;
@@ -91,7 +90,6 @@ export function AgentsScreen({
   onClose?: () => void;
   listHeader?: ReactNode;
   initialCreate?: boolean;
-  onCreate?: () => void;
   onCreated?: (agentId: string) => void;
 } = {}) {
   const { colors } = useTheme();
@@ -816,24 +814,6 @@ export function AgentsScreen({
           <Label muted>Change your search or create a new specialist.</Label>
         </Card>
       )}
-      <ActionButton
-        label="Create an agent"
-        disabled={
-          !isConnected ||
-          !foreground ||
-          !focused ||
-          Boolean(atLimit) ||
-          list.isPending ||
-          list.isError
-        }
-        onPress={() => {
-          Keyboard.dismiss();
-          if (onCreate) onCreate();
-          else setCreating(true);
-          setError(undefined);
-          setNotice(undefined);
-        }}
-      />
       {list.data && (
         <Label muted style={{ fontSize: 11 }}>
           {live} / {list.data.limits.max_live_subagents} personal specialists

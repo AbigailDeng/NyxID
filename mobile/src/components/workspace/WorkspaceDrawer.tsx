@@ -15,7 +15,7 @@ import {
   Settings,
   ShieldCheck,
   SquarePen,
-  UserPlus,
+  Users,
 } from "lucide-react-native";
 import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
@@ -43,6 +43,7 @@ export type WorkspaceRoute =
   | "Agents"
   | "AccountSettings";
 const destinations = [
+  { route: "Agents", label: "Agents & Crews", Icon: Users },
   { route: "Automations", label: "Automations", Icon: CalendarClock },
   { route: "Machines", label: "Machines", Icon: Monitor },
   { route: "Plugins", label: "Plugins", Icon: Plug },
@@ -59,7 +60,6 @@ type Props = {
   onBrowse: (route: "WorkspaceSearch" | "WorkspaceRecents") => void;
   currentChat?: WorkspaceChatTarget;
   onOpenChat: (target: WorkspaceChatTarget) => void;
-  onCreateAgent: () => void;
   onCreateGroup: () => void;
 };
 export function WorkspaceDrawer({
@@ -72,7 +72,6 @@ export function WorkspaceDrawer({
   onBrowse,
   currentChat,
   onOpenChat,
-  onCreateAgent,
   onCreateGroup,
 }: Props) {
   const { colors } = useTheme();
@@ -134,7 +133,6 @@ export function WorkspaceDrawer({
         visible={visible}
         current={currentChat}
         onSelect={onOpenChat}
-        onCreateAgent={onCreateAgent}
         onCreateGroup={onCreateGroup}
         scrollProps={{
           style: styles.scroll,
@@ -236,17 +234,6 @@ export function WorkspaceDrawer({
                 </Pressable>
               );
             })}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Create new agent"
-              onPress={onCreateAgent}
-              style={styles.row}
-            >
-              <UserPlus size={20} color={colors.textSecondary} />
-              <Text style={[styles.rowText, { color: colors.textPrimary }]}>
-                Create new agent
-              </Text>
-            </Pressable>
           </View>
         }
         scrollFooter={

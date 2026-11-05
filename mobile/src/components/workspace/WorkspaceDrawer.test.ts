@@ -42,7 +42,7 @@ function setup() {
         "Settings",
         "ShieldCheck",
         "SquarePen",
-        "UserPlus",
+        "Users",
       ].map((n) => [n, n]),
     ),
     "@tanstack/react-query": { useQuery: () => ({ data: { total: 3 } }) },
@@ -70,7 +70,6 @@ function setup() {
       onQuickAction: (kind: string) => events.push(kind),
       onNavigate: (name: string) => events.push(name),
       onBrowse: (name: string) => events.push(name),
-      onCreateAgent: () => events.push("create"),
     }),
   );
   const all = () => [
@@ -152,11 +151,11 @@ test("Quick actions precede Workspace with no placeholders and a live Activity p
     [
       "Scan QR code",
       "Terminal login code",
+      "Agents & Crews",
       "Automations",
       "Machines",
       "Plugins",
       "Activity, 3 pending",
-      "Create new agent",
     ],
   );
   assert.equal(
@@ -169,9 +168,9 @@ test("Quick actions precede Workspace with no placeholders and a live Activity p
   );
   x.label("Scan QR code").props.onPress();
   x.label("Terminal login code").props.onPress();
+  x.label("Agents & Crews").props.onPress();
   x.label("Machines").props.onPress();
-  x.label("Create new agent").props.onPress();
-  assert.deepEqual(x.events, ["scanner", "terminal", "Machines", "create"]);
+  assert.deepEqual(x.events, ["scanner", "terminal", "Agents", "Machines"]);
   const footer = x.list().props.scrollFooter;
   assert.equal(footer.type, "Recents");
   footer.props.onSeeAll();

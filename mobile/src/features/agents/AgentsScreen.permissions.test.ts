@@ -218,10 +218,6 @@ function setup(
   };
   const action = (label: string) =>
     one((row) => row.type === "ActionButton" && row.props.label === label);
-  if (creating) {
-    action("Create an agent").props.onPress();
-    harness.flush();
-  }
   return {
     harness,
     calls,
@@ -282,7 +278,7 @@ test("concurrent permission changes, revoked maintenance and destroyed state ret
 });
 
 test("creation permission confirmation updates only the local draft until Create agent", async () => {
-  const state = setup(true);
+  const state = setup(false, false, { initialCreate: true });
   const result = await state.field().props.onSave({
     services: ["documents"],
     account_read: true,

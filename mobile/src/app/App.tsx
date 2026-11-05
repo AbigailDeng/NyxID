@@ -717,16 +717,6 @@ function ThemedAppShell({
             currentRoute={currentRouteName}
             currentChat={currentChat}
             onOpenChat={openChatFromDrawer}
-            onCreateAgent={() => {
-              if (navigationRef.isReady())
-                selectDestination(
-                  workspaceNavigateAction(
-                    "AgentCreate",
-                    undefined,
-                    navigationRef.getRootState(),
-                  ),
-                );
-            }}
             onCreateGroup={() => {
               if (navigationRef.isReady())
                 selectDestination(

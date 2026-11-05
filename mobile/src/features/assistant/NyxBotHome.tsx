@@ -40,7 +40,6 @@ type Props = {
     acknowledgementId?: string,
   ) => void;
   onOpenCrew: (groupId: string) => void;
-  onNewAgent: () => void;
   onNewCrew: () => void;
 };
 
@@ -49,7 +48,6 @@ export function NyxBotHome({
   scrollProps,
   onChat,
   onOpenCrew,
-  onNewAgent,
   onNewCrew,
 }: Props) {
   const { colors } = useTheme();
@@ -265,20 +263,7 @@ export function NyxBotHome({
           </Quiet>
         ) : null}
       </Section>
-      <Section
-        title="Your agents"
-        action={
-          <ActionButton
-            label="New agent"
-            compact
-            variant="secondary"
-            disabled={!active}
-            onPress={() => {
-              if (available()) onNewAgent();
-            }}
-          />
-        }
-      >
+      <Section title="Your agents">
         {agentOwnerSections(roster).map((section) => (
           <View key={section.id} style={styles.section}>
             <Label accessibilityRole="header" muted style={styles.owner}>

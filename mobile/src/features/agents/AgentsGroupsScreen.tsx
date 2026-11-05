@@ -65,7 +65,7 @@ export function AgentsGroupsScreen({
     );
   }
   return (
-    <AgentsScreen {...agentsProps} onCreate={onCreateAgent} listHeader={tabs} />
+    <AgentsScreen {...agentsProps} listHeader={tabs} />
   );
 }
 
