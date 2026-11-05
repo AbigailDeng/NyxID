@@ -24,6 +24,7 @@ export const serviceConnectionSchema = z.object({
   credential_source: credentialSourceSchema.optional(),
   credential_type: z.string(),
   service_type: z.string().optional(),
+  ssh_ca_public_key: z.string().nullish(),
   endpoint_url: z.string().nullish(),
   api_key_id: z.string().nullish(),
   credential_missing: z.boolean().optional(),

@@ -2,6 +2,7 @@ import { ServiceIcon } from "../../components/ServiceIcon";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   AppState,
   Keyboard,
   Linking,
@@ -51,6 +52,8 @@ import {
   reconnectScopeOverride,
 } from "./connectionPresentation";
 import { PluginConnectionHistory } from "../plugins/PluginConnectionHistory";
+import { ServiceMonitoringCard } from "./console/ServiceMonitoringCard";
+import { AdvancedConnectionLinks } from "./console/AdvancedConnectionLinks";
 
 const ROOT = ["workspace", "services"] as const;
 const MANAGEMENT_TABS = ["overview", "advanced", "history"] as const;
@@ -81,7 +84,9 @@ export function ServicesScreen({
     initialConnectionId,
   );
   const [adding, setAdding] = useState<CatalogEntry>();
-  const [busy, setBusy] = useState(false);
+  const [actionBusy, setBusy] = useState(false);
+  const [monitoringBusy, setMonitoringBusyState] = useState(false);
+  const busy = actionBusy || monitoringBusy;
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [flowComplete, setFlowComplete] = useState(false);
@@ -95,6 +100,11 @@ export function ServicesScreen({
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [credentialEditorOpen, setCredentialEditorOpen] = useState(false);
   const actionLock = useRef(false);
+  const monitoringLock = useRef(false);
+  const setMonitoringBusy = useCallback((value: boolean) => {
+    monitoringLock.current = value;
+    setMonitoringBusyState(value);
+  }, []);
   const launchedCatalog = useRef(false);
   const connections = useQuery({
     queryKey: [...ROOT, "connections"],
@@ -168,7 +178,7 @@ export function ServicesScreen({
   }, [focused]);
 
   function closeDetail() {
-    if (actionLock.current) return;
+    if (actionLock.current || monitoringLock.current) return;
     setSelectedId(undefined);
     setAdding(undefined);
     setError(undefined);
@@ -192,12 +202,12 @@ export function ServicesScreen({
         : undefined,
     label: onClose ? "Back to plugins" : "Back to services",
     onBack: () => {
-      if (!actionLock.current) closeDetail();
+      if (!actionLock.current && !monitoringLock.current) closeDetail();
     },
   });
 
   async function run(action: () => Promise<void>) {
-    if (actionLock.current) return;
+    if (actionLock.current || monitoringLock.current) return;
     actionLock.current = true;
     setBusy(true);
     setError(undefined);
@@ -464,17 +474,54 @@ export function ServicesScreen({
           disabled={busy}
           onPress={(index) => {
             const value = MANAGEMENT_TABS[index];
-            if (!value) return;
-            setManagementTab(value);
-            setReplacement("");
-            setCredentialEditorOpen(false);
-            setConfirmRemove(false);
-            setTokenOnlyRemoval(false);
+            if (
+              !value ||
+              actionLock.current ||
+              monitoringLock.current ||
+              value === managementTab
+            )
+              return;
+            const change = () => {
+              setFormDirty(false);
+              setManagementTab(value);
+              setReplacement("");
+              setCredentialEditorOpen(false);
+              setConfirmRemove(false);
+              setTokenOnlyRemoval(false);
+            };
+            if (formDirty)
+              Alert.alert(
+                "Discard monitoring changes?",
+                "Your unsaved monitoring changes will be lost.",
+                [
+                  { text: "Keep editing", style: "cancel" },
+                  {
+                    text: "Discard changes",
+                    style: "destructive",
+                    onPress: change,
+                  },
+                ],
+              );
+            else change();
           }}
           style={styles.tabs}
         />
         {notice && <Notice message={notice} tone="success" />}
         {error && <Notice message={error} tone="error" />}
+        {connection &&
+          connection.service_type === "http" &&
+          !restricted &&
+          managementTab === "overview" &&
+          !detail.isError && (
+            <ServiceMonitoringCard
+              key={connection.id}
+              serviceId={connection.id}
+              active={focused && foreground}
+              parentBusy={actionBusy}
+              onEditingChange={setFormDirty}
+              onBusyChange={setMonitoringBusy}
+            />
+          )}
         {managementTab !== "history" && detail.isPending && (
           <ActivityIndicator
             color={colors.primary}
@@ -737,20 +784,12 @@ export function ServicesScreen({
                 </Label>
               )}
             </Card>
-            <Card>
-              <Label style={styles.sectionTitle}>More settings in Web</Label>
-              <Label muted style={styles.cardDescription}>
-                Configure routing, endpoints, request headers and other service
-                settings in NyxID Web. These settings are not edited in the
-                mobile app yet.
-              </Label>
-              <ActionButton
-                label="Open advanced settings in Web"
-                variant="secondary"
-                disabled={busy}
-                onPress={() => void openWeb("advanced")}
-              />
-            </Card>
+            <AdvancedConnectionLinks
+              connection={connection}
+              editable={Boolean(editable)}
+              active={focused && foreground && !busy && !detail.isError}
+              onReturned={reload}
+            />
             {replaceable && (
               <Card>
                 <Pressable

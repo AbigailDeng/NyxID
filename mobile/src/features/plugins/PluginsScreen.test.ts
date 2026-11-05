@@ -164,6 +164,7 @@ function setup({
     catalog: response(catalog, "catalog"),
   };
   const navigation = {
+    navigate: record("navigate"),
     push: record("push"),
     setOptions: record("setOptions"),
   };
@@ -285,6 +286,27 @@ function setup({
   };
 }
 
+test("Plugins does not expose a generic service console entry", () => {
+  const env = setup();
+  try {
+    assert.equal(
+      env
+        .all()
+        .some((node) => node.props.label === "Service & developer console"),
+      false,
+    );
+    env.tab("Skills").props.onPress();
+    assert.equal(
+      env
+        .all()
+        .some((node) => node.props.label === "Service & developer console"),
+      false,
+    );
+  } finally {
+    env.unmount();
+  }
+});
+
 test("automatic credentials cannot enter the mobile management picker or counts", () => {
   const env = setup({
     connections: [
@@ -296,14 +318,25 @@ test("automatic credentials cannot enter the mobile management picker or counts"
   try {
     assert.equal(env.list().data.length, 1);
     env.control("Added connectors, 1");
-    assert.deepEqual(Array.from(env.list().data[0].manageKeyIds), [dnsPersonal.id]);
+    assert.deepEqual(Array.from(env.list().data[0].manageKeyIds), [
+      dnsPersonal.id,
+    ]);
     assert.equal(env.list().data[0].disabled, true);
     env.connector("service:api-cloudflare");
     assert.ok(env.control("Manage Personal Cloudflare"));
-    assert.ok(!env.all().some((node) => node.props.accessibilityLabel === "Manage Work Cloudflare"));
+    assert.ok(
+      !env
+        .all()
+        .some(
+          (node) => node.props.accessibilityLabel === "Manage Work Cloudflare",
+        ),
+    );
     env.connector();
     env.control("Discover connectors, 1").props.onPress();
-    assert.deepEqual(Array.from(env.list().data, (item: { name: string }) => item.name), ["Slack"]);
+    assert.deepEqual(
+      Array.from(env.list().data, (item: { name: string }) => item.name),
+      ["Slack"],
+    );
   } finally {
     env.unmount();
   }
